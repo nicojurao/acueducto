@@ -74,9 +74,9 @@ export default function PerfilModal({ onCerrar }: { onCerrar: () => void }) {
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[2000] flex items-center justify-center overflow-y-auto bg-black/50 p-4">
+    <div className="fixed inset-0 z-[2000] flex items-center justify-center overflow-y-auto bg-black/50 animate-fade-in p-4">
       {modalConfirmacion}
-      <div className="w-full max-w-lg rounded-xl bg-white p-5 shadow-xl dark:bg-slate-900">
+      <div className="w-full max-w-lg rounded-xl bg-white animate-scale-in p-5 shadow-xl dark:bg-slate-900">
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-base font-semibold text-slate-800 dark:text-slate-100">Mi perfil</h3>
           <button onClick={onCerrar} className="rounded-lg p-1 text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800">

@@ -47,3 +47,44 @@ body {
     transform: translateX(300%);
   }
 }
+
+/* Entrada de modales: el fondo se desvanece y el panel aparece con un leve zoom-in, en vez de
+   aparecer de golpe (se sentía como si la pantalla "parpadeara"). Solo animación de entrada —
+   no hay animación de salida porque los modales se desmontan de inmediato al cerrarse (no vale
+   la pena la complejidad de mantenerlos montados solo para animar la salida). */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(4px);
+  }
+}
+.animate-fade-in {
+  animation: fade-in 0.15s ease-out;
+}
+.animate-scale-in {
+  animation: scale-in 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Contenido que reemplaza un skeleton de carga (tablas/listas): entra con un fade suave en vez
+   de aparecer de golpe apenas termina de cargar. */
+@keyframes content-in {
+  from {
+    opacity: 0;
+  }
+}
+.animate-content-in {
+  animation: content-in 0.2s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in,
+  .animate-scale-in,
+  .animate-content-in {
+    animation: none;
+  }
+}

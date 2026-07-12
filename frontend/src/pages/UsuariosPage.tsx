@@ -131,9 +131,9 @@ function UsuarioModal({
   }
 
   return (
-    <div className="fixed inset-0 z-[2000] flex items-center justify-center overflow-y-auto bg-black/50 p-4">
+    <div className="fixed inset-0 z-[2000] flex items-center justify-center overflow-y-auto bg-black/50 animate-fade-in p-4">
       {modalConfirmacion}
-      <div className="w-full max-w-lg rounded-xl bg-white p-5 shadow-xl dark:bg-slate-900">
+      <div className="w-full max-w-lg rounded-xl bg-white animate-scale-in p-5 shadow-xl dark:bg-slate-900">
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-base font-semibold text-slate-800 dark:text-slate-100">
             {editando ? "Editar usuario" : "Nuevo usuario"}
@@ -446,7 +446,7 @@ export default function UsuariosPage() {
       {cargando ? (
         <p className="text-slate-700 dark:text-slate-400">Cargando...</p>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-brand-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div className="overflow-x-auto rounded-xl border border-brand-200 bg-white shadow-sm animate-content-in dark:border-slate-800 dark:bg-slate-900">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-brand-100 bg-brand-50 text-left text-brand-800 dark:border-slate-800 dark:bg-slate-800/50 dark:text-slate-400">

@@ -106,7 +106,7 @@ export default function HistorialPage() {
           No hay cambios registrados con estos filtros.
         </p>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-brand-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div className="overflow-x-auto rounded-xl border border-brand-200 bg-white shadow-sm animate-content-in dark:border-slate-800 dark:bg-slate-900">
           <table className="w-full text-left text-sm">
             <thead className="border-b border-brand-100 bg-brand-50 text-xs uppercase text-brand-800 dark:border-slate-800 dark:bg-transparent dark:text-slate-400">
               <tr>

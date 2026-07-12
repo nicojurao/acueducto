@@ -106,7 +106,7 @@ export default function Sidebar({ abierto, onCerrar }: { abierto: boolean; onCer
       {abierto && (
         <div
           onClick={onCerrar}
-          className="fixed inset-0 z-[1500] bg-black/50 md:hidden"
+          className="fixed inset-0 z-[1500] bg-black/50 animate-fade-in md:hidden"
         />
       )}
       <aside
@@ -220,8 +220,8 @@ export default function Sidebar({ abierto, onCerrar }: { abierto: boolean; onCer
       </aside>
 
       {avisoCierreSesion !== null && (
-        <div className="fixed inset-0 z-[2500] flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-xl dark:bg-slate-900">
+        <div className="fixed inset-0 z-[2500] flex items-center justify-center bg-black/50 animate-fade-in p-4">
+          <div className="w-full max-w-sm rounded-xl bg-white animate-scale-in p-5 shadow-xl dark:bg-slate-900">
             <p className="mb-1 text-sm font-semibold text-amber-700 dark:text-amber-400">
               Tienes {avisoCierreSesion} lectura{avisoCierreSesion === 1 ? "" : "s"} sin sincronizar
             </p>

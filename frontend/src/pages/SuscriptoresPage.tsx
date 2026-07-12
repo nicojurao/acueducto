@@ -282,7 +282,7 @@ function ListadoTab() {
         <SkeletonTabla columnas={7} filas={porPagina} />
       ) : (
         <>
-          <div className="overflow-x-auto rounded-xl border border-brand-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div className="overflow-x-auto rounded-xl border border-brand-200 bg-white shadow-sm animate-content-in dark:border-slate-800 dark:bg-slate-900">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-brand-100 bg-brand-50 text-left text-brand-800 dark:border-slate-800 dark:bg-slate-800/50 dark:text-slate-400">
@@ -539,7 +539,7 @@ function BarriosEstratosTab() {
         {cargando ? (
           <p className="text-sm text-slate-700 dark:text-slate-400">Cargando...</p>
         ) : (
-          <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-brand-200 bg-white shadow-sm dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
+          <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-brand-200 bg-white shadow-sm animate-content-in dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
             {barrios.map((b) =>
               editandoBarrioId === b.id ? (
                 <form key={b.id} onSubmit={guardarEdicionBarrio} className="flex items-center gap-2 px-4 py-2 text-sm">
@@ -636,7 +636,7 @@ function BarriosEstratosTab() {
         {cargando ? (
           <p className="text-sm text-slate-700 dark:text-slate-400">Cargando...</p>
         ) : (
-          <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-brand-200 bg-white shadow-sm dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
+          <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-brand-200 bg-white shadow-sm animate-content-in dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
             {estratos.map((e) =>
               editandoEstratoId === e.id ? (
                 <form key={e.id} onSubmit={guardarEdicionEstrato} className="flex items-center gap-2 px-4 py-2 text-sm">

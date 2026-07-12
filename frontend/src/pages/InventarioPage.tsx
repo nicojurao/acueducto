@@ -275,7 +275,7 @@ function ItemsTab({
           {busqueda.trim() ? `Sin resultados para "${busqueda}".` : "No hay ítems registrados en el inventario."}
         </p>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-brand-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div className="overflow-x-auto rounded-xl border border-brand-200 bg-white shadow-sm animate-content-in dark:border-slate-800 dark:bg-slate-900">
           <table className="w-full text-left text-sm">
             <thead className="border-b border-brand-100 bg-brand-50 text-xs uppercase text-brand-800 dark:border-slate-800 dark:bg-transparent dark:text-slate-400">
               <tr>
@@ -571,7 +571,7 @@ function PrestamosTab() {
           No hay préstamos {soloActivos ? "activos" : "registrados"}.
         </p>
       ) : (
-        <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-brand-200 bg-white shadow-sm dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
+        <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-brand-200 bg-white shadow-sm animate-content-in dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
           {prestamos.map((p) => (
             <div key={p.id} className="flex items-center gap-3 px-3 py-2.5 sm:px-4">
               <div className="min-w-0 flex-1">
@@ -614,8 +614,8 @@ function PrestamosTab() {
       )}
 
       {asignando && (
-        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-xl dark:bg-slate-900">
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 animate-fade-in p-4">
+          <div className="w-full max-w-sm rounded-xl bg-white animate-scale-in p-5 shadow-xl dark:bg-slate-900">
             <h2 className="mb-4 text-lg font-bold">{editandoId ? "Editar préstamo" : "Asignar préstamo"}</h2>
             {errorModal && (
               <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-500/10 dark:text-red-400">
@@ -832,7 +832,7 @@ function MovimientosTab() {
           No hay movimientos registrados.
         </p>
       ) : (
-        <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-brand-200 bg-white shadow-sm dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
+        <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-brand-200 bg-white shadow-sm animate-content-in dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
           {movimientos.map((m) => (
             <div key={m.id} className="flex items-center gap-3 px-3 py-2.5 sm:px-4">
               {m.tipo === "entrada" ? (
@@ -863,8 +863,8 @@ function MovimientosTab() {
       )}
 
       {registrando && (
-        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-xl dark:bg-slate-900">
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 animate-fade-in p-4">
+          <div className="w-full max-w-sm rounded-xl bg-white animate-scale-in p-5 shadow-xl dark:bg-slate-900">
             <h2 className="mb-4 text-lg font-bold">
               {registrando === "entrada" ? "Registrar entrada" : "Registrar salida"}
             </h2>
@@ -1038,7 +1038,7 @@ function CatalogoSimpleTab({
           No hay {titulo.toLowerCase()} registradas todavía.
         </p>
       ) : (
-        <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-brand-200 bg-white shadow-sm dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
+        <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-brand-200 bg-white shadow-sm animate-content-in dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
           {filas.map((f) => (
             <div key={f.id} className="flex items-center gap-3 px-3 py-2.5 sm:px-4">
               {editando === f.id ? (
@@ -1172,7 +1172,7 @@ function ProveedoresTab({ recargarCatalogos }: { recargarCatalogos: () => void }
           No hay proveedores registrados todavía.
         </p>
       ) : (
-        <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-brand-200 bg-white shadow-sm dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
+        <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-brand-200 bg-white shadow-sm animate-content-in dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
           {filas.map((p) => (
             <div key={p.id} className="flex items-center gap-3 px-3 py-2.5 sm:px-4">
               <div className="min-w-0 flex-1">
@@ -1200,8 +1200,8 @@ function ProveedoresTab({ recargarCatalogos }: { recargarCatalogos: () => void }
       )}
 
       {modalAbierto && (
-        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-xl dark:bg-slate-900">
+        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 animate-fade-in p-4">
+          <div className="w-full max-w-sm rounded-xl bg-white animate-scale-in p-5 shadow-xl dark:bg-slate-900">
             <h2 className="mb-4 text-lg font-bold">{modalAbierto === "nuevo" ? "Nuevo proveedor" : "Editar proveedor"}</h2>
             <div className="space-y-3">
               <label className="block text-sm">

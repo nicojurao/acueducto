@@ -14,8 +14,8 @@ function ConfirmModal({
   onCancelar: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-xl dark:bg-slate-900">
+    <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 animate-fade-in p-4">
+      <div className="w-full max-w-sm rounded-xl bg-white animate-scale-in p-5 shadow-xl dark:bg-slate-900">
         <p className="mb-4 text-sm text-slate-700 dark:text-slate-200">{mensaje}</p>
         <div className="flex justify-end gap-2">
           <button

@@ -42,8 +42,8 @@ export default function ItemInventarioDetalleModal({
   const abreviada = UNIDAD_ABREVIADA[item.unidadMedida] ?? item.unidadMedida;
 
   return (
-    <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-4">
-      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-xl dark:bg-slate-900">
+    <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 animate-fade-in p-4">
+      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white animate-scale-in p-5 shadow-xl dark:bg-slate-900">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-bold">{item.nombre}</h2>
           <button onClick={onClose} className="rounded-lg p-1 hover:bg-slate-100 dark:hover:bg-slate-800">

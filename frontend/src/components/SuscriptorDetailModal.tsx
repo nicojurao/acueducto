@@ -487,11 +487,11 @@ export default function SuscriptorDetailModal({
 
   return (
     <div
-      className="fixed inset-0 z-[2000] flex h-dvh items-center justify-center bg-black/50 p-4"
+      className="fixed inset-0 z-[2000] flex h-dvh items-center justify-center bg-black/50 animate-fade-in p-4"
       onClick={onClose}
     >
       <div
-        className="flex max-h-[90dvh] w-full max-w-2xl flex-col rounded-xl bg-white shadow-xl dark:bg-slate-900"
+        className="flex max-h-[90dvh] w-full max-w-2xl flex-col rounded-xl bg-white animate-scale-in shadow-xl dark:bg-slate-900"
         style={{ marginTop: "env(safe-area-inset-top)", marginBottom: "env(safe-area-inset-bottom)" }}
         onClick={(e) => e.stopPropagation()}
       >

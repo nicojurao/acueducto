@@ -332,7 +332,7 @@ export default function LecturasPage() {
           {busqueda.trim() ? `Sin resultados para "${busqueda}".` : "No hay medidores en este filtro."}
         </p>
       ) : (
-        <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-brand-200 bg-white shadow-sm dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
+        <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-brand-200 bg-white shadow-sm animate-content-in dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
           {resultados.map((f) => {
             const pendiente = pendientePorMedidor.get(f.medidorId);
             const pendienteNovedad = pendienteNovedadPorMedidor.get(f.medidorId);

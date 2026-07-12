@@ -234,9 +234,9 @@ export default function LecturaModal({
   }
 
   return (
-    <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 animate-fade-in p-4" onClick={onClose}>
       <div
-        className="flex max-h-[90vh] w-full max-w-md flex-col rounded-xl bg-white shadow-xl dark:bg-slate-900"
+        className="flex max-h-[90vh] w-full max-w-md flex-col rounded-xl bg-white animate-scale-in shadow-xl dark:bg-slate-900"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex shrink-0 items-start justify-between border-b border-slate-200 px-5 py-4 dark:border-slate-800">

@@ -75,7 +75,7 @@ function PuntosTab({ puntos, recargar }: { puntos: PuntoAforo[]; recargar: () =>
         )}
       </div>
 
-      <div className="overflow-x-auto rounded-xl border border-brand-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <div className="overflow-x-auto rounded-xl border border-brand-200 bg-white shadow-sm animate-content-in dark:border-slate-800 dark:bg-slate-900">
         <table className="w-full text-left text-sm">
           <thead className="border-b border-brand-100 bg-brand-50 text-xs uppercase text-brand-800 dark:border-slate-800 dark:bg-transparent dark:text-slate-400">
             <tr>
@@ -185,7 +185,7 @@ function RegistrosTab({ puntos }: { puntos: PuntoAforo[] }) {
           No hay registros de aforo{puntoFiltro ? " para este punto" : ""}.
         </p>
       ) : (
-        <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-brand-200 bg-white shadow-sm dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
+        <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-brand-200 bg-white shadow-sm animate-content-in dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
           {filas.map((a) => (
             <div key={a.id} className="flex items-center gap-3 px-3 py-2.5 sm:px-4">
               <div className="min-w-0 flex-1">

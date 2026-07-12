@@ -61,9 +61,9 @@ export default function NovedadDetailModal({
   }
 
   return (
-    <div className="fixed inset-0 z-[2100] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[2100] flex items-center justify-center bg-black/50 animate-fade-in p-4" onClick={onClose}>
       <div
-        className="flex max-h-[90vh] w-full max-w-md flex-col rounded-xl bg-white shadow-xl dark:bg-slate-900"
+        className="flex max-h-[90vh] w-full max-w-md flex-col rounded-xl bg-white animate-scale-in shadow-xl dark:bg-slate-900"
         onClick={(e) => e.stopPropagation()}
       >
         {modalConfirmacion}

@@ -130,7 +130,7 @@ export default function AtipicosPage() {
       ) : atipicos.length === 0 ? (
         <p className="text-slate-700 dark:text-slate-400">No hay consumos atípicos en este periodo.</p>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-brand-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div className="overflow-x-auto rounded-xl border border-brand-200 bg-white shadow-sm animate-content-in dark:border-slate-800 dark:bg-slate-900">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-brand-100 bg-brand-50 text-left text-brand-800 dark:border-slate-800 dark:bg-slate-800/50 dark:text-slate-400">

@@ -102,11 +102,11 @@ export default function ImportExcelModal({
 
   return (
     <div
-      className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-4"
+      className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 animate-fade-in p-4"
       onClick={() => !bloqueado && onCerrar()}
     >
       <div
-        className="w-full max-w-lg rounded-xl bg-white p-5 shadow-xl dark:bg-slate-900"
+        className="w-full max-w-lg rounded-xl bg-white animate-scale-in p-5 shadow-xl dark:bg-slate-900"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">
