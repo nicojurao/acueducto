@@ -36,6 +36,7 @@ import {
 } from "./routes/catalogosInventario.js";
 import { historialRouter } from "./routes/historial.js";
 import { requireAuth, requireAuthQuery, requirePermiso } from "./middleware/auth.js";
+import { limiteApi } from "./middleware/rateLimit.js";
 import { leerArchivo } from "./lib/storage.js";
 
 // Dominios desde los que se permite llamar a la API por CORS. Las llamadas normales de la app
@@ -106,6 +107,7 @@ app.use("/api/auth", authRouter);
 // Todo lo demás requiere sesión. El acceso a cada módulo depende de los permisos
 // del rol del usuario (ver backend/src/lib/permisos.ts y la pantalla de Roles).
 app.use(requireAuth);
+app.use(limiteApi);
 
 app.use("/api/suscriptores", suscriptoresRouter);
 app.use("/api/barrios", requirePermiso("suscriptores_ver", "suscriptores_avanzado"), barriosRouter);
