@@ -4,6 +4,7 @@ import { api, Aforo, PuntoAforo, urlFoto } from "../api/client";
 import AforoModal from "../components/AforoModal";
 import { useConfirm, useErrorHandler } from "../components/ConfirmModal";
 import { useEsMovil } from "../lib/useEsMovil";
+import { SkeletonLista } from "../components/Skeleton";
 
 const inputClass =
   "rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:placeholder:text-slate-500";
@@ -178,7 +179,7 @@ function RegistrosTab({ puntos }: { puntos: PuntoAforo[] }) {
       </div>
 
       {cargando ? (
-        <p className="text-slate-700 dark:text-slate-400">Cargando...</p>
+        <SkeletonLista />
       ) : filas.length === 0 ? (
         <p className="rounded-xl border border-brand-200 bg-white px-4 py-6 text-center text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900">
           No hay registros de aforo{puntoFiltro ? " para este punto" : ""}.

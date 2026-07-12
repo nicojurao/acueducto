@@ -660,7 +660,10 @@ export const api = {
     update: (id: number, data: Partial<Medidor> & { marcaId?: number | null; modeloId?: number | null; diametroId?: number | null }) =>
       request<Medidor>(`/api/medidores/${id}`, { method: "PUT", body: JSON.stringify(data) }),
     remove: (id: number) => request<void>(`/api/medidores/${id}`, { method: "DELETE" }),
-    export: () => descargarArchivo("/api/medidores/export", "plantilla_medidores.xlsx"),
+    export: (ids?: number[]) => {
+      const qs = ids && ids.length > 0 ? `?ids=${ids.join(",")}` : "";
+      return descargarArchivo(`/api/medidores/export${qs}`, "plantilla_medidores.xlsx");
+    },
     import: (file: File) => {
       const formData = new FormData();
       formData.append("archivo", file);
@@ -944,11 +947,12 @@ export const api = {
       return requestMultipart<ItemInventario>(`/api/inventario/items/${id}`, fd, "PUT");
     },
     remove: (id: number) => request<void>(`/api/inventario/items/${id}`, { method: "DELETE" }),
-    exportarExcel: (filtros?: { categoria?: number; estado?: string; q?: string }) => {
+    exportarExcel: (filtros?: { categoria?: number; estado?: string; q?: string; ids?: number[] }) => {
       const qs = new URLSearchParams();
       if (filtros?.categoria) qs.set("categoria", String(filtros.categoria));
       if (filtros?.estado) qs.set("estado", filtros.estado);
       if (filtros?.q) qs.set("q", filtros.q);
+      if (filtros?.ids && filtros.ids.length > 0) qs.set("ids", filtros.ids.join(","));
       return descargarArchivo(`/api/inventario/items/excel?${qs}`, "inventario_items.xlsx");
     },
     exportarPdf: (filtros?: { categoria?: number; estado?: string; q?: string }) => {

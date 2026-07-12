@@ -38,6 +38,7 @@ import ChartCard from "../components/ChartCard";
 import { useConfirm, useErrorHandler } from "../components/ConfirmModal";
 import { useEsMovil } from "../lib/useEsMovil";
 import { useAuth } from "../contexts/AuthContext";
+import { SkeletonTabla, SkeletonLista } from "../components/Skeleton";
 
 const GRID_STROKE = "#475569";
 
@@ -142,6 +143,20 @@ function ItemsTab({
   const [detalle, setDetalle] = useState<ItemInventario | null>(null);
   const { pedirConfirmacion, modal } = useConfirm();
   const { error, run } = useErrorHandler();
+  const [seleccionados, setSeleccionados] = useState<Set<number>>(new Set());
+
+  function alternarSeleccion(id: number) {
+    setSeleccionados((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function alternarSeleccionTodos() {
+    setSeleccionados((prev) => (prev.size === filas.length ? new Set() : new Set(filas.map((f) => f.id))));
+  }
 
   useEffect(() => {
     const t = setTimeout(() => setBusquedaDebounced(busqueda), 300);
@@ -157,6 +172,7 @@ function ItemsTab({
       });
       setFilas(resultado.data);
       setTotal(resultado.total);
+      setSeleccionados(new Set());
     } finally {
       setCargando(false);
     }
@@ -232,6 +248,15 @@ function ItemsTab({
           <Download className="h-4 w-4" />
           PDF
         </button>
+        {seleccionados.size > 0 && (
+          <button
+            onClick={() => api.inventario.exportarExcel({ ...filtrosActuales(), ids: [...seleccionados] })}
+            className="flex items-center gap-1.5 rounded-lg border border-brand-200 px-3 py-2 text-sm font-medium text-brand-700 hover:bg-brand-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+          >
+            <Download className="h-4 w-4" />
+            Exportar seleccionados ({seleccionados.size})
+          </button>
+        )}
         {puedeEditar && (
           <button
             onClick={() => setModalAbierto("nuevo")}
@@ -244,7 +269,7 @@ function ItemsTab({
       </div>
 
       {cargando ? (
-        <p className="text-slate-700 dark:text-slate-400">Cargando...</p>
+        <SkeletonTabla columnas={5} filas={porPagina} />
       ) : filas.length === 0 ? (
         <p className="rounded-xl border border-brand-200 bg-white px-4 py-6 text-center text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900">
           {busqueda.trim() ? `Sin resultados para "${busqueda}".` : "No hay ítems registrados en el inventario."}
@@ -254,6 +279,14 @@ function ItemsTab({
           <table className="w-full text-left text-sm">
             <thead className="border-b border-brand-100 bg-brand-50 text-xs uppercase text-brand-800 dark:border-slate-800 dark:bg-transparent dark:text-slate-400">
               <tr>
+                <th className="w-8 px-4 py-2.5">
+                  <input
+                    type="checkbox"
+                    checked={filas.length > 0 && seleccionados.size === filas.length}
+                    onChange={alternarSeleccionTodos}
+                    className="h-4 w-4 rounded border-slate-300"
+                  />
+                </th>
                 <th className="px-4 py-2.5">Ítem</th>
                 <th className="px-4 py-2.5">Categoría</th>
                 <th className="px-4 py-2.5">Disponible</th>
@@ -265,6 +298,14 @@ function ItemsTab({
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {filas.map((item) => (
                 <tr key={item.id}>
+                  <td className="px-4 py-2.5">
+                    <input
+                      type="checkbox"
+                      checked={seleccionados.has(item.id)}
+                      onChange={() => alternarSeleccion(item.id)}
+                      className="h-4 w-4 rounded border-slate-300"
+                    />
+                  </td>
                   <td className="px-4 py-2.5">
                     <button
                       onClick={() => setDetalle(item)}
@@ -524,7 +565,7 @@ function PrestamosTab() {
       </div>
 
       {cargando ? (
-        <p className="text-slate-700 dark:text-slate-400">Cargando...</p>
+        <SkeletonLista />
       ) : prestamos.length === 0 ? (
         <p className="rounded-xl border border-brand-200 bg-white px-4 py-6 text-center text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900">
           No hay préstamos {soloActivos ? "activos" : "registrados"}.
@@ -785,7 +826,7 @@ function MovimientosTab() {
       </div>
 
       {cargando ? (
-        <p className="text-slate-700 dark:text-slate-400">Cargando...</p>
+        <SkeletonLista />
       ) : movimientos.length === 0 ? (
         <p className="rounded-xl border border-brand-200 bg-white px-4 py-6 text-center text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900">
           No hay movimientos registrados.
@@ -991,7 +1032,7 @@ function CatalogoSimpleTab({
       )}
 
       {cargando ? (
-        <p className="text-slate-700 dark:text-slate-400">Cargando...</p>
+        <SkeletonLista />
       ) : filas.length === 0 ? (
         <p className="rounded-xl border border-brand-200 bg-white px-4 py-6 text-center text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900">
           No hay {titulo.toLowerCase()} registradas todavía.
@@ -1125,7 +1166,7 @@ function ProveedoresTab({ recargarCatalogos }: { recargarCatalogos: () => void }
       )}
 
       {cargando ? (
-        <p className="text-slate-700 dark:text-slate-400">Cargando...</p>
+        <SkeletonLista />
       ) : filas.length === 0 ? (
         <p className="rounded-xl border border-brand-200 bg-white px-4 py-6 text-center text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900">
           No hay proveedores registrados todavía.

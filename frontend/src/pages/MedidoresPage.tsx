@@ -32,6 +32,7 @@ import SuscriptorDetailModal from "../components/SuscriptorDetailModal";
 import ImportExcelModal from "../components/ImportExcelModal";
 import { useConfirm, useErrorHandler } from "../components/ConfirmModal";
 import { useEsMovil } from "../lib/useEsMovil";
+import { SkeletonTabla, SkeletonLista } from "../components/Skeleton";
 
 const inputClass =
   "rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:placeholder:text-slate-500";
@@ -109,6 +110,22 @@ function InventarioTab() {
   const [cargando, setCargando] = useState(true);
   const { error, run } = useErrorHandler();
   const { pedirConfirmacion, modal } = useConfirm();
+  const [seleccionados, setSeleccionados] = useState<Set<number>>(new Set());
+
+  function alternarSeleccion(id: number) {
+    setSeleccionados((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function alternarSeleccionTodos() {
+    setSeleccionados((prev) =>
+      prev.size === medidores.length ? new Set() : new Set(medidores.map((m) => m.id))
+    );
+  }
 
   const [nuevo, setNuevo] = useState({
     serial: "",
@@ -148,6 +165,7 @@ function InventarioTab() {
     setModelos(mo);
     setLotes(lo);
     setDiametros(di);
+    setSeleccionados(new Set());
     setCargando(false);
   }
 
@@ -235,6 +253,15 @@ function InventarioTab() {
           <Upload className="h-4 w-4" />
           Importar / exportar Excel
         </button>
+        {seleccionados.size > 0 && (
+          <button
+            onClick={() => api.medidores.export([...seleccionados])}
+            className="flex items-center gap-1.5 rounded-lg border border-brand-200 px-4 py-2 text-sm font-medium text-brand-700 hover:bg-brand-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+          >
+            <Download className="h-4 w-4" />
+            Exportar seleccionados ({seleccionados.size})
+          </button>
+        )}
       </div>
 
       {importAbierto && (
@@ -451,12 +478,20 @@ function InventarioTab() {
       </div>
 
       {cargando ? (
-        <p className="text-slate-700 dark:text-slate-400">Cargando...</p>
+        <SkeletonTabla columnas={8} filas={porPagina} />
       ) : (
         <div className="overflow-x-auto rounded-xl border border-brand-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-brand-100 bg-brand-50 text-left text-brand-800 dark:border-slate-800 dark:bg-slate-800/50 dark:text-slate-400">
+                <th className="w-8 px-3 py-2 sm:px-4 sm:py-3">
+                  <input
+                    type="checkbox"
+                    checked={medidores.length > 0 && seleccionados.size === medidores.length}
+                    onChange={alternarSeleccionTodos}
+                    className="h-4 w-4 rounded border-slate-300"
+                  />
+                </th>
                 <th className="px-3 py-2 font-medium sm:px-4 sm:py-3">Serial</th>
                 <th className="px-3 py-2 font-medium sm:px-4 sm:py-3">Tipo</th>
                 <th className="px-3 py-2 font-medium sm:px-4 sm:py-3">Marca</th>
@@ -474,6 +509,14 @@ function InventarioTab() {
                   onClick={() => (m.suscriptorId ? setDetalleSuscriptorId(m.suscriptorId) : setDetalleMedidor(m))}
                   className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/40"
                 >
+                  <td className="px-3 py-1.5 sm:px-4 sm:py-2.5" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={seleccionados.has(m.id)}
+                      onChange={() => alternarSeleccion(m.id)}
+                      className="h-4 w-4 rounded border-slate-300"
+                    />
+                  </td>
                   <td className="px-3 py-1.5 sm:px-4 sm:py-2.5">{m.serial ?? "-"}</td>
                   <td className="px-3 py-1.5 sm:px-4 sm:py-2.5">{tipoLabel(m.tipo)}</td>
                   <td className="px-3 py-1.5 sm:px-4 sm:py-2.5">{m.marcaCat?.nombre ?? "-"}</td>
@@ -514,7 +557,7 @@ function InventarioTab() {
               ))}
               {medidores.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-6 text-center text-slate-600">
+                  <td colSpan={9} className="px-4 py-6 text-center text-slate-600">
                     Sin resultados.
                   </td>
                 </tr>
@@ -1256,7 +1299,7 @@ function ActasTab() {
         en la pestaña Suscriptores.
       </p>
       {cargando ? (
-        <p className="text-slate-700 dark:text-slate-400">Cargando...</p>
+        <SkeletonLista />
       ) : (
         <div className="overflow-x-auto rounded-xl border border-brand-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <table className="w-full text-sm">

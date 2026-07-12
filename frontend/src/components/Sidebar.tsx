@@ -25,6 +25,7 @@ import { useTheme } from "../contexts/ThemeContext";
 import { urlFoto } from "../api/client";
 import PerfilModal from "./PerfilModal";
 import GlobalSearch from "./GlobalSearch";
+import { listarPendientes, listarPendientesNovedad } from "../lib/offlineQueue";
 
 type Link = { to: string; label: string; icon: typeof LayoutDashboard; permiso?: string | string[] };
 type Entrada = Link | { label: string; icon: typeof LayoutDashboard; children: Link[] };
@@ -68,6 +69,18 @@ export default function Sidebar({ abierto, onCerrar }: { abierto: boolean; onCer
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const [perfilAbierto, setPerfilAbierto] = useState(false);
+  const [avisoCierreSesion, setAvisoCierreSesion] = useState<number | null>(null);
+
+  async function intentarCerrarSesion() {
+    const [pendientes, pendientesNovedad] = await Promise.all([listarPendientes(), listarPendientesNovedad()]);
+    const total = pendientes.length + pendientesNovedad.length;
+    if (total > 0) {
+      setAvisoCierreSesion(total);
+      return;
+    }
+    logout();
+    navigate("/login");
+  }
 
   const tienePermiso = (l: Link) => {
     if (!l.permiso || !usuario) return true;
@@ -197,10 +210,7 @@ export default function Sidebar({ abierto, onCerrar }: { abierto: boolean; onCer
         </button>
         {usuario && (
           <button
-            onClick={() => {
-              logout();
-              navigate("/login");
-            }}
+            onClick={intentarCerrarSesion}
             className="mx-3 mb-[max(1rem,env(safe-area-inset-bottom))] flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-brand-100 hover:bg-white/10 dark:text-slate-300 dark:hover:bg-slate-800"
           >
             <LogOut size={18} />
@@ -208,6 +218,39 @@ export default function Sidebar({ abierto, onCerrar }: { abierto: boolean; onCer
           </button>
         )}
       </aside>
+
+      {avisoCierreSesion !== null && (
+        <div className="fixed inset-0 z-[2500] flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-xl dark:bg-slate-900">
+            <p className="mb-1 text-sm font-semibold text-amber-700 dark:text-amber-400">
+              Tienes {avisoCierreSesion} lectura{avisoCierreSesion === 1 ? "" : "s"} sin sincronizar
+            </p>
+            <p className="mb-4 text-sm text-slate-700 dark:text-slate-300">
+              Se guardaron en este dispositivo y se subirán solos apenas haya internet, pero
+              solo si vuelves a entrar aquí. Si cierras sesión ahora y luego entras desde otro
+              celular o navegador, esas lecturas no van a estar ahí.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setAvisoCierreSesion(null)}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+              >
+                Seguir aquí
+              </button>
+              <button
+                onClick={() => {
+                  setAvisoCierreSesion(null);
+                  logout();
+                  navigate("/login");
+                }}
+                className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-500"
+              >
+                Cerrar sesión igual
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

@@ -162,10 +162,17 @@ itemsInventarioRouter.get("/", async (req, res) => {
 // Excel de ítems con los mismos filtros que el listado (q, categoria, estado), con columnas
 // adicionales (proveedor, fechas, valor) que no caben en la tabla de la UI.
 itemsInventarioRouter.get("/excel", async (req, res) => {
-  const { q, categoria, estado } = req.query;
+  const { q, categoria, estado, ids } = req.query;
   const filtros: any[] = [{ activo: true }];
   if (categoria) filtros.push({ categoriaId: Number(categoria) });
   if (estado) filtros.push({ estado: String(estado) });
+  if (ids) {
+    const idsFiltro = String(ids)
+      .split(",")
+      .map(Number)
+      .filter((n) => !Number.isNaN(n));
+    filtros.push({ id: { in: idsFiltro } });
+  }
   if (q) {
     const texto = String(q).trim();
     filtros.push({
