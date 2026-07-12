@@ -4,6 +4,7 @@ import { api, PuntoAforo } from "../api/client";
 import { useConfirm, useErrorHandler } from "./ConfirmModal";
 import CamaraModal from "./CamaraModal";
 import { comprimirFoto } from "../lib/comprimirImagen";
+import { useCierreAnimado } from "../lib/useCierreAnimado";
 
 const inputClass =
   "rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:placeholder:text-slate-500";
@@ -130,6 +131,7 @@ export default function AforoModal({
   const [ubicacion, setUbicacion] = useState<{ latitud?: number; longitud?: number }>({});
   const { error, run } = useErrorHandler();
   const { pedirConfirmacion, modal: modalConfirmacion } = useConfirm();
+  const { saliendo, cerrar } = useCierreAnimado(onClose);
 
   const tiempoProm = promedio(tiempos);
   const profAltaProm = promedio(profundidadesAltaM);
@@ -180,7 +182,7 @@ export default function AforoModal({
         });
         onCambio();
         setGuardadoOk(true);
-        setTimeout(onClose, 1100);
+        setTimeout(cerrar, 1100);
       } finally {
         setGuardando(false);
       }
@@ -188,12 +190,12 @@ export default function AforoModal({
   }
 
   return (
-    <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 animate-fade-in p-4">
+    <div className={`fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-4 ${saliendo ? "animate-fade-out" : "animate-fade-in"}`}>
       {modalConfirmacion}
-      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white animate-scale-in p-5 shadow-xl dark:bg-slate-900">
+      <div className={`max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-xl dark:bg-slate-900 ${saliendo ? "animate-scale-out" : "animate-scale-in"}`}>
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-bold">Nuevo registro de aforo</h2>
-          <button onClick={onClose} className="rounded-lg p-1 hover:bg-slate-100 dark:hover:bg-slate-800">
+          <button onClick={cerrar} className="rounded-lg p-1 hover:bg-slate-100 dark:hover:bg-slate-800">
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -422,7 +424,7 @@ export default function AforoModal({
 
         <div className="mt-5 flex justify-end gap-2">
           <button
-            onClick={onClose}
+            onClick={cerrar}
             className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
           >
             Cancelar

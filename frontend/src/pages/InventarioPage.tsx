@@ -39,6 +39,7 @@ import { useConfirm, useErrorHandler } from "../components/ConfirmModal";
 import { useEsMovil } from "../lib/useEsMovil";
 import { useAuth } from "../contexts/AuthContext";
 import { SkeletonTabla, SkeletonLista } from "../components/Skeleton";
+import { useCierreAnimado } from "../lib/useCierreAnimado";
 
 const GRID_STROKE = "#475569";
 
@@ -417,6 +418,7 @@ function PrestamosTab() {
   const [items, setItems] = useState<ItemInventario[]>([]);
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
   const [asignando, setAsignando] = useState(false);
+  const { saliendo: saliendoAsignar, cerrar: cerrarAsignar } = useCierreAnimado(() => setAsignando(false));
   const [editandoId, setEditandoId] = useState<number | null>(null);
   const [itemId, setItemId] = useState("");
   const [usuarioId, setUsuarioId] = useState("");
@@ -481,7 +483,7 @@ function PrestamosTab() {
           observaciones: observaciones.trim() || undefined,
         });
       }
-      setAsignando(false);
+      cerrarAsignar();
       cargar();
     });
   }
@@ -614,8 +616,8 @@ function PrestamosTab() {
       )}
 
       {asignando && (
-        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 animate-fade-in p-4">
-          <div className="w-full max-w-sm rounded-xl bg-white animate-scale-in p-5 shadow-xl dark:bg-slate-900">
+        <div className={`fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-4 ${saliendoAsignar ? "animate-fade-out" : "animate-fade-in"}`}>
+          <div className={`w-full max-w-sm rounded-xl bg-white p-5 shadow-xl dark:bg-slate-900 ${saliendoAsignar ? "animate-scale-out" : "animate-scale-in"}`}>
             <h2 className="mb-4 text-lg font-bold">{editandoId ? "Editar préstamo" : "Asignar préstamo"}</h2>
             {errorModal && (
               <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-500/10 dark:text-red-400">
@@ -672,7 +674,7 @@ function PrestamosTab() {
             </div>
             <div className="mt-5 flex justify-end gap-2">
               <button
-                onClick={() => setAsignando(false)}
+                onClick={cerrarAsignar}
                 className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
               >
                 Cancelar
@@ -701,6 +703,7 @@ function MovimientosTab() {
   const [cargando, setCargando] = useState(true);
   const [items, setItems] = useState<ItemInventario[]>([]);
   const [registrando, setRegistrando] = useState<"entrada" | "salida" | null>(null);
+  const { saliendo: saliendoRegistrar, cerrar: cerrarRegistrar } = useCierreAnimado(() => setRegistrando(null));
   const [itemId, setItemId] = useState("");
   const [cantidad, setCantidad] = useState("1");
   const [motivo, setMotivo] = useState("");
@@ -743,7 +746,7 @@ function MovimientosTab() {
         motivo: motivo.trim() || undefined,
         observaciones: observaciones.trim() || undefined,
       });
-      setRegistrando(null);
+      cerrarRegistrar();
       cargar();
     });
   }
@@ -863,8 +866,8 @@ function MovimientosTab() {
       )}
 
       {registrando && (
-        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 animate-fade-in p-4">
-          <div className="w-full max-w-sm rounded-xl bg-white animate-scale-in p-5 shadow-xl dark:bg-slate-900">
+        <div className={`fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-4 ${saliendoRegistrar ? "animate-fade-out" : "animate-fade-in"}`}>
+          <div className={`w-full max-w-sm rounded-xl bg-white p-5 shadow-xl dark:bg-slate-900 ${saliendoRegistrar ? "animate-scale-out" : "animate-scale-in"}`}>
             <h2 className="mb-4 text-lg font-bold">
               {registrando === "entrada" ? "Registrar entrada" : "Registrar salida"}
             </h2>
@@ -911,7 +914,7 @@ function MovimientosTab() {
             </div>
             <div className="mt-5 flex justify-end gap-2">
               <button
-                onClick={() => setRegistrando(null)}
+                onClick={cerrarRegistrar}
                 className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
               >
                 Cancelar
@@ -1097,6 +1100,7 @@ function ProveedoresTab({ recargarCatalogos }: { recargarCatalogos: () => void }
   const [filas, setFilas] = useState<ProveedorInventario[]>([]);
   const [cargando, setCargando] = useState(true);
   const [modalAbierto, setModalAbierto] = useState<"nuevo" | ProveedorInventario | null>(null);
+  const { saliendo: saliendoProveedor, cerrar: cerrarProveedor } = useCierreAnimado(() => setModalAbierto(null));
   const [nombre, setNombre] = useState("");
   const [contacto, setContacto] = useState("");
   const [telefono, setTelefono] = useState("");
@@ -1132,7 +1136,7 @@ function ProveedoresTab({ recargarCatalogos }: { recargarCatalogos: () => void }
       } else {
         await api.inventario.proveedores.crear(data);
       }
-      setModalAbierto(null);
+      cerrarProveedor();
       recargar();
       recargarCatalogos();
     });
@@ -1200,8 +1204,8 @@ function ProveedoresTab({ recargarCatalogos }: { recargarCatalogos: () => void }
       )}
 
       {modalAbierto && (
-        <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 animate-fade-in p-4">
-          <div className="w-full max-w-sm rounded-xl bg-white animate-scale-in p-5 shadow-xl dark:bg-slate-900">
+        <div className={`fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-4 ${saliendoProveedor ? "animate-fade-out" : "animate-fade-in"}`}>
+          <div className={`w-full max-w-sm rounded-xl bg-white p-5 shadow-xl dark:bg-slate-900 ${saliendoProveedor ? "animate-scale-out" : "animate-scale-in"}`}>
             <h2 className="mb-4 text-lg font-bold">{modalAbierto === "nuevo" ? "Nuevo proveedor" : "Editar proveedor"}</h2>
             <div className="space-y-3">
               <label className="block text-sm">
@@ -1219,7 +1223,7 @@ function ProveedoresTab({ recargarCatalogos }: { recargarCatalogos: () => void }
             </div>
             <div className="mt-5 flex justify-end gap-2">
               <button
-                onClick={() => setModalAbierto(null)}
+                onClick={cerrarProveedor}
                 className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
               >
                 Cancelar

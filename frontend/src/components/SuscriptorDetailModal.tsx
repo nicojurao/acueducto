@@ -25,6 +25,7 @@ import { useConfirm } from "./ConfirmModal";
 import { comprimirFotos } from "../lib/comprimirImagen";
 import { HistorialSeccion } from "./HistorialTimeline";
 import { useAuth } from "../contexts/AuthContext";
+import { useCierreAnimado } from "../lib/useCierreAnimado";
 
 const GRID_STROKE = "#475569";
 
@@ -99,6 +100,7 @@ export default function SuscriptorDetailModal({
   const [fotosARemover, setFotosARemover] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { pedirConfirmacion, modal: modalConfirmacion } = useConfirm();
+  const { saliendo, cerrar } = useCierreAnimado(onClose);
   const [instaladores, setInstaladores] = useState<{ id: number; nombre: string }[]>([]);
   const { usuario } = useAuth();
 
@@ -487,18 +489,18 @@ export default function SuscriptorDetailModal({
 
   return (
     <div
-      className="fixed inset-0 z-[2000] flex h-dvh items-center justify-center bg-black/50 animate-fade-in p-4"
-      onClick={onClose}
+      className={`fixed inset-0 z-[2000] flex h-dvh items-center justify-center bg-black/50 p-4 ${saliendo ? "animate-fade-out" : "animate-fade-in"}`}
+      onClick={cerrar}
     >
       <div
-        className="flex max-h-[90dvh] w-full max-w-2xl flex-col rounded-xl bg-white animate-scale-in shadow-xl dark:bg-slate-900"
+        className={`flex max-h-[90dvh] w-full max-w-2xl flex-col rounded-xl bg-white shadow-xl dark:bg-slate-900 ${saliendo ? "animate-scale-out" : "animate-scale-in"}`}
         style={{ marginTop: "env(safe-area-inset-top)", marginBottom: "env(safe-area-inset-bottom)" }}
         onClick={(e) => e.stopPropagation()}
       >
         {modalConfirmacion}
         <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-slate-800">
           <h2 className="text-lg font-bold">{cargando ? "Cargando..." : suscriptor?.nombre}</h2>
-          <button onClick={onClose} className="rounded-lg p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800">
+          <button onClick={cerrar} className="rounded-lg p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800">
             <X className="h-5 w-5" />
           </button>
         </div>

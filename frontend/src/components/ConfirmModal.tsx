@@ -4,18 +4,20 @@ function ConfirmModal({
   mensaje,
   textoConfirmar,
   variante,
+  saliendo,
   onConfirmar,
   onCancelar,
 }: {
   mensaje: string;
   textoConfirmar: string;
   variante: "peligro" | "normal";
+  saliendo: boolean;
   onConfirmar: () => void;
   onCancelar: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 animate-fade-in p-4">
-      <div className="w-full max-w-sm rounded-xl bg-white animate-scale-in p-5 shadow-xl dark:bg-slate-900">
+    <div className={`fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-4 ${saliendo ? "animate-fade-out" : "animate-fade-in"}`}>
+      <div className={`w-full max-w-sm rounded-xl bg-white p-5 shadow-xl dark:bg-slate-900 ${saliendo ? "animate-scale-out" : "animate-scale-in"}`}>
         <p className="mb-4 text-sm text-slate-700 dark:text-slate-200">{mensaje}</p>
         <div className="flex justify-end gap-2">
           <button
@@ -45,11 +47,14 @@ export function useConfirm() {
     textoConfirmar: string;
     variante: "peligro" | "normal";
   } | null>(null);
+  const [saliendo, setSaliendo] = useState(false);
+
   function pedirConfirmacion(
     mensaje: string,
     accion: () => void,
     opciones?: { textoConfirmar?: string; variante?: "peligro" | "normal" }
   ) {
+    setSaliendo(false);
     setPendiente({
       mensaje,
       accion,
@@ -57,16 +62,27 @@ export function useConfirm() {
       variante: opciones?.variante ?? "peligro",
     });
   }
+
+  // Cierra con la misma animación de salida que el resto de los modales (ver
+  // frontend/src/lib/useCierreAnimado.ts) — inline acá en vez de reusar el hook porque este
+  // "cerrar" además decide si dispara la acción confirmada antes de desmontar.
+  function cerrarConAnimacion(disparar: boolean) {
+    setSaliendo(true);
+    setTimeout(() => {
+      if (disparar) pendiente?.accion();
+      setPendiente(null);
+      setSaliendo(false);
+    }, 150);
+  }
+
   const modal = pendiente ? (
     <ConfirmModal
       mensaje={pendiente.mensaje}
       textoConfirmar={pendiente.textoConfirmar}
       variante={pendiente.variante}
-      onCancelar={() => setPendiente(null)}
-      onConfirmar={() => {
-        pendiente.accion();
-        setPendiente(null);
-      }}
+      saliendo={saliendo}
+      onCancelar={() => cerrarConAnimacion(false)}
+      onConfirmar={() => cerrarConAnimacion(true)}
     />
   ) : null;
   return { pedirConfirmacion, modal };

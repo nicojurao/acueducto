@@ -1,5 +1,6 @@
 import { X, Calendar, MapPin, User, Droplet } from "lucide-react";
 import { urlFoto } from "../api/client";
+import { useCierreAnimado } from "../lib/useCierreAnimado";
 
 function fmtFechaHora(iso: string): string {
   return new Date(iso).toLocaleString("es-CO", {
@@ -30,15 +31,16 @@ export default function LecturaDetalleModal({
   capturadoPor: string | null;
   onClose: () => void;
 }) {
+  const { saliendo, cerrar } = useCierreAnimado(onClose);
   return (
-    <div className="fixed inset-0 z-[2100] flex items-center justify-center bg-black/50 animate-fade-in p-4" onClick={onClose}>
+    <div className={`fixed inset-0 z-[2100] flex items-center justify-center bg-black/50 p-4 ${saliendo ? "animate-fade-out" : "animate-fade-in"}`} onClick={cerrar}>
       <div
-        className="flex max-h-[90vh] w-full max-w-md flex-col rounded-xl bg-white animate-scale-in shadow-xl dark:bg-slate-900"
+        className={`flex max-h-[90vh] w-full max-w-md flex-col rounded-xl bg-white shadow-xl dark:bg-slate-900 ${saliendo ? "animate-scale-out" : "animate-scale-in"}`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-slate-800">
           <h2 className="text-lg font-bold">Lectura de {periodo}</h2>
-          <button onClick={onClose} className="rounded-lg p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800">
+          <button onClick={cerrar} className="rounded-lg p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800">
             <X className="h-5 w-5" />
           </button>
         </div>

@@ -1,6 +1,7 @@
 import { X, Pencil, Image as ImageIcon } from "lucide-react";
 import { ItemInventario, urlFoto } from "../api/client";
 import { UNIDAD_ABREVIADA, UNIDADES } from "./ItemInventarioModal";
+import { useCierreAnimado } from "../lib/useCierreAnimado";
 
 const ESTADO_LABELS: Record<string, string> = { bueno: "Bueno", regular: "Regular", dañado: "Dañado", de_baja: "De baja" };
 const ESTADO_COLORS: Record<string, string> = {
@@ -40,13 +41,14 @@ export default function ItemInventarioDetalleModal({
 }) {
   const unidadLabel = UNIDADES.find((u) => u.value === item.unidadMedida)?.label ?? item.unidadMedida;
   const abreviada = UNIDAD_ABREVIADA[item.unidadMedida] ?? item.unidadMedida;
+  const { saliendo, cerrar } = useCierreAnimado(onClose);
 
   return (
-    <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 animate-fade-in p-4">
-      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white animate-scale-in p-5 shadow-xl dark:bg-slate-900">
+    <div className={`fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-4 ${saliendo ? "animate-fade-out" : "animate-fade-in"}`}>
+      <div className={`max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-xl dark:bg-slate-900 ${saliendo ? "animate-scale-out" : "animate-scale-in"}`}>
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-bold">{item.nombre}</h2>
-          <button onClick={onClose} className="rounded-lg p-1 hover:bg-slate-100 dark:hover:bg-slate-800">
+          <button onClick={cerrar} className="rounded-lg p-1 hover:bg-slate-100 dark:hover:bg-slate-800">
             <X className="h-5 w-5" />
           </button>
         </div>

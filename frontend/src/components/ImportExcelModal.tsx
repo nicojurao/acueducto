@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { Download, AlertTriangle, CheckCircle2, Loader2, X } from "lucide-react";
+import { useCierreAnimado } from "../lib/useCierreAnimado";
 
 type ResultadoValidar =
   | { ok: true; totalFilas: number; filasConProblemas: 0 }
@@ -44,6 +45,7 @@ export default function ImportExcelModal({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const bloqueado = paso.tipo === "validando" || paso.tipo === "importando";
+  const { saliendo, cerrar } = useCierreAnimado(onCerrar);
 
   function seleccionarArchivo(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -102,17 +104,17 @@ export default function ImportExcelModal({
 
   return (
     <div
-      className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 animate-fade-in p-4"
-      onClick={() => !bloqueado && onCerrar()}
+      className={`fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-4 ${saliendo ? "animate-fade-out" : "animate-fade-in"}`}
+      onClick={() => !bloqueado && cerrar()}
     >
       <div
-        className="w-full max-w-lg rounded-xl bg-white animate-scale-in p-5 shadow-xl dark:bg-slate-900"
+        className={`w-full max-w-lg rounded-xl bg-white p-5 shadow-xl dark:bg-slate-900 ${saliendo ? "animate-scale-out" : "animate-scale-in"}`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-bold">{titulo}</h2>
           {!bloqueado && (
-            <button onClick={onCerrar} className="rounded-lg p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800">
+            <button onClick={cerrar} className="rounded-lg p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800">
               <X className="h-5 w-5" />
             </button>
           )}
@@ -226,7 +228,7 @@ export default function ImportExcelModal({
             </button>
             <div className="flex justify-end">
               <button
-                onClick={onCerrar}
+                onClick={cerrar}
                 className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-500"
               >
                 Cerrar

@@ -48,12 +48,17 @@ body {
   }
 }
 
-/* Entrada de modales: el fondo se desvanece y el panel aparece con un leve zoom-in, en vez de
-   aparecer de golpe (se sentía como si la pantalla "parpadeara"). Solo animación de entrada —
-   no hay animación de salida porque los modales se desmontan de inmediato al cerrarse (no vale
-   la pena la complejidad de mantenerlos montados solo para animar la salida). */
+/* Entrada Y salida de modales: el fondo se desvanece y el panel aparece/desaparece con un leve
+   zoom, en vez de aparecer o desaparecer de golpe (se sentía como si la pantalla "parpadeara").
+   La salida requiere mantener el modal montado ~150ms más tras pedir el cierre — ver
+   frontend/src/lib/useCierreAnimado.ts — no es solo CSS, porque React desmonta de inmediato. */
 @keyframes fade-in {
   from {
+    opacity: 0;
+  }
+}
+@keyframes fade-out {
+  to {
     opacity: 0;
   }
 }
@@ -63,11 +68,23 @@ body {
     transform: scale(0.96) translateY(4px);
   }
 }
+@keyframes scale-out {
+  to {
+    opacity: 0;
+    transform: scale(0.96) translateY(4px);
+  }
+}
 .animate-fade-in {
   animation: fade-in 0.15s ease-out;
 }
+.animate-fade-out {
+  animation: fade-out 0.15s ease-in forwards;
+}
 .animate-scale-in {
   animation: scale-in 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.animate-scale-out {
+  animation: scale-out 0.15s ease-in forwards;
 }
 
 /* Contenido que reemplaza un skeleton de carga (tablas/listas): entra con un fade suave en vez
@@ -83,7 +100,9 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .animate-fade-in,
+  .animate-fade-out,
   .animate-scale-in,
+  .animate-scale-out,
   .animate-content-in {
     animation: none;
   }

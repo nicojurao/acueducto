@@ -5,6 +5,7 @@ import { api, urlFoto } from "../api/client";
 import { useAuth } from "../contexts/AuthContext";
 import { comprimirFoto } from "../lib/comprimirImagen";
 import { useConfirm, useErrorHandler } from "./ConfirmModal";
+import { useCierreAnimado } from "../lib/useCierreAnimado";
 
 const inputClass =
   "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:placeholder:text-slate-500";
@@ -33,6 +34,7 @@ export default function PerfilModal({ onCerrar }: { onCerrar: () => void }) {
   const [guardadoOk, setGuardadoOk] = useState(false);
   const { error, run } = useErrorHandler();
   const { pedirConfirmacion, modal: modalConfirmacion } = useConfirm();
+  const { saliendo, cerrar } = useCierreAnimado(onCerrar);
 
   if (!usuario) return null;
 
@@ -68,18 +70,18 @@ export default function PerfilModal({ onCerrar }: { onCerrar: () => void }) {
       });
       await refrescarUsuario();
       setGuardadoOk(true);
-      setTimeout(onCerrar, 1100);
+      setTimeout(cerrar, 1100);
     });
     setGuardando(false);
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[2000] flex items-center justify-center overflow-y-auto bg-black/50 animate-fade-in p-4">
+    <div className={`fixed inset-0 z-[2000] flex items-center justify-center overflow-y-auto bg-black/50 p-4 ${saliendo ? "animate-fade-out" : "animate-fade-in"}`}>
       {modalConfirmacion}
-      <div className="w-full max-w-lg rounded-xl bg-white animate-scale-in p-5 shadow-xl dark:bg-slate-900">
+      <div className={`w-full max-w-lg rounded-xl bg-white p-5 shadow-xl dark:bg-slate-900 ${saliendo ? "animate-scale-out" : "animate-scale-in"}`}>
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-base font-semibold text-slate-800 dark:text-slate-100">Mi perfil</h3>
-          <button onClick={onCerrar} className="rounded-lg p-1 text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800">
+          <button onClick={cerrar} className="rounded-lg p-1 text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -190,7 +192,7 @@ export default function PerfilModal({ onCerrar }: { onCerrar: () => void }) {
           <div className="mt-2 flex justify-end gap-2">
             <button
               type="button"
-              onClick={onCerrar}
+              onClick={cerrar}
               className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
             >
               Cancelar

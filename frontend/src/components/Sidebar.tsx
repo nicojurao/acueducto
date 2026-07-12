@@ -26,6 +26,7 @@ import { urlFoto } from "../api/client";
 import PerfilModal from "./PerfilModal";
 import GlobalSearch from "./GlobalSearch";
 import { listarPendientes, listarPendientesNovedad } from "../lib/offlineQueue";
+import { useCierreAnimado } from "../lib/useCierreAnimado";
 
 type Link = { to: string; label: string; icon: typeof LayoutDashboard; permiso?: string | string[] };
 type Entrada = Link | { label: string; icon: typeof LayoutDashboard; children: Link[] };
@@ -70,6 +71,7 @@ export default function Sidebar({ abierto, onCerrar }: { abierto: boolean; onCer
   const { pathname } = useLocation();
   const [perfilAbierto, setPerfilAbierto] = useState(false);
   const [avisoCierreSesion, setAvisoCierreSesion] = useState<number | null>(null);
+  const { saliendo: saliendoAviso, cerrar: cerrarAviso } = useCierreAnimado(() => setAvisoCierreSesion(null));
 
   async function intentarCerrarSesion() {
     const [pendientes, pendientesNovedad] = await Promise.all([listarPendientes(), listarPendientesNovedad()]);
@@ -220,8 +222,8 @@ export default function Sidebar({ abierto, onCerrar }: { abierto: boolean; onCer
       </aside>
 
       {avisoCierreSesion !== null && (
-        <div className="fixed inset-0 z-[2500] flex items-center justify-center bg-black/50 animate-fade-in p-4">
-          <div className="w-full max-w-sm rounded-xl bg-white animate-scale-in p-5 shadow-xl dark:bg-slate-900">
+        <div className={`fixed inset-0 z-[2500] flex items-center justify-center bg-black/50 p-4 ${saliendoAviso ? "animate-fade-out" : "animate-fade-in"}`}>
+          <div className={`w-full max-w-sm rounded-xl bg-white p-5 shadow-xl dark:bg-slate-900 ${saliendoAviso ? "animate-scale-out" : "animate-scale-in"}`}>
             <p className="mb-1 text-sm font-semibold text-amber-700 dark:text-amber-400">
               Tienes {avisoCierreSesion} lectura{avisoCierreSesion === 1 ? "" : "s"} sin sincronizar
             </p>
@@ -232,14 +234,13 @@ export default function Sidebar({ abierto, onCerrar }: { abierto: boolean; onCer
             </p>
             <div className="flex justify-end gap-2">
               <button
-                onClick={() => setAvisoCierreSesion(null)}
+                onClick={cerrarAviso}
                 className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
               >
                 Seguir aquí
               </button>
               <button
                 onClick={() => {
-                  setAvisoCierreSesion(null);
                   logout();
                   navigate("/login");
                 }}
