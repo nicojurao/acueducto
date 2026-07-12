@@ -1,5 +1,6 @@
-import XLSX from "xlsx";
+import type ExcelJS from "exceljs";
 import { prisma } from "../src/lib/prisma.js";
+import { leerLibroDesdeArchivo, hojaAFilas } from "../src/lib/xlsxCompat.js";
 
 const filePath = process.argv[2];
 if (!filePath) {
@@ -30,13 +31,13 @@ function colIndexContains(headers: string[], ...palabras: string[]): number {
   });
 }
 
-async function importMedidores(wb: XLSX.WorkBook) {
-  const sheet = wb.Sheets["MEDIDORES"];
+async function importMedidores(wb: ExcelJS.Workbook) {
+  const sheet = wb.getWorksheet("MEDIDORES");
   if (!sheet) {
     console.warn("Hoja MEDIDORES no encontrada, se omite.");
     return;
   }
-  const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true });
+  const rows: any[][] = hojaAFilas(sheet);
   const headers = rows[0].map((h) => String(h ?? ""));
 
   const iNombre = colIndex(headers, "NOMBRE DE SUSCRIPTOR");
@@ -144,13 +145,13 @@ async function importMedidores(wb: XLSX.WorkBook) {
   console.log(`MEDIDORES: ${creados} medidores creados, ${cotitulares} cotitulares vinculados.`);
 }
 
-async function importLecturas(wb: XLSX.WorkBook, sheetName: string, anio: number) {
-  const sheet = wb.Sheets[sheetName];
+async function importLecturas(wb: ExcelJS.Workbook, sheetName: string, anio: number) {
+  const sheet = wb.getWorksheet(sheetName);
   if (!sheet) {
     console.warn(`Hoja ${sheetName} no encontrada, se omite.`);
     return;
   }
-  const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true });
+  const rows: any[][] = hojaAFilas(sheet);
 
   // La fila de encabezado real no siempre es la primera (algunas hojas tienen un título arriba)
   const headerRowIdx = rows.findIndex((r) => r.some((c) => norm(c).startsWith("LECTURA INICIAL")));
@@ -242,7 +243,7 @@ async function importLecturas(wb: XLSX.WorkBook, sheetName: string, anio: number
 }
 
 async function main() {
-  const wb = XLSX.readFile(filePath);
+  const wb = await leerLibroDesdeArchivo(filePath);
   await importMedidores(wb);
   await importLecturas(wb, "LECTURAS MEDIDORES 2024", 2024);
   await importLecturas(wb, "LECTURA MEDIDORES 2025", 2025);

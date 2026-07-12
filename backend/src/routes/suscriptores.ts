@@ -1,10 +1,10 @@
 import { Router } from "express";
 import multer from "multer";
-import XLSX from "xlsx";
 import { prisma } from "../lib/prisma.js";
 import { requirePermiso } from "../middleware/auth.js";
 import { crearPlantillaImportExport, enviarExcel } from "../lib/excelBranding.js";
 import { registrarCambios, camposSuscriptor } from "../lib/historial.js";
+import { leerLibroDesdeBuffer, hojaAFilas } from "../lib/xlsxCompat.js";
 
 export const suscriptoresRouter = Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -273,9 +273,9 @@ suscriptoresRouter.put("/:id", soloAvanzado, async (req, res) => {
 suscriptoresRouter.post("/import/validar", soloAvanzado, upload.single("archivo"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "Falta el archivo (campo 'archivo')" });
 
-  const wb = XLSX.read(req.file.buffer, { type: "buffer" });
-  const sheet = wb.Sheets[wb.SheetNames[0]];
-  const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true });
+  const wb = await leerLibroDesdeBuffer(req.file.buffer);
+  const sheet = wb.worksheets[0];
+  const rows: any[][] = hojaAFilas(sheet);
   if (rows.length === 0) return res.status(400).json({ error: "El archivo está vacío" });
 
   const headers = rows[0].map((h) => String(h ?? ""));
@@ -361,9 +361,9 @@ suscriptoresRouter.post("/import/validar", soloAvanzado, upload.single("archivo"
 suscriptoresRouter.post("/import", soloAvanzado, upload.single("archivo"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "Falta el archivo (campo 'archivo')" });
 
-  const wb = XLSX.read(req.file.buffer, { type: "buffer" });
-  const sheet = wb.Sheets[wb.SheetNames[0]];
-  const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true });
+  const wb = await leerLibroDesdeBuffer(req.file.buffer);
+  const sheet = wb.worksheets[0];
+  const rows: any[][] = hojaAFilas(sheet);
   if (rows.length === 0) return res.status(400).json({ error: "El archivo está vacío" });
 
   const headers = rows[0].map((h) => String(h ?? ""));

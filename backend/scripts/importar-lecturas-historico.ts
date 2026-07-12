@@ -2,8 +2,9 @@
 // del endpoint POST /api/lecturas/importar-historico (formato ancho: una hoja por año, columna
 // LECTURA INICIAL + pares LECTURA/CONSUMO por mes). Se hizo como script, en vez de subir el
 // archivo por la UI, para no depender de credenciales de usuario.
-import XLSX from "xlsx";
+import type ExcelJS from "exceljs";
 import { prisma } from "../src/lib/prisma.js";
+import { leerLibroDesdeArchivo, hojaAFilas } from "../src/lib/xlsxCompat.js";
 
 const filePath = process.argv[2] ?? "/data/lecturas.xlsx";
 
@@ -22,8 +23,10 @@ function colIndexContains(headers: string[], ...palabras: string[]): number {
   });
 }
 
-function hojasDeAnio(wb: XLSX.WorkBook): { nombre: string; anio: number }[] {
-  return wb.SheetNames.filter((n) => norm(n).includes("LECTURA"))
+function hojasDeAnio(wb: ExcelJS.Workbook): { nombre: string; anio: number }[] {
+  return wb.worksheets
+    .map((h) => h.name)
+    .filter((n) => norm(n).includes("LECTURA"))
     .map((nombre) => {
       const match = nombre.match(/\d{4}/);
       return match ? { nombre, anio: Number(match[0]) } : null;
@@ -32,9 +35,10 @@ function hojasDeAnio(wb: XLSX.WorkBook): { nombre: string; anio: number }[] {
     .sort((a, b) => a.anio - b.anio);
 }
 
-function leerHojaLecturas(wb: XLSX.WorkBook, nombreHoja: string) {
-  const sheet = wb.Sheets[nombreHoja];
-  const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true });
+function leerHojaLecturas(wb: ExcelJS.Workbook, nombreHoja: string) {
+  const sheet = wb.getWorksheet(nombreHoja);
+  if (!sheet) return null;
+  const rows: any[][] = hojaAFilas(sheet);
   const headerRowIdx = rows.findIndex((r) => r.some((c) => norm(c).startsWith("LECTURA INICIAL")));
   if (headerRowIdx === -1) return null;
 
@@ -61,7 +65,7 @@ function leerHojaLecturas(wb: XLSX.WorkBook, nombreHoja: string) {
 }
 
 async function main() {
-  const wb = XLSX.readFile(filePath);
+  const wb = await leerLibroDesdeArchivo(filePath);
   const hojas = hojasDeAnio(wb);
   if (hojas.length === 0) {
     console.error("No se encontró ninguna hoja de lecturas (el nombre debe traer 'LECTURA' y el año).");

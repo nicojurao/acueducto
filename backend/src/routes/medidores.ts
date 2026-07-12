@@ -1,11 +1,11 @@
 import { Router } from "express";
 import multer from "multer";
-import XLSX from "xlsx";
 import { prisma } from "../lib/prisma.js";
 import { requirePermiso } from "../middleware/auth.js";
 import { crearPlantillaImportExport, enviarExcel } from "../lib/excelBranding.js";
 import { guardarArchivo, borrarArchivo } from "../lib/storage.js";
 import { registrarCambios, camposMedidor } from "../lib/historial.js";
+import { leerLibroDesdeBuffer, hojaAFilas } from "../lib/xlsxCompat.js";
 
 export const medidoresRouter = Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -231,9 +231,9 @@ function normalizarTipoMedidor(raw: string | undefined): "volumetrico" | "veloci
 medidoresRouter.post("/import/validar", soloAvanzado, upload.single("archivo"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "Falta el archivo (campo 'archivo')" });
 
-  const wb = XLSX.read(req.file.buffer, { type: "buffer", cellDates: true });
-  const sheet = wb.Sheets[wb.SheetNames[0]];
-  const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true });
+  const wb = await leerLibroDesdeBuffer(req.file.buffer);
+  const sheet = wb.worksheets[0];
+  const rows: any[][] = hojaAFilas(sheet);
   if (rows.length === 0) return res.status(400).json({ error: "El archivo está vacío" });
   const headers = rows[0].map((h) => String(h ?? ""));
   const { iNuid, iSerial, iMarca, iModelo, iTipo, iFecha, iCotitulares, iFechaFabricacion, iFechaCertificacion, iInstalador } =
@@ -383,9 +383,9 @@ medidoresRouter.post("/import/validar", soloAvanzado, upload.single("archivo"), 
 medidoresRouter.post("/import", soloAvanzado, upload.single("archivo"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "Falta el archivo (campo 'archivo')" });
 
-  const wb = XLSX.read(req.file.buffer, { type: "buffer", cellDates: true });
-  const sheet = wb.Sheets[wb.SheetNames[0]];
-  const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true });
+  const wb = await leerLibroDesdeBuffer(req.file.buffer);
+  const sheet = wb.worksheets[0];
+  const rows: any[][] = hojaAFilas(sheet);
   if (rows.length === 0) return res.status(400).json({ error: "El archivo está vacío" });
   const headers = rows[0].map((h) => String(h ?? ""));
   const {
