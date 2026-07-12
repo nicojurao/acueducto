@@ -1,0 +1,310 @@
+import { useEffect, useState } from "react";
+import { Waves, Plus, Trash2, ChevronLeft, ChevronRight, Image as ImageIcon, FileText } from "lucide-react";
+import { api, Aforo, PuntoAforo, urlFoto } from "../api/client";
+import AforoModal from "../components/AforoModal";
+import { useConfirm, useErrorHandler } from "../components/ConfirmModal";
+import { useEsMovil } from "../lib/useEsMovil";
+
+const inputClass =
+  "rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:placeholder:text-slate-500";
+
+const METODO_LABELS: Record<string, string> = { volumetrico: "Volumétrico", flotador: "Flotador" };
+
+function PuntosTab({ puntos, recargar }: { puntos: PuntoAforo[]; recargar: () => void }) {
+  const [nombre, setNombre] = useState("");
+  const [descripcion, setDescripcion] = useState("");
+  const [creando, setCreando] = useState(false);
+  const { pedirConfirmacion, modal } = useConfirm();
+  const { error, run } = useErrorHandler();
+
+  async function crear() {
+    if (!nombre.trim()) return;
+    await run(async () => {
+      await api.puntosAforo.create({ nombre: nombre.trim(), descripcion: descripcion.trim() || undefined });
+      setNombre("");
+      setDescripcion("");
+      setCreando(false);
+      recargar();
+    });
+  }
+
+  function eliminar(p: PuntoAforo) {
+    pedirConfirmacion(`¿Eliminar el punto de aforo "${p.nombre}"?`, async () => {
+      await run(() => api.puntosAforo.remove(p.id));
+      recargar();
+    });
+  }
+
+  return (
+    <div>
+      {error && (
+        <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-500/10 dark:text-red-400">
+          {error}
+        </p>
+      )}
+      <div className="mb-4">
+        {creando ? (
+          <div className="flex flex-wrap items-end gap-2 rounded-xl border border-brand-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
+            <label className="text-sm">
+              <span className="mb-1 block text-slate-600 dark:text-slate-300">Nombre</span>
+              <input value={nombre} onChange={(e) => setNombre(e.target.value)} className={inputClass} autoFocus />
+            </label>
+            <label className="text-sm">
+              <span className="mb-1 block text-slate-600 dark:text-slate-300">Descripción (opcional)</span>
+              <input value={descripcion} onChange={(e) => setDescripcion(e.target.value)} className={inputClass} />
+            </label>
+            <button onClick={crear} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-500">
+              Guardar
+            </button>
+            <button
+              onClick={() => setCreando(false)}
+              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+            >
+              Cancelar
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setCreando(true)}
+            className="flex items-center gap-1.5 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-500"
+          >
+            <Plus className="h-4 w-4" />
+            Nuevo punto de aforo
+          </button>
+        )}
+      </div>
+
+      <div className="overflow-x-auto rounded-xl border border-brand-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <table className="w-full text-left text-sm">
+          <thead className="border-b border-brand-100 bg-brand-50 text-xs uppercase text-brand-800 dark:border-slate-800 dark:bg-transparent dark:text-slate-400">
+            <tr>
+              <th className="px-4 py-2.5">Nombre</th>
+              <th className="px-4 py-2.5">Descripción</th>
+              <th className="px-4 py-2.5">Registros</th>
+              <th className="px-4 py-2.5"></th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+            {puntos.map((p) => (
+              <tr key={p.id}>
+                <td className="px-4 py-2.5 font-medium text-slate-800 dark:text-slate-100">{p.nombre}</td>
+                <td className="px-4 py-2.5 text-slate-700 dark:text-slate-400">{p.descripcion ?? "-"}</td>
+                <td className="px-4 py-2.5 text-slate-700 dark:text-slate-400">{p.registros ?? 0}</td>
+                <td className="px-4 py-2.5 text-right">
+                  <button onClick={() => eliminar(p)} className="rounded-lg p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10">
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {puntos.length === 0 && (
+              <tr>
+                <td colSpan={4} className="px-4 py-6 text-center text-slate-600">
+                  Todavía no hay puntos de aforo registrados.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      {modal}
+    </div>
+  );
+}
+
+function RegistrosTab({ puntos }: { puntos: PuntoAforo[] }) {
+  const esMovil = useEsMovil();
+  const porPagina = esMovil ? 5 : 10;
+  const [puntoFiltro, setPuntoFiltro] = useState<number | "">("");
+  const [filas, setFilas] = useState<Aforo[]>([]);
+  const [total, setTotal] = useState(0);
+  const [pagina, setPagina] = useState(1);
+  const [cargando, setCargando] = useState(true);
+  const [modalAbierto, setModalAbierto] = useState(false);
+  const { pedirConfirmacion, modal } = useConfirm();
+  const { error, run } = useErrorHandler();
+
+  async function cargar() {
+    setCargando(true);
+    try {
+      const resultado = await api.aforos.listPaginado(pagina, porPagina, puntoFiltro || undefined);
+      setFilas(resultado.data);
+      setTotal(resultado.total);
+    } finally {
+      setCargando(false);
+    }
+  }
+
+  useEffect(() => {
+    cargar();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pagina, porPagina, puntoFiltro]);
+
+  useEffect(() => setPagina(1), [puntoFiltro]);
+
+  function eliminar(a: Aforo) {
+    pedirConfirmacion("¿Eliminar este registro de aforo?", async () => {
+      await run(() => api.aforos.remove(a.id));
+      cargar();
+    });
+  }
+
+  const totalPaginas = Math.max(1, Math.ceil(total / porPagina));
+
+  return (
+    <div>
+      {error && (
+        <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-500/10 dark:text-red-400">
+          {error}
+        </p>
+      )}
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <select value={puntoFiltro} onChange={(e) => setPuntoFiltro(e.target.value ? Number(e.target.value) : "")} className={inputClass}>
+          <option value="">Todos los puntos</option>
+          {puntos.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.nombre}
+            </option>
+          ))}
+        </select>
+        <button
+          onClick={() => setModalAbierto(true)}
+          disabled={puntos.length === 0}
+          className="flex items-center gap-1.5 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-500 disabled:opacity-60"
+        >
+          <Plus className="h-4 w-4" />
+          Nuevo registro
+        </button>
+      </div>
+
+      {cargando ? (
+        <p className="text-slate-700 dark:text-slate-400">Cargando...</p>
+      ) : filas.length === 0 ? (
+        <p className="rounded-xl border border-brand-200 bg-white px-4 py-6 text-center text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900">
+          No hay registros de aforo{puntoFiltro ? " para este punto" : ""}.
+        </p>
+      ) : (
+        <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-brand-200 bg-white shadow-sm dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
+          {filas.map((a) => (
+            <div key={a.id} className="flex items-center gap-3 px-3 py-2.5 sm:px-4">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">
+                  {a.puntoAforo?.nombre} · {Number(a.caudalLps).toFixed(2)} L/s
+                </div>
+                <div className="text-xs text-slate-700 dark:text-slate-400">
+                  {new Date(a.fecha).toLocaleDateString()}{" "}
+                  {new Date(a.fecha).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} ·{" "}
+                  {METODO_LABELS[a.metodo]}
+                  {a.metodo === "flotador" && a.distanciaMetros && a.tiempoSegundos
+                    ? ` · ${(Number(a.distanciaMetros) / Number(a.tiempoSegundos)).toFixed(3)} m/s`
+                    : ""}
+                  {a.capturadoPor ? ` · ${a.capturadoPor.nombre}` : ""}
+                </div>
+              </div>
+              {a.fotoUrl && (
+                <a href={urlFoto(a.fotoUrl)} target="_blank" rel="noreferrer" className="shrink-0 text-slate-600 hover:text-brand-600">
+                  <ImageIcon className="h-4 w-4" />
+                </a>
+              )}
+              <button
+                onClick={() => api.aforos.verPdf(a.id)}
+                className="shrink-0 rounded-lg p-1.5 text-slate-600 hover:bg-brand-50 hover:text-brand-600 dark:hover:bg-brand-500/10"
+                title="Ver PDF"
+              >
+                <FileText className="h-4 w-4" />
+              </button>
+              <button onClick={() => eliminar(a)} className="shrink-0 rounded-lg p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10">
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!cargando && total > 0 && (
+        <div className="mt-3 flex items-center justify-between text-sm text-slate-700 dark:text-slate-400 sm:mt-4">
+          <span>
+            {total} resultado{total === 1 ? "" : "s"} · página {pagina} de {totalPaginas}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setPagina((p) => Math.max(1, p - 1))}
+              disabled={pagina <= 1}
+              className="flex items-center gap-1 rounded-lg border border-brand-200 px-2.5 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:hover:bg-slate-800"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+              Anterior
+            </button>
+            <button
+              onClick={() => setPagina((p) => Math.min(totalPaginas, p + 1))}
+              disabled={pagina >= totalPaginas}
+              className="flex items-center gap-1 rounded-lg border border-brand-200 px-2.5 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:hover:bg-slate-800"
+            >
+              Siguiente
+              <ChevronRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {modalAbierto && (
+        <AforoModal
+          puntos={puntos}
+          puntoInicial={puntoFiltro || undefined}
+          onClose={() => setModalAbierto(false)}
+          onCambio={cargar}
+        />
+      )}
+      {modal}
+    </div>
+  );
+}
+
+export default function AforosPage() {
+  const [tab, setTab] = useState<"registros" | "puntos">("registros");
+  const [puntos, setPuntos] = useState<PuntoAforo[]>([]);
+
+  async function cargarPuntos() {
+    setPuntos(await api.puntosAforo.list());
+  }
+
+  useEffect(() => {
+    cargarPuntos();
+  }, []);
+
+  return (
+    <div>
+      <h1 className="mb-3 flex items-center gap-2 text-xl font-bold sm:mb-5 sm:text-2xl">
+        <Waves className="h-6 w-6 text-brand-500" />
+        Aforos
+      </h1>
+
+      <div className="mb-4 flex items-center gap-1 rounded-full border border-slate-200 p-1 dark:border-slate-800 w-fit">
+        {(
+          [
+            ["registros", "Registros de aforo"],
+            ["puntos", "Puntos de aforo"],
+          ] as [typeof tab, string][]
+        ).map(([valor, etiqueta]) => (
+          <button
+            key={valor}
+            onClick={() => setTab(valor)}
+            className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+              tab === valor
+                ? "bg-brand-600 text-white"
+                : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+            }`}
+          >
+            {etiqueta}
+          </button>
+        ))}
+      </div>
+
+      {tab === "puntos" ? (
+        <PuntosTab puntos={puntos} recargar={cargarPuntos} />
+      ) : (
+        <RegistrosTab puntos={puntos} />
+      )}
+    </div>
+  );
+}

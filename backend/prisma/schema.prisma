@@ -1,0 +1,434 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Suscriptor {
+  id                  Int       @id @default(autoincrement())
+  nombre              String
+  codigo              String    @unique
+  ruta                String?
+
+  primerNombre        String?
+  segundoNombre       String?
+  primerApellido      String?
+  segundoApellido     String?
+  identificacion      String?
+  barrioId            Int?
+  barrioCat           Barrio?   @relation(fields: [barrioId], references: [id])
+  direccion           String?
+  direccionComercial  String?
+  estratoId           Int?
+  estratoCat          Estrato?  @relation(fields: [estratoId], references: [id])
+  latitud             Float?
+  longitud            Float?
+
+  // "sin_medidor" | "instalado_prueba" | "facturando" | "inactivo"
+  estadoFacturacion   String    @default("sin_medidor")
+
+  // "activo" | "inactivo". Un predio inactivo (lote baldío, demolido, etc.) no puede tener
+  // medidor asignado — se valida en las rutas de suscriptores/actas, no solo en la UI.
+  estadoPredio        String    @default("activo")
+
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  medidores           Medidor[]
+  cotitularDe         Cotitular?
+  actas               ActaInstalacion[]
+}
+
+// Catálogo de barrios, editable desde la pestaña de Barrios/Estratos. Permite pre-registrar
+// barrios nuevos antes de que exista un suscriptor con ese valor.
+model Barrio {
+  id           Int          @id @default(autoincrement())
+  nombre       String       @unique
+  createdAt    DateTime     @default(now())
+  suscriptores Suscriptor[]
+}
+
+// Catálogo de estratos (1, 2, 3, 4, Comercial, Oficial), editable desde la pestaña de
+// Barrios/Estratos — antes era una lista fija en el código que aceptaba cualquier valor sin
+// validar, lo que dejaba colar estratos inexistentes (ej. "7") al importar desde Excel.
+model Estrato {
+  id           Int          @id @default(autoincrement())
+  codigo       String       @unique
+  etiqueta     String
+  createdAt    DateTime     @default(now())
+  suscriptores Suscriptor[]
+}
+
+model MarcaMedidor {
+  id       Int             @id @default(autoincrement())
+  nombre   String          @unique
+  modelos  ModeloMedidor[]
+  medidores Medidor[]
+}
+
+model ModeloMedidor {
+  id        Int          @id @default(autoincrement())
+  nombre    String
+  tipo      String        // "volumetrico" | "velocidad"
+  marcaId   Int
+  marca     MarcaMedidor  @relation(fields: [marcaId], references: [id])
+  medidores Medidor[]
+  diametros DiametroMedidor[]
+
+  @@unique([marcaId, nombre])
+}
+
+model DiametroMedidor {
+  id        Int       @id @default(autoincrement())
+  valor     String    @unique // ej. 1/2", 3/4", 1"
+  medidores Medidor[]
+  modelos   ModeloMedidor[]
+}
+
+// Una caja de fábrica trae varios medidores con seriales consecutivos (ej. 23001 a 23020); el
+// lote agrupa esa caja para trazabilidad/garantía. La acta de calibración es individual por
+// medidor (ver Medidor.actaCalibracionUrl), no vive acá.
+model Lote {
+  id            Int       @id @default(autoincrement())
+  serialInicial String
+  serialFinal   String
+  fechaCompra   DateTime?
+  observaciones String?
+  createdAt     DateTime  @default(now())
+  medidores     Medidor[]
+
+  @@unique([serialInicial, serialFinal])
+}
+
+model Medidor {
+  id                  Int       @id @default(autoincrement())
+  suscriptorId        Int?
+  suscriptor          Suscriptor? @relation(fields: [suscriptorId], references: [id])
+  serial              String?   @unique
+  estado              String    @default("instalado") // "en_bodega" | "instalado"
+  condicion           String    @default("bueno") // "bueno" | "danado" — estado físico, independiente de si está instalado o en bodega
+
+  marcaId             Int?
+  marcaCat            MarcaMedidor? @relation(fields: [marcaId], references: [id])
+  modeloId            Int?
+  modeloCat           ModeloMedidor? @relation(fields: [modeloId], references: [id])
+  diametroId          Int?
+  diametroCat         DiametroMedidor? @relation(fields: [diametroId], references: [id])
+
+  fechaInstalacion    DateTime?
+  tipo                String?
+  fechaFabricacion    DateTime?
+  fechaCertificacion  DateTime?
+  clase               String?
+  certificado         String?
+  loteId              Int?
+  lote                Lote?     @relation(fields: [loteId], references: [id])
+  actaCalibracionUrl  String?   // acta de calibración escaneada (PDF o imagen), individual por medidor
+  lecturaInicial      Decimal?  @db.Decimal(12, 2)
+  activo              Boolean   @default(true)
+
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  lecturas            Lectura[]
+  cotitulares         Cotitular[]
+  actas               ActaInstalacion[]
+  novedadesLectura    NovedadLectura[]
+}
+
+model ActaInstalacion {
+  id                Int       @id @default(autoincrement())
+  medidorId         Int
+  medidor           Medidor   @relation(fields: [medidorId], references: [id])
+  suscriptorId      Int
+  suscriptor        Suscriptor @relation(fields: [suscriptorId], references: [id])
+  serial            String
+  fechaInstalacion  DateTime
+  fechaRetiro       DateTime? // si se le quitó el medidor al suscriptor sin reemplazo: la acta
+                              // se conserva como historial en vez de borrarse, con esta fecha.
+  instaladoPor      String    // snapshot de texto: quién instaló, tal como se llamaba en ese momento.
+                              // No se actualiza si el usuario cambia de nombre después (documento histórico).
+  usuarioId         Int?      // FK opcional al usuario real, cuando se puede enlazar. Puede quedar
+                              // null (actas antiguas sin vincular, o instalador ya no existe en el sistema).
+  usuario           Usuario?  @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
+  observaciones     String?
+  fotos             String[]
+  actaFirmadaUrl    String?   // el PDF/imagen que genera la app es solo para imprimir y firmar a
+                               // mano; esto guarda el escaneo YA FIRMADO, documento legal distinto
+                               // de las fotos de evidencia de la instalación.
+  createdAt         DateTime  @default(now())
+}
+
+// Registro de auditoría: un renglón por cada campo que cambió en un Medidor o Suscriptor
+// (serial, nombre, estrato, etc.), con el valor anterior y el nuevo ya en texto legible
+// (nombres de catálogo resueltos, no IDs) para no tener que traducir nada en el frontend.
+model HistorialCambio {
+  id            Int       @id @default(autoincrement())
+  entidad       String    // "medidor" | "suscriptor"
+  entidadId     Int
+  campo         String
+  valorAnterior String?
+  valorNuevo    String?
+  usuarioId     Int?
+  usuario       Usuario?  @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
+  fecha         DateTime  @default(now())
+
+  @@index([entidad, entidadId])
+}
+
+// Suscriptor adicional que comparte un mismo medidor (acometida multiusuario).
+// El consumo del medidor se reparte en partes iguales entre el titular (Medidor.suscriptorId) y sus cotitulares.
+model Cotitular {
+  id           Int        @id @default(autoincrement())
+  medidorId    Int
+  medidor      Medidor    @relation(fields: [medidorId], references: [id])
+  suscriptorId Int        @unique
+  suscriptor   Suscriptor @relation(fields: [suscriptorId], references: [id])
+  createdAt    DateTime   @default(now())
+}
+
+model Lectura {
+  id              Int       @id @default(autoincrement())
+  medidorId       Int
+  medidor         Medidor   @relation(fields: [medidorId], references: [id])
+
+  periodo         DateTime  // primer día del mes, ej 2026-06-01
+  valorLectura    Decimal   @db.Decimal(12, 2)
+  consumo         Decimal   @db.Decimal(12, 2)
+  observaciones   String?
+
+  // Evidencia de la toma: foto del medidor y coordenadas donde se capturó (no se usan
+  // para actualizar el pin del suscriptor en el Mapa, son solo auditoría de la lectura).
+  fotoUrl         String?
+  latitud         Float?
+  longitud        Float?
+  capturadoPorId  Int?
+  capturadoPor    Usuario?  @relation(fields: [capturadoPorId], references: [id], onDelete: SetNull)
+
+  fechaRegistro   DateTime  @default(now())
+
+  @@unique([medidorId, periodo])
+}
+
+model Usuario {
+  id              Int       @id @default(autoincrement())
+  nombre          String
+  nombreUsuario   String    @unique
+  passwordHash    String
+  rolId           Int
+  rol             Rol       @relation(fields: [rolId], references: [id])
+  activo          Boolean   @default(true)
+
+  cedula          String?   @unique
+  celular         String?
+  fechaNacimiento DateTime?
+  foto            String?
+
+  createdAt       DateTime  @default(now())
+
+  lecturas        Lectura[]
+  aforos          Aforo[]
+  prestamos       PrestamoInventario[]
+  movimientosInventario MovimientoInventario[]
+  itemsIngresados ItemInventario[]
+  actasInstaladas ActaInstalacion[]
+  cambiosRealizados HistorialCambio[]
+}
+
+// Inventario general del acueducto: herramientas, equipos e insumos de la operación (distinto
+// del inventario de Medidores, que ya tiene su propio módulo). Un mismo modelo cubre tanto
+// insumos apilables (ej. tubos, accesorios — cantidad alta, nunca se prestan) como equipos
+// individuales prestables (ej. una motosierra — cantidad 1, se asigna a un responsable vía
+// PrestamoInventario). La disponibilidad se calcula: cantidad - suma de préstamos activos.
+model ItemInventario {
+  id            Int      @id @default(autoincrement())
+  nombre        String
+  categoriaId   Int?
+  categoriaCat  CategoriaInventario? @relation(fields: [categoriaId], references: [id])
+  codigo        String?  @unique // placa/código de inventario, opcional
+  descripcion   String?
+  cantidad      Int      @default(1)
+  unidadMedida  String   @default("unidad") // "unidad" | "metro" | "kilogramo" | "litro" | "galon" | "rollo" | "caja" | "par"
+  estado        String   @default("bueno") // "bueno" | "regular" | "dañado" | "de_baja"
+  ubicacionId   Int?
+  ubicacionCat  UbicacionInventario? @relation(fields: [ubicacionId], references: [id])
+  proveedorId   Int?
+  proveedor     ProveedorInventario? @relation(fields: [proveedorId], references: [id])
+  fechaCompra   DateTime?
+  fechaIngreso  DateTime?
+  valor         Decimal? @db.Decimal(12, 2) // valor unitario
+  ingresadoPorId Int?
+  ingresadoPor  Usuario? @relation(fields: [ingresadoPorId], references: [id], onDelete: SetNull)
+  fotoUrl       String?
+  activo        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  prestamos     PrestamoInventario[]
+  movimientos   MovimientoInventario[]
+}
+
+// Catálogos administrables del módulo de Inventario general. Se administran aparte (crear la
+// categoría/ubicación/proveedor antes) en vez de escribirse libremente al crear un ítem.
+model CategoriaInventario {
+  id        Int              @id @default(autoincrement())
+  nombre    String           @unique
+  createdAt DateTime         @default(now())
+  items     ItemInventario[]
+}
+
+model UbicacionInventario {
+  id        Int              @id @default(autoincrement())
+  nombre    String           @unique
+  createdAt DateTime         @default(now())
+  items     ItemInventario[]
+}
+
+model ProveedorInventario {
+  id        Int              @id @default(autoincrement())
+  nombre    String           @unique
+  contacto  String?
+  telefono  String?
+  createdAt DateTime         @default(now())
+  items     ItemInventario[]
+}
+
+model PrestamoInventario {
+  id              Int            @id @default(autoincrement())
+  itemId          Int
+  item            ItemInventario @relation(fields: [itemId], references: [id])
+  usuarioId       Int
+  usuario         Usuario        @relation(fields: [usuarioId], references: [id])
+  cantidad        Int            @default(1)
+  fechaEntrega    DateTime       @default(now())
+  fechaDevolucion DateTime? // null = todavía está prestado
+  observaciones   String?
+  createdAt       DateTime       @default(now())
+}
+
+// Entradas (compra, reposición) y salidas (consumo, ej. tubos usados en una instalación) de
+// stock — distinto de PrestamoInventario, que es para equipos que se prestan y se devuelven.
+// Una entrada suma "cantidad" al ItemInventario, una salida la resta.
+model MovimientoInventario {
+  id            Int            @id @default(autoincrement())
+  itemId        Int
+  item          ItemInventario @relation(fields: [itemId], references: [id])
+  tipo          String // "entrada" | "salida"
+  cantidad      Int
+  motivo        String?
+  observaciones String?
+  usuarioId     Int?
+  usuario       Usuario?       @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
+  createdAt     DateTime       @default(now())
+}
+
+// Roles configurables. "admin" y "fontanero" vienen del sistema (esSistema=true) y no se
+// pueden editar ni eliminar desde la UI de Roles, para evitar quedarse sin acceso administrativo.
+model Rol {
+  id          Int          @id @default(autoincrement())
+  nombre      String       @unique
+  descripcion String?
+  esSistema   Boolean      @default(false)
+  createdAt   DateTime     @default(now())
+
+  permisos    RolPermiso[]
+  usuarios    Usuario[]
+}
+
+// Catálogo fijo de permisos por módulo (ver PERMISOS en backend/src/lib/permisos.ts).
+model Permiso {
+  id          Int          @id @default(autoincrement())
+  clave       String       @unique
+  nombre      String
+  descripcion String?
+
+  roles       RolPermiso[]
+}
+
+model RolPermiso {
+  rolId     Int
+  permisoId Int
+  rol       Rol     @relation(fields: [rolId], references: [id], onDelete: Cascade)
+  permiso   Permiso @relation(fields: [permisoId], references: [id], onDelete: Cascade)
+
+  @@id([rolId, permisoId])
+}
+
+// Módulo de Aforos: mide caudal de una fuente/bocatoma (no de un medidor de suscriptor).
+// Independiente del módulo de Medición (Suscriptor/Medidor/Lectura).
+model PuntoAforo {
+  id          Int      @id @default(autoincrement())
+  nombre      String
+  descripcion String?
+  latitud     Float?
+  longitud    Float?
+  activo      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  aforos      Aforo[]
+}
+
+model Aforo {
+  id           Int        @id @default(autoincrement())
+  puntoAforoId Int
+  puntoAforo   PuntoAforo @relation(fields: [puntoAforoId], references: [id])
+
+  fecha        DateTime
+  metodo       String     // "volumetrico" | "flotador"
+
+  // método volumétrico: tiempo en llenar un recipiente de volumen conocido
+  volumenLitros   Decimal? @db.Decimal(10, 2)
+
+  // tiempoSegundos es el promedio final usado en el cálculo (volumétrico: valor único
+  // ingresado; flotador: promedio de "tiempos", varias corridas del flotador en el mismo
+  // tramo). "tiempos" guarda cada medición cruda para trazabilidad, solo se usa en flotador.
+  tiempoSegundos  Decimal? @db.Decimal(10, 2)
+  tiempos         Float[]  @default([])
+
+  // método flotador: velocidad superficial (distancia/tiempoSegundos) x área de la sección
+  // transversal del cauce. El área se mide en dos secciones del tramo (aguas arriba/"alta" y
+  // aguas abajo/"baja", porque el cauce rara vez es uniforme) y se promedian. Cada sección se
+  // mide como ancho (un solo valor) x profundidad promedio (5 medidas de profundidad tomadas
+  // a lo ancho de esa sección, para compensar que el fondo no es plano).
+  distanciaMetros    Decimal? @db.Decimal(10, 2)
+
+  anchoAltaM         Decimal? @db.Decimal(10, 3)
+  profundidadesAltaM Float[]  @default([])
+  areaAltaM2         Decimal? @db.Decimal(10, 3) // anchoAltaM x promedio(profundidadesAltaM), calculado por el backend
+
+  anchoBajaM         Decimal? @db.Decimal(10, 3)
+  profundidadesBajaM Float[]  @default([])
+  areaBajaM2         Decimal? @db.Decimal(10, 3) // anchoBajaM x promedio(profundidadesBajaM), calculado por el backend
+
+  areaM2          Decimal? @db.Decimal(10, 3) // promedio de areaAltaM2/areaBajaM2, calculado por el backend
+
+  caudalLps    Decimal    @db.Decimal(10, 3) // resultado final, siempre calculado por el backend
+
+  observaciones String?
+  fotoUrl        String?
+  latitud        Float?
+  longitud        Float?
+  capturadoPorId Int?
+  capturadoPor   Usuario?  @relation(fields: [capturadoPorId], references: [id], onDelete: SetNull)
+
+  createdAt    DateTime   @default(now())
+}
+
+// Registro de que a un medidor NO se le pudo tomar lectura en un periodo, con el motivo
+// (ej. "predio cerrado", "medidor dañado", "no dejaron acceso"). Al capturar una lectura
+// real para ese mismo medidor/periodo, la novedad se elimina.
+model NovedadLectura {
+  id        Int      @id @default(autoincrement())
+  medidorId Int
+  medidor   Medidor  @relation(fields: [medidorId], references: [id])
+  periodo   DateTime // primer día del mes
+  motivo    String
+  fotos     String[] @default([])
+  createdAt DateTime @default(now())
+
+  @@unique([medidorId, periodo])
+}

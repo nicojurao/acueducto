@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+CREDENCIALES.md
+minio_data/
+backup/postgres/
+backup/disco-log.txt
+backup/ALERTA_DISCO.txt
+.claude/
+*.xlsx
