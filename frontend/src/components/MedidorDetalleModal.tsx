@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { X } from "lucide-react";
 import { api, DiametroMedidor, Lote, MarcaMedidor, Medidor, ModeloMedidor, urlFoto } from "../api/client";
-import { useErrorHandler } from "./ConfirmModal";
+import { useConfirm, useErrorHandler } from "./ConfirmModal";
 import { HistorialSeccion } from "./HistorialTimeline";
 import { useAuth } from "../contexts/AuthContext";
 
@@ -38,6 +38,7 @@ export default function MedidorDetalleModal({
   const [subiendo, setSubiendo] = useState(false);
   const { error, run } = useErrorHandler();
   const { usuario } = useAuth();
+  const { pedirConfirmacion, modal: modalConfirmacion } = useConfirm();
 
   const modelosDeMarca = modelos.filter((mo) => String(mo.marcaId) === marcaId);
   const modeloSeleccionado = modelos.find((mo) => String(mo.id) === modeloId);
@@ -81,6 +82,7 @@ export default function MedidorDetalleModal({
 
   return (
     <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-4">
+      {modalConfirmacion}
       <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-xl dark:bg-slate-900">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-bold">Medidor {medidor.serial ?? `#${medidor.id}`}</h2>
@@ -260,7 +262,7 @@ export default function MedidorDetalleModal({
             Cancelar
           </button>
           <button
-            onClick={guardar}
+            onClick={() => pedirConfirmacion("¿Deseas guardar los cambios?", guardar, { textoConfirmar: "Guardar", variante: "normal" })}
             disabled={guardando}
             className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-500 disabled:opacity-60"
           >

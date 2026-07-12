@@ -157,8 +157,12 @@ export default function SuscriptorDetailModal({
     setEditandoInfo(true);
   }
 
-  async function guardarInfo(e: React.FormEvent) {
+  function onSubmitInfo(e: React.FormEvent) {
     e.preventDefault();
+    pedirConfirmacion("¿Deseas guardar los cambios?", guardarInfo, { textoConfirmar: "Guardar", variante: "normal" });
+  }
+
+  async function guardarInfo() {
     setGuardandoInfo(true);
     try {
       await api.suscriptores.update(suscriptorId, {
@@ -363,8 +367,12 @@ export default function SuscriptorDetailModal({
     });
   }
 
-  async function registrarAsignacion(e: React.FormEvent) {
+  function onSubmitAsignacion(e: React.FormEvent) {
     e.preventDefault();
+    pedirConfirmacion("¿Deseas guardar los cambios?", registrarAsignacion, { textoConfirmar: "Guardar", variante: "normal" });
+  }
+
+  async function registrarAsignacion() {
     const usuarioIdInstalador = instaladores.find((u) => u.nombre === formActa.instaladoPor)?.id;
     setGuardandoActa(true);
     try {
@@ -543,7 +551,7 @@ export default function SuscriptorDetailModal({
             </div>
 
             {editandoInfo ? (
-              <form onSubmit={guardarInfo} className="rounded-lg border border-slate-200 p-3 dark:border-slate-800">
+              <form onSubmit={onSubmitInfo} className="rounded-lg border border-slate-200 p-3 dark:border-slate-800">
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                   <label className="col-span-2 flex flex-col gap-1 text-xs font-medium text-slate-700 sm:col-span-3">
                     Nombre
@@ -786,7 +794,7 @@ export default function SuscriptorDetailModal({
               {asignando && (
                 <form
                   className="mb-3 flex flex-col gap-2 rounded-lg border border-slate-200 p-3 dark:border-slate-800"
-                  onSubmit={registrarAsignacion}
+                  onSubmit={onSubmitAsignacion}
                 >
                   {editandoMedidorId ? (
                     <>

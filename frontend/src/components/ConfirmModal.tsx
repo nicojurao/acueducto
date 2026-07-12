@@ -2,10 +2,14 @@ import { useState } from "react";
 
 function ConfirmModal({
   mensaje,
+  textoConfirmar,
+  variante,
   onConfirmar,
   onCancelar,
 }: {
   mensaje: string;
+  textoConfirmar: string;
+  variante: "peligro" | "normal";
   onConfirmar: () => void;
   onCancelar: () => void;
 }) {
@@ -22,9 +26,11 @@ function ConfirmModal({
           </button>
           <button
             onClick={onConfirmar}
-            className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-500"
+            className={`rounded-lg px-4 py-2 text-sm font-medium text-white ${
+              variante === "peligro" ? "bg-red-600 hover:bg-red-500" : "bg-brand-600 hover:bg-brand-500"
+            }`}
           >
-            Eliminar
+            {textoConfirmar}
           </button>
         </div>
       </div>
@@ -33,13 +39,29 @@ function ConfirmModal({
 }
 
 export function useConfirm() {
-  const [pendiente, setPendiente] = useState<{ mensaje: string; accion: () => void } | null>(null);
-  function pedirConfirmacion(mensaje: string, accion: () => void) {
-    setPendiente({ mensaje, accion });
+  const [pendiente, setPendiente] = useState<{
+    mensaje: string;
+    accion: () => void;
+    textoConfirmar: string;
+    variante: "peligro" | "normal";
+  } | null>(null);
+  function pedirConfirmacion(
+    mensaje: string,
+    accion: () => void,
+    opciones?: { textoConfirmar?: string; variante?: "peligro" | "normal" }
+  ) {
+    setPendiente({
+      mensaje,
+      accion,
+      textoConfirmar: opciones?.textoConfirmar ?? "Eliminar",
+      variante: opciones?.variante ?? "peligro",
+    });
   }
   const modal = pendiente ? (
     <ConfirmModal
       mensaje={pendiente.mensaje}
+      textoConfirmar={pendiente.textoConfirmar}
+      variante={pendiente.variante}
       onCancelar={() => setPendiente(null)}
       onConfirmar={() => {
         pendiente.accion();

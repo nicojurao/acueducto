@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { X, MapPin, Loader2, Camera, Plus, Trash2 } from "lucide-react";
 import { api, PuntoAforo } from "../api/client";
-import { useErrorHandler } from "./ConfirmModal";
+import { useConfirm, useErrorHandler } from "./ConfirmModal";
 import CamaraModal from "./CamaraModal";
 import { comprimirFoto } from "../lib/comprimirImagen";
 
@@ -128,6 +128,7 @@ export default function AforoModal({
   const [ubicando, setUbicando] = useState(false);
   const [ubicacion, setUbicacion] = useState<{ latitud?: number; longitud?: number }>({});
   const { error, run } = useErrorHandler();
+  const { pedirConfirmacion, modal: modalConfirmacion } = useConfirm();
 
   const tiempoProm = promedio(tiempos);
   const profAltaProm = promedio(profundidadesAltaM);
@@ -186,6 +187,7 @@ export default function AforoModal({
 
   return (
     <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-4">
+      {modalConfirmacion}
       <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-xl dark:bg-slate-900">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-bold">Nuevo registro de aforo</h2>
@@ -419,7 +421,7 @@ export default function AforoModal({
             Cancelar
           </button>
           <button
-            onClick={guardar}
+            onClick={() => pedirConfirmacion("¿Deseas guardar los cambios?", guardar, { textoConfirmar: "Guardar", variante: "normal" })}
             disabled={guardando || !puntoAforoId || caudalLps === null}
             className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-500 disabled:opacity-60"
           >

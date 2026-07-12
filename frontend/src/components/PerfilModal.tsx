@@ -4,7 +4,7 @@ import { X, Camera, Eye, EyeOff } from "lucide-react";
 import { api, urlFoto } from "../api/client";
 import { useAuth } from "../contexts/AuthContext";
 import { comprimirFoto } from "../lib/comprimirImagen";
-import { useErrorHandler } from "./ConfirmModal";
+import { useConfirm, useErrorHandler } from "./ConfirmModal";
 
 const inputClass =
   "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:placeholder:text-slate-500";
@@ -31,6 +31,7 @@ export default function PerfilModal({ onCerrar }: { onCerrar: () => void }) {
   const [previewFoto, setPreviewFoto] = useState<string | null>(usuario?.foto ? urlFoto(usuario.foto) : null);
   const [guardando, setGuardando] = useState(false);
   const { error, run } = useErrorHandler();
+  const { pedirConfirmacion, modal: modalConfirmacion } = useConfirm();
 
   if (!usuario) return null;
 
@@ -47,9 +48,13 @@ export default function PerfilModal({ onCerrar }: { onCerrar: () => void }) {
     setPreviewFoto(null);
   }
 
-  async function onSubmit(e: React.FormEvent) {
+  function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!nombre.trim()) return;
+    pedirConfirmacion("¿Deseas guardar los cambios?", guardar, { textoConfirmar: "Guardar", variante: "normal" });
+  }
+
+  async function guardar() {
     setGuardando(true);
     await run(async () => {
       await api.auth.actualizarPerfil({
@@ -68,6 +73,7 @@ export default function PerfilModal({ onCerrar }: { onCerrar: () => void }) {
 
   return createPortal(
     <div className="fixed inset-0 z-[2000] flex items-center justify-center overflow-y-auto bg-black/50 p-4">
+      {modalConfirmacion}
       <div className="w-full max-w-lg rounded-xl bg-white p-5 shadow-xl dark:bg-slate-900">
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-base font-semibold text-slate-800 dark:text-slate-100">Mi perfil</h3>

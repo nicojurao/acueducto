@@ -367,7 +367,12 @@ export default function LecturaModal({
               </label>
               <div className="flex gap-2 pt-1">
                 <button
-                  onClick={guardarNovedad}
+                  onClick={() =>
+                    pedirConfirmacion("¿Deseas guardar esta novedad?", guardarNovedad, {
+                      textoConfirmar: "Guardar",
+                      variante: "normal",
+                    })
+                  }
                   disabled={guardando || !motivo.trim()}
                   className="flex items-center gap-1.5 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-500 disabled:opacity-50"
                 >
@@ -394,7 +399,12 @@ export default function LecturaModal({
                   className={`${inputClass} w-full`}
                 />
                 <button
-                  onClick={guardarLectura}
+                  onClick={() =>
+                    pedirConfirmacion("¿Deseas guardar esta lectura?", guardarLectura, {
+                      textoConfirmar: "Guardar",
+                      variante: "normal",
+                    })
+                  }
                   disabled={guardando || valorTexto === "" || (!lectura && !foto)}
                   className="flex shrink-0 items-center gap-1.5 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-500 disabled:opacity-50"
                 >

@@ -24,14 +24,19 @@ function RolModal({
   const [permisos, setPermisos] = useState<string[]>(rol?.permisos ?? []);
   const { error, run } = useErrorHandler();
   const [guardando, setGuardando] = useState(false);
+  const { pedirConfirmacion, modal: modalConfirmacion } = useConfirm();
 
   function togglePermiso(clave: string) {
     setPermisos((prev) => (prev.includes(clave) ? prev.filter((p) => p !== clave) : [...prev, clave]));
   }
 
-  async function onSubmit(e: React.FormEvent) {
+  function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!nombre) return;
+    pedirConfirmacion("¿Deseas guardar los cambios?", guardar, { textoConfirmar: "Guardar", variante: "normal" });
+  }
+
+  async function guardar() {
     setGuardando(true);
     await run(async () => {
       if (rol) {
@@ -47,6 +52,7 @@ function RolModal({
 
   return (
     <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-4">
+      {modalConfirmacion}
       <div className="w-full max-w-lg rounded-xl bg-white p-5 shadow-xl dark:bg-slate-900">
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-base font-semibold text-slate-800 dark:text-slate-100">

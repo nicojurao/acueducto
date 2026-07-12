@@ -73,6 +73,7 @@ function UsuarioModal({
   const [verPassword, setVerPassword] = useState(false);
   const { error, run } = useErrorHandler();
   const [guardando, setGuardando] = useState(false);
+  const { pedirConfirmacion, modal: modalConfirmacion } = useConfirm();
 
   async function onFotoSeleccionada(file: File | null) {
     const comprimido = file ? await comprimirFoto(file) : null;
@@ -87,9 +88,13 @@ function UsuarioModal({
     setPreviewFoto(null);
   }
 
-  async function onSubmit(e: React.FormEvent) {
+  function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!form.nombre || !form.nombreUsuario || !form.rolId || (!editando && !form.password)) return;
+    pedirConfirmacion("¿Deseas guardar los cambios?", guardar, { textoConfirmar: "Guardar", variante: "normal" });
+  }
+
+  async function guardar() {
     setGuardando(true);
     await run(async () => {
       if (editando) {
@@ -125,6 +130,7 @@ function UsuarioModal({
 
   return (
     <div className="fixed inset-0 z-[2000] flex items-center justify-center overflow-y-auto bg-black/50 p-4">
+      {modalConfirmacion}
       <div className="w-full max-w-lg rounded-xl bg-white p-5 shadow-xl dark:bg-slate-900">
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-base font-semibold text-slate-800 dark:text-slate-100">

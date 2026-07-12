@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { X, Camera } from "lucide-react";
 import { api, CategoriaInventario, ItemInventario, ProveedorInventario, UbicacionInventario, urlFoto } from "../api/client";
-import { useErrorHandler } from "./ConfirmModal";
+import { useConfirm, useErrorHandler } from "./ConfirmModal";
 import { comprimirFoto } from "../lib/comprimirImagen";
 import CatalogoCombobox from "./CatalogoCombobox";
 import CamaraModal from "./CamaraModal";
@@ -69,6 +69,7 @@ export default function ItemInventarioModal({
   const [camaraAbierta, setCamaraAbierta] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const { error, run } = useErrorHandler();
+  const { pedirConfirmacion, modal: modalConfirmacion } = useConfirm();
 
   const valorTotal = valor !== "" && cantidad ? Number(valor) * (Number(cantidad) || 0) : null;
 
@@ -116,6 +117,7 @@ export default function ItemInventarioModal({
 
   return (
     <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-4">
+      {modalConfirmacion}
       <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-xl dark:bg-slate-900">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-bold">{item ? "Editar ítem" : "Nuevo ítem de inventario"}</h2>
@@ -304,7 +306,7 @@ export default function ItemInventarioModal({
             Cancelar
           </button>
           <button
-            onClick={guardar}
+            onClick={() => pedirConfirmacion("¿Deseas guardar los cambios?", guardar, { textoConfirmar: "Guardar", variante: "normal" })}
             disabled={guardando || !nombre.trim()}
             className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-500 disabled:opacity-60"
           >
