@@ -68,6 +68,7 @@ export default function ItemInventarioModal({
   const [quitarFoto, setQuitarFoto] = useState(false);
   const [camaraAbierta, setCamaraAbierta] = useState(false);
   const [guardando, setGuardando] = useState(false);
+  const [guardadoOk, setGuardadoOk] = useState(false);
   const { error, run } = useErrorHandler();
   const { pedirConfirmacion, modal: modalConfirmacion } = useConfirm();
 
@@ -108,7 +109,8 @@ export default function ItemInventarioModal({
           await api.inventario.create(data);
         }
         onCambio();
-        onClose();
+        setGuardadoOk(true);
+        setTimeout(onClose, 1100);
       } finally {
         setGuardando(false);
       }
@@ -129,6 +131,11 @@ export default function ItemInventarioModal({
         {error && (
           <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-500/10 dark:text-red-400">
             {error}
+          </p>
+        )}
+        {guardadoOk && (
+          <p className="mb-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400">
+            ✓ Cambios guardados correctamente
           </p>
         )}
 

@@ -125,6 +125,7 @@ export default function AforoModal({
   const [foto, setFoto] = useState<File | null>(null);
   const [camaraAbierta, setCamaraAbierta] = useState(false);
   const [guardando, setGuardando] = useState(false);
+  const [guardadoOk, setGuardadoOk] = useState(false);
   const [ubicando, setUbicando] = useState(false);
   const [ubicacion, setUbicacion] = useState<{ latitud?: number; longitud?: number }>({});
   const { error, run } = useErrorHandler();
@@ -178,7 +179,8 @@ export default function AforoModal({
           foto,
         });
         onCambio();
-        onClose();
+        setGuardadoOk(true);
+        setTimeout(onClose, 1100);
       } finally {
         setGuardando(false);
       }
@@ -199,6 +201,11 @@ export default function AforoModal({
         {error && (
           <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-500/10 dark:text-red-400">
             {error}
+          </p>
+        )}
+        {guardadoOk && (
+          <p className="mb-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400">
+            ✓ Cambios guardados correctamente
           </p>
         )}
 

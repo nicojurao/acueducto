@@ -80,6 +80,7 @@ export default function SuscriptorDetailModal({
   const [actaPorMedidor, setActaPorMedidor] = useState<Record<number, ActaInstalacion>>({});
   const [actasRetiradas, setActasRetiradas] = useState<ActaInstalacion[]>([]);
   const [guardandoActa, setGuardandoActa] = useState(false);
+  const [actaGuardadaOk, setActaGuardadaOk] = useState(false);
   const [editandoEsRetirado, setEditandoEsRetirado] = useState(false);
   const [editandoActaCalibracionUrl, setEditandoActaCalibracionUrl] = useState<string | null>(null);
   // Diámetro real del medidor que se está editando, aunque no esté vinculado al modelo elegido en
@@ -129,6 +130,7 @@ export default function SuscriptorDetailModal({
 
   const [editandoInfo, setEditandoInfo] = useState(false);
   const [guardandoInfo, setGuardandoInfo] = useState(false);
+  const [infoGuardadaOk, setInfoGuardadaOk] = useState(false);
   const [barriosCatalogo, setBarriosCatalogo] = useState<{ id: number; nombre: string }[]>([]);
   const [estratosCatalogo, setEstratosCatalogo] = useState<Estrato[]>([]);
   const [formInfo, setFormInfo] = useState({
@@ -176,6 +178,8 @@ export default function SuscriptorDetailModal({
       });
       setEditandoInfo(false);
       cargarDetalle();
+      setInfoGuardadaOk(true);
+      setTimeout(() => setInfoGuardadaOk(false), 2000);
     } finally {
       setGuardandoInfo(false);
     }
@@ -437,6 +441,8 @@ export default function SuscriptorDetailModal({
       }
       cerrarFormulario();
       cargarDetalle();
+      setActaGuardadaOk(true);
+      setTimeout(() => setActaGuardadaOk(false), 2000);
     } finally {
       setGuardandoActa(false);
     }
@@ -644,6 +650,11 @@ export default function SuscriptorDetailModal({
               </form>
             ) : (
               <div>
+                {infoGuardadaOk && (
+                  <p className="mb-2 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400">
+                    ✓ Cambios guardados correctamente
+                  </p>
+                )}
                 <div className="mb-2 flex justify-end">
                   <button
                     onClick={abrirEdicionInfo}
@@ -771,6 +782,11 @@ export default function SuscriptorDetailModal({
             )}
 
             <div>
+              {actaGuardadaOk && (
+                <p className="mb-2 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400">
+                  ✓ Cambios guardados correctamente
+                </p>
+              )}
               <div className="mb-2 flex items-center justify-between">
                 <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-700 dark:text-slate-200">
                   <Gauge className="h-4 w-4 text-brand-500" />

@@ -30,6 +30,7 @@ export default function PerfilModal({ onCerrar }: { onCerrar: () => void }) {
   const [quitarFoto, setQuitarFoto] = useState(false);
   const [previewFoto, setPreviewFoto] = useState<string | null>(usuario?.foto ? urlFoto(usuario.foto) : null);
   const [guardando, setGuardando] = useState(false);
+  const [guardadoOk, setGuardadoOk] = useState(false);
   const { error, run } = useErrorHandler();
   const { pedirConfirmacion, modal: modalConfirmacion } = useConfirm();
 
@@ -66,7 +67,8 @@ export default function PerfilModal({ onCerrar }: { onCerrar: () => void }) {
         quitarFoto,
       });
       await refrescarUsuario();
-      onCerrar();
+      setGuardadoOk(true);
+      setTimeout(onCerrar, 1100);
     });
     setGuardando(false);
   }
@@ -85,6 +87,11 @@ export default function PerfilModal({ onCerrar }: { onCerrar: () => void }) {
         {error && (
           <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-400">
             {error}
+          </div>
+        )}
+        {guardadoOk && (
+          <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-400">
+            ✓ Cambios guardados correctamente
           </div>
         )}
 
