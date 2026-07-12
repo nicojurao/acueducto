@@ -1042,7 +1042,7 @@ export default function SuscriptorDetailModal({
                           accept="image/*"
                           multiple
                           onChange={async (e) => setFotos(await comprimirFotos(Array.from(e.target.files ?? [])))}
-                          className={inputClass}
+                          className={`${inputClass} w-full`}
                         />
                         {fotos.length > 0 && (
                           <div className="mt-2 flex flex-wrap gap-2">
@@ -1101,7 +1101,7 @@ export default function SuscriptorDetailModal({
                         type="file"
                         accept="image/*,application/pdf"
                         onChange={(e) => setActaFirmadaArchivo(e.target.files?.[0] ?? null)}
-                        className={inputClass}
+                        className={`${inputClass} w-full`}
                       />
                     </div>
                   )}
