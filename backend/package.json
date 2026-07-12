@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
+    "test": "vitest run",
     "start": "node dist/src/index.js",
     "import": "tsx scripts/import-excel.ts",
     "split-nombres": "tsx scripts/split-nombres.ts",
@@ -25,6 +26,8 @@
     "minio": "^8.0.7",
     "multer": "^2.0.0",
     "pdfkit": "^0.15.0",
+    "pino": "^10.3.1",
+    "pino-http": "^11.0.0",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
@@ -37,6 +40,7 @@
     "@types/pdfkit": "^0.13.4",
     "prisma": "^5.20.0",
     "tsx": "^4.19.0",
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.10"
   }
 }

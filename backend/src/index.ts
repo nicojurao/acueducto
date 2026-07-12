@@ -8,6 +8,8 @@ import "express-async-errors";
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
+import pinoHttp from "pino-http";
+import { logger } from "./lib/logger.js";
 import { suscriptoresRouter } from "./routes/suscriptores.js";
 import { medidoresRouter } from "./routes/medidores.js";
 import { lecturasRouter } from "./routes/lecturas.js";
@@ -66,6 +68,16 @@ app.use(
   })
 );
 app.use(express.json());
+app.use(
+  pinoHttp({
+    logger,
+    // El token de sesión no debe quedar en texto plano en los logs (se filtra al log
+    // igual que a cualquier otro almacenamiento, y a diferencia de la contraseña ya sí
+    // circula en cada request autenticado).
+    redact: ["req.headers.authorization", "req.headers.cookie"],
+    autoLogging: { ignore: (req) => req.url === "/api/health" },
+  })
+);
 
 // Las fotos (actas, lecturas, novedades, perfil de usuario) viven en MinIO, no en disco.
 // Requieren sesión igual que el resto de la app — como <img src>/<a href> no pueden mandar
@@ -123,8 +135,8 @@ app.use("/api/historial", requirePermiso("historial"), historialRouter);
 // Red de seguridad final: cualquier error que llegue hasta acá (gracias a "express-async-errors")
 // se responde como 500 en vez de dejar caer el proceso completo. Debe ir después de todas las
 // rutas — Express identifica el middleware de errores por tener 4 argumentos.
-app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error(err);
+app.use((err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  (req.log ?? logger).error({ err }, "Error no capturado en un handler de ruta");
   if (res.headersSent) return;
   res.status(500).json({ error: "Error interno del servidor" });
 });
@@ -132,10 +144,10 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 // Respaldo adicional para lo que quede fuera del ciclo de request de Express (ej. una promesa
 // suelta en un setInterval/callback). Solo loguea — no intenta seguir "como si nada" porque el
 // estado del proceso podría haber quedado inconsistente, pero al menos no lo tumba en caliente.
-process.on("unhandledRejection", (err) => console.error("unhandledRejection:", err));
-process.on("uncaughtException", (err) => console.error("uncaughtException:", err));
+process.on("unhandledRejection", (err) => logger.error({ err }, "unhandledRejection"));
+process.on("uncaughtException", (err) => logger.error({ err }, "uncaughtException"));
 
 const port = process.env.PORT ? Number(process.env.PORT) : 3001;
 app.listen(port, () => {
-  console.log(`Backend escuchando en puerto ${port}`);
+  logger.info(`Backend escuchando en puerto ${port}`);
 });

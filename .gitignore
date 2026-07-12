@@ -6,5 +6,6 @@ minio_data/
 backup/postgres/
 backup/disco-log.txt
 backup/ALERTA_DISCO.txt
+backup/minio_espejo/
 .claude/
 *.xlsx
