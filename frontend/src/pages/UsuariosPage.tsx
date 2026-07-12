@@ -74,7 +74,6 @@ function UsuarioModal({
   const [verPassword, setVerPassword] = useState(false);
   const { error, run } = useErrorHandler();
   const [guardando, setGuardando] = useState(false);
-  const [guardadoOk, setGuardadoOk] = useState(false);
   const { pedirConfirmacion, modal: modalConfirmacion } = useConfirm();
   const { saliendo, cerrar } = useCierreAnimado(onCerrar);
 
@@ -126,8 +125,7 @@ function UsuarioModal({
         });
       }
       await onGuardado();
-      setGuardadoOk(true);
-      setTimeout(cerrar, 1100);
+      cerrar();
     });
     setGuardando(false);
   }
@@ -150,12 +148,6 @@ function UsuarioModal({
             {error}
           </div>
         )}
-        {guardadoOk && (
-          <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-400">
-            ✓ Cambios guardados correctamente
-          </div>
-        )}
-
         {/* autoComplete="off" + name no genérico evita que el navegador rellene esto con las
             credenciales de la sesión activa, ya que "parece" un formulario de login */}
         <form onSubmit={onSubmit} autoComplete="off" className="flex flex-col gap-3">

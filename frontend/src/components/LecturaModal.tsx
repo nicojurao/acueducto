@@ -58,12 +58,6 @@ export default function LecturaModal({
   const [camaraAbierta, setCamaraAbierta] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [obteniendoUbicacion, setObteniendoUbicacion] = useState(false);
-  const [avisoGuardado, setAvisoGuardado] = useState<string | null>(null);
-
-  function mostrarAvisoGuardado(mensaje: string) {
-    setAvisoGuardado(mensaje);
-    setTimeout(() => setAvisoGuardado(null), 2000);
-  }
 
   const [motivo, setMotivo] = useState("");
   const [fotosNovedad, setFotosNovedad] = useState<File[]>([]);
@@ -94,7 +88,6 @@ export default function LecturaModal({
           setFoto(null);
           setQuitarFoto(false);
           setEditando(false);
-          mostrarAvisoGuardado("✓ Lectura actualizada");
           onCambio();
         });
       } else {
@@ -120,7 +113,6 @@ export default function LecturaModal({
           });
           setNovedad(null);
           setFoto(null);
-          mostrarAvisoGuardado("✓ Lectura guardada");
           onCambio();
         } catch (err) {
           if (!esErrorDeRed(err)) throw err;
@@ -149,7 +141,6 @@ export default function LecturaModal({
             creadoEn: new Date().toISOString(),
           });
           setFoto(null);
-          mostrarAvisoGuardado("✓ Guardada en el dispositivo, se subirá al recuperar conexión");
           onCambio();
         }
       }
@@ -196,7 +187,6 @@ export default function LecturaModal({
       setModoNovedad(false);
       setMotivo("");
       setFotosNovedad([]);
-      mostrarAvisoGuardado("✓ Novedad guardada");
       onCambio();
     } catch (err) {
       if (!esErrorDeRed(err)) {
@@ -218,7 +208,6 @@ export default function LecturaModal({
       setModoNovedad(false);
       setMotivo("");
       setFotosNovedad([]);
-      mostrarAvisoGuardado("✓ Guardada en el dispositivo, se subirá al recuperar conexión");
       onCambio();
     }
     setGuardando(false);
@@ -258,11 +247,6 @@ export default function LecturaModal({
           {error && (
             <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-400">
               {error}
-            </div>
-          )}
-          {avisoGuardado && (
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-400">
-              {avisoGuardado}
             </div>
           )}
 

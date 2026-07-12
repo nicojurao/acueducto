@@ -25,7 +25,6 @@ function RolModal({
   const [permisos, setPermisos] = useState<string[]>(rol?.permisos ?? []);
   const { error, run } = useErrorHandler();
   const [guardando, setGuardando] = useState(false);
-  const [guardadoOk, setGuardadoOk] = useState(false);
   const { pedirConfirmacion, modal: modalConfirmacion } = useConfirm();
   const { saliendo, cerrar } = useCierreAnimado(onCerrar);
 
@@ -48,8 +47,7 @@ function RolModal({
         await api.roles.create({ nombre, descripcion, permisos });
       }
       await onGuardado();
-      setGuardadoOk(true);
-      setTimeout(cerrar, 1100);
+      cerrar();
     });
     setGuardando(false);
   }
@@ -72,12 +70,6 @@ function RolModal({
             {error}
           </div>
         )}
-        {guardadoOk && (
-          <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-400">
-            ✓ Cambios guardados correctamente
-          </div>
-        )}
-
         <form onSubmit={onSubmit} className="flex flex-col gap-3">
           <label className={labelClass}>
             Nombre del rol

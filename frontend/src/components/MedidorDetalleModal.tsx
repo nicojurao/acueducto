@@ -37,7 +37,6 @@ export default function MedidorDetalleModal({
   const [actaCalibracionArchivo, setActaCalibracionArchivo] = useState<File | null>(null);
   const [guardando, setGuardando] = useState(false);
   const [subiendo, setSubiendo] = useState(false);
-  const [guardadoOk, setGuardadoOk] = useState(false);
   const { error, run } = useErrorHandler();
   const { usuario } = useAuth();
   const { pedirConfirmacion, modal: modalConfirmacion } = useConfirm();
@@ -66,8 +65,7 @@ export default function MedidorDetalleModal({
           await api.medidores.subirActaCalibracion(medidor.id, actaCalibracionArchivo);
         }
         onCambio();
-        setGuardadoOk(true);
-        setTimeout(cerrar, 1100);
+        cerrar();
       } finally {
         setGuardando(false);
       }
@@ -100,12 +98,6 @@ export default function MedidorDetalleModal({
             {error}
           </p>
         )}
-        {guardadoOk && (
-          <p className="mb-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400">
-            ✓ Cambios guardados correctamente
-          </p>
-        )}
-
         <div className="space-y-3">
           <label className="block text-sm">
             <span className="mb-1 block text-slate-600 dark:text-slate-300">Serial</span>
