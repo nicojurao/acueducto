@@ -964,9 +964,9 @@ export default function SuscriptorDetailModal({
                         onChange={(e) => setFormActa({ ...formActa, observaciones: e.target.value })}
                         className={`${inputClass} min-h-[60px]`}
                       />
-                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                       {editandoMedidorId && (
-                        <div>
+                        <div className="min-w-0">
                           <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">
                             Acta de calibración (escaneada)
                           </label>
@@ -1008,7 +1008,7 @@ export default function SuscriptorDetailModal({
                           />
                         </div>
                       )}
-                      <div>
+                      <div className="min-w-0">
                         {fotosExistentes.length > 0 && (
                           <>
                             <label className="mb-1 block text-xs font-medium text-slate-700">Fotos actuales</label>
@@ -1057,6 +1057,7 @@ export default function SuscriptorDetailModal({
                           </div>
                         )}
                   </div>
+                  </div>
                   {editandoMedidorId && (
                     <div>
                       <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">
@@ -1104,7 +1105,6 @@ export default function SuscriptorDetailModal({
                       />
                     </div>
                   )}
-                  </div>
                   <div className="flex gap-2">
                     <button
                       type="submit"
