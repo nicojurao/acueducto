@@ -24,6 +24,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
 import { urlFoto } from "../api/client";
 import PerfilModal from "./PerfilModal";
+import GlobalSearch from "./GlobalSearch";
 
 type Link = { to: string; label: string; icon: typeof LayoutDashboard; permiso?: string | string[] };
 type Entrada = Link | { label: string; icon: typeof LayoutDashboard; children: Link[] };
@@ -149,6 +150,8 @@ export default function Sidebar({ abierto, onCerrar }: { abierto: boolean; onCer
           </button>
         )}
         {perfilAbierto && <PerfilModal onCerrar={() => setPerfilAbierto(false)} />}
+
+        <GlobalSearch onNavegar={onCerrar} />
 
         <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
           {entradasVisibles.map((e) =>

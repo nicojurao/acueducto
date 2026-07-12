@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Home, Users, Gauge, Droplet, Warehouse, Package, DollarSign, ArrowRight } from "lucide-react";
+import { Home, Users, Gauge, Droplet, Warehouse, Package, DollarSign, ArrowRight, AlertTriangle } from "lucide-react";
 import { api, InventarioKpis } from "../api/client";
 import { useAuth } from "../contexts/AuthContext";
 import KpiCard from "../components/KpiCard";
@@ -35,6 +35,39 @@ function fmt(n: number, decimales = 0): string {
 
 function fmtMoneda(n: number): string {
   return n.toLocaleString("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 });
+}
+
+// Banner de alertas para no obligar a entrar al dashboard/atípicos a diario solo para ver si
+// hay algo pendiente de revisar: lecturas sin tomar y consumos atípicos del periodo vigente.
+function AlertasProactivas() {
+  const [kpis, setKpis] = useState<MedicionKpis | null>(null);
+  const [atipicos, setAtipicos] = useState<number | null>(null);
+
+  useEffect(() => {
+    api.dashboard.kpis(periodoActual()).then(setKpis);
+    api.dashboard.atipicos(periodoActual()).then((r) => setAtipicos(r.length));
+  }, []);
+
+  const lecturasPendientes = kpis?.lecturasPendientes ?? 0;
+  if (lecturasPendientes === 0 && (atipicos ?? 0) === 0) return null;
+
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-700/50 dark:bg-amber-900/20 sm:flex-row sm:items-center sm:gap-4">
+      <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
+      <div className="flex flex-1 flex-wrap items-center gap-x-4 gap-y-1 text-amber-800 dark:text-amber-300">
+        {lecturasPendientes > 0 && (
+          <Link to="/lecturas" className="hover:underline">
+            <strong>{lecturasPendientes}</strong> predio{lecturasPendientes === 1 ? "" : "s"} sin lectura este mes
+          </Link>
+        )}
+        {(atipicos ?? 0) > 0 && (
+          <Link to="/atipicos" className="hover:underline">
+            <strong>{atipicos}</strong> consumo{atipicos === 1 ? "" : "s"} atípico{atipicos === 1 ? "" : "s"} sin revisar
+          </Link>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function SeccionMedicion() {
@@ -131,6 +164,7 @@ export default function InicioPage() {
         </p>
       ) : (
         <div className="space-y-6">
+          {puedeMedicion && <AlertasProactivas />}
           {puedeMedicion && <SeccionMedicion />}
           {puedeInventario && <SeccionInventario />}
         </div>

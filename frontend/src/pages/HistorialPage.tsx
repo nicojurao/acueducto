@@ -29,6 +29,13 @@ export default function HistorialPage() {
   const [usuarioFiltro, setUsuarioFiltro] = useState("");
   const [desde, setDesde] = useState("");
   const [hasta, setHasta] = useState("");
+  const [campoFiltro, setCampoFiltro] = useState("");
+  const [campoDebounced, setCampoDebounced] = useState("");
+
+  useEffect(() => {
+    const t = setTimeout(() => setCampoDebounced(campoFiltro.trim()), 300);
+    return () => clearTimeout(t);
+  }, [campoFiltro]);
 
   useEffect(() => {
     api.usuarios.list().then(setUsuarios);
@@ -42,15 +49,16 @@ export default function HistorialPage() {
         usuarioId: usuarioFiltro ? Number(usuarioFiltro) : undefined,
         desde: desde || undefined,
         hasta: hasta || undefined,
+        campo: campoDebounced || undefined,
       })
       .then((r) => {
         setCambios(r.data);
         setTotal(r.total);
       })
       .finally(() => setCargando(false));
-  }, [pagina, porPagina, entidadFiltro, usuarioFiltro, desde, hasta]);
+  }, [pagina, porPagina, entidadFiltro, usuarioFiltro, desde, hasta, campoDebounced]);
 
-  useEffect(() => setPagina(1), [entidadFiltro, usuarioFiltro, desde, hasta]);
+  useEffect(() => setPagina(1), [entidadFiltro, usuarioFiltro, desde, hasta, campoDebounced]);
 
   const totalPaginas = Math.max(1, Math.ceil(total / porPagina));
 
@@ -83,6 +91,12 @@ export default function HistorialPage() {
           Hasta
           <input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} className={inputClass} />
         </label>
+        <input
+          placeholder="Filtrar por campo (ej. Serial, Estrato...)"
+          value={campoFiltro}
+          onChange={(e) => setCampoFiltro(e.target.value)}
+          className={`${inputClass} w-full max-w-xs`}
+        />
       </div>
 
       {cargando ? (

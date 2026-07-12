@@ -604,7 +604,10 @@ export const api = {
         | { ok: false; totalFilas: number; filasConProblemas: number; reporteBase64: string }
       >("/api/suscriptores/import/validar", formData);
     },
-    export: () => descargarArchivo("/api/suscriptores/export", "plantilla_suscriptores.xlsx"),
+    export: (ids?: number[]) => {
+      const qs = ids && ids.length > 0 ? `?ids=${ids.join(",")}` : "";
+      return descargarArchivo(`/api/suscriptores/export${qs}`, "plantilla_suscriptores.xlsx");
+    },
   },
   barrios: {
     list: () => request<Barrio[]>("/api/barrios"),
@@ -1029,6 +1032,7 @@ export const api = {
     kpis: () => request<InventarioKpis>("/api/inventario/kpis"),
   },
   lecturas: {
+    resumen: (periodo: string) => request<{ total: number; tomadas: number }>(`/api/lecturas/resumen?periodo=${periodo}`),
     listByPeriodo: (periodo: string, ruta?: string) => {
       const qs = new URLSearchParams({ periodo });
       if (ruta) qs.set("ruta", ruta);

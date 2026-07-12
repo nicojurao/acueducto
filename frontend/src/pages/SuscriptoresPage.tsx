@@ -12,6 +12,7 @@ import {
   Plus,
   Trash2,
   Pencil,
+  Download,
 } from "lucide-react";
 import {
   api,
@@ -28,6 +29,7 @@ import SuscriptorDetailModal from "../components/SuscriptorDetailModal";
 import ImportExcelModal from "../components/ImportExcelModal";
 import { useConfirm, useErrorHandler } from "../components/ConfirmModal";
 import { useEsMovil } from "../lib/useEsMovil";
+import { SkeletonTabla } from "../components/Skeleton";
 
 const inputClass =
   "rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:placeholder:text-slate-500";
@@ -91,6 +93,22 @@ function ListadoTab() {
   const [importAbierto, setImportAbierto] = useState(false);
   const [cargando, setCargando] = useState(true);
   const [detalleId, setDetalleId] = useState<number | null>(null);
+  const [seleccionados, setSeleccionados] = useState<Set<number>>(new Set());
+
+  function alternarSeleccion(id: number) {
+    setSeleccionados((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function alternarSeleccionTodos() {
+    setSeleccionados((prev) =>
+      prev.size === suscriptores.length ? new Set() : new Set(suscriptores.map((s) => s.id))
+    );
+  }
 
   useEffect(() => {
     api.suscriptores.barrios().then(setBarrios);
@@ -124,6 +142,7 @@ function ListadoTab() {
     });
     setSuscriptores(resultado.data);
     setTotal(resultado.total);
+    setSeleccionados(new Set());
     setCargando(false);
   }
 
@@ -146,7 +165,7 @@ function ListadoTab() {
 
   return (
     <div>
-      <div className="mb-3 sm:mb-4">
+      <div className="mb-3 flex flex-wrap items-center gap-2 sm:mb-4">
         <button
           onClick={() => setImportAbierto((v) => !v)}
           className="flex items-center gap-1.5 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
@@ -154,6 +173,15 @@ function ListadoTab() {
           <Upload className="h-4 w-4" />
           Importar / exportar Excel
         </button>
+        {seleccionados.size > 0 && (
+          <button
+            onClick={() => api.suscriptores.export([...seleccionados])}
+            className="flex items-center gap-1.5 rounded-lg border border-brand-200 px-4 py-2 text-sm font-medium text-brand-700 hover:bg-brand-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+          >
+            <Download className="h-4 w-4" />
+            Exportar seleccionados ({seleccionados.size})
+          </button>
+        )}
       </div>
 
       {importAbierto && (
@@ -251,13 +279,21 @@ function ListadoTab() {
       </div>
 
       {cargando ? (
-        <p className="text-slate-700 dark:text-slate-400">Cargando...</p>
+        <SkeletonTabla columnas={7} filas={porPagina} />
       ) : (
         <>
           <div className="overflow-x-auto rounded-xl border border-brand-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-brand-100 bg-brand-50 text-left text-brand-800 dark:border-slate-800 dark:bg-slate-800/50 dark:text-slate-400">
+                  <th className="w-8 px-3 py-2 sm:px-4 sm:py-3">
+                    <input
+                      type="checkbox"
+                      checked={suscriptores.length > 0 && seleccionados.size === suscriptores.length}
+                      onChange={alternarSeleccionTodos}
+                      className="h-4 w-4 rounded border-slate-300"
+                    />
+                  </th>
                   <th className="px-3 py-2 font-medium sm:px-4 sm:py-3">NUID</th>
                   <th className="px-3 py-2 font-medium sm:px-4 sm:py-3">Nombre</th>
                   <th className="px-3 py-2 font-medium sm:px-4 sm:py-3">Ruta</th>
@@ -274,6 +310,14 @@ function ListadoTab() {
                     onClick={() => setDetalleId(s.id)}
                     className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/40"
                   >
+                    <td className="px-3 py-1.5 sm:px-4 sm:py-2.5" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={seleccionados.has(s.id)}
+                        onChange={() => alternarSeleccion(s.id)}
+                        className="h-4 w-4 rounded border-slate-300"
+                      />
+                    </td>
                     <td className="px-3 py-1.5 sm:px-4 sm:py-2.5">{s.codigo}</td>
                     <td className="px-3 py-1.5 sm:px-4 sm:py-2.5">{s.nombre}</td>
                     <td className="px-3 py-1.5 sm:px-4 sm:py-2.5">{s.ruta ?? "-"}</td>
@@ -299,7 +343,7 @@ function ListadoTab() {
                 ))}
                 {suscriptores.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-4 py-6 text-center text-slate-600">
+                    <td colSpan={8} className="px-4 py-6 text-center text-slate-600">
                       Sin resultados.
                     </td>
                   </tr>

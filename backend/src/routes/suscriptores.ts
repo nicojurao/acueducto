@@ -116,8 +116,20 @@ suscriptoresRouter.get("/barrios", async (_req, res) => {
 // Descarga una plantilla .xlsx con los suscriptores ya cargados, en el mismo formato
 // de columnas que espera POST /import. Sirve como punto de partida para editar datos
 // existentes o agregar filas nuevas (el NUID sigue siendo la clave al volver a subirla).
-suscriptoresRouter.get("/export", soloAvanzado, async (_req, res) => {
+suscriptoresRouter.get("/export", soloAvanzado, async (req, res) => {
+  // Sin "ids" exporta todo el catálogo (uso normal: plantilla de import/export). Con "ids"
+  // (coma-separado) exporta solo esos suscriptores — lo usa el botón "Exportar seleccionados"
+  // del listado, para no obligar a exportar/filtrar todo cuando solo interesan unas pocas filas.
+  const { ids } = req.query;
+  const idsFiltro = ids
+    ? String(ids)
+        .split(",")
+        .map(Number)
+        .filter((n) => !Number.isNaN(n))
+    : undefined;
+
   const suscriptores = await prisma.suscriptor.findMany({
+    where: idsFiltro ? { id: { in: idsFiltro } } : undefined,
     orderBy: { codigo: "asc" },
     include: { barrioCat: true, estratoCat: true },
   });

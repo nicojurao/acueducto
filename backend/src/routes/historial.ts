@@ -24,7 +24,7 @@ historialRouter.get("/", async (req, res) => {
   const where: any = {};
   if (entidad) where.entidad = String(entidad);
   if (usuarioId) where.usuarioId = Number(usuarioId);
-  if (campo) where.campo = String(campo);
+  if (campo) where.campo = { contains: String(campo), mode: "insensitive" };
   if (desde || hasta) {
     where.fecha = {};
     if (desde) where.fecha.gte = new Date(String(desde));

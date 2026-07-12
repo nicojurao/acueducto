@@ -91,6 +91,21 @@ lecturasRouter.get("/", async (req, res) => {
   res.json(resultado);
 });
 
+// Resumen rápido de avance de un periodo (para la barra de progreso de LecturasPage): cuántos
+// medidores activos con suscriptor hay en total y cuántos ya tienen lectura tomada ese mes.
+lecturasRouter.get("/resumen", async (req, res) => {
+  const { periodo } = req.query;
+  if (!periodo) return res.status(400).json({ error: "periodo es requerido (YYYY-MM)" });
+  const fecha = primerDiaMes(String(periodo));
+
+  const where = { activo: true, suscriptorId: { not: null } };
+  const [total, tomadas] = await Promise.all([
+    prisma.medidor.count({ where }),
+    prisma.medidor.count({ where: { ...where, lecturas: { some: { periodo: fecha } } } }),
+  ]);
+  res.json({ total, tomadas });
+});
+
 // Registrar una lectura nueva de un medidor para un periodo. La foto del medidor mostrando
 // la medida es obligatoria (evidencia); las coordenadas son opcionales (si el navegador/celular
 // no da permiso de ubicación, igual se guarda la lectura). Si había una novedad registrada para

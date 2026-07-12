@@ -19,6 +19,7 @@ import { api, LecturaPendiente } from "../api/client";
 import LecturaModal from "../components/LecturaModal";
 import { PendienteLectura, PendienteNovedad, useColaPendientes, useColaPendientesNovedad } from "../lib/offlineQueue";
 import { useEsMovil } from "../lib/useEsMovil";
+import { SkeletonLista } from "../components/Skeleton";
 
 function periodoActual(): string {
   const now = new Date();
@@ -66,6 +67,7 @@ export default function LecturasPage() {
   const [pagina, setPagina] = useState(1);
   const [seleccionada, setSeleccionada] = useState<LecturaPendiente | null>(null);
   const [importAbierto, setImportAbierto] = useState(false);
+  const [resumen, setResumen] = useState<{ total: number; tomadas: number } | null>(null);
   const { pendientes, sincronizando, online, sincronizarAhora } = useColaPendientes();
   const {
     pendientes: pendientesNovedad,
@@ -127,6 +129,11 @@ export default function LecturasPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [periodo, pagina, porPagina, filtroEstado, busquedaDebounced, medidorResaltado]);
 
+  function cargarResumen() {
+    api.lecturas.resumen(periodo).then(setResumen).catch(() => {});
+  }
+  useEffect(cargarResumen, [periodo]);
+
   // Cualquier cambio en los filtros vuelve a la primera página.
   useEffect(() => {
     setPagina(1);
@@ -138,7 +145,10 @@ export default function LecturasPage() {
   // verse "pendiente" y pase a verde de una vez, sin esperar a recargar la página a mano.
   const pendientesPrevRef = useRef(totalPendientes);
   useEffect(() => {
-    if (totalPendientes < pendientesPrevRef.current) cargar();
+    if (totalPendientes < pendientesPrevRef.current) {
+      cargar();
+      cargarResumen();
+    }
     pendientesPrevRef.current = totalPendientes;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [totalPendientes]);
@@ -157,6 +167,7 @@ export default function LecturasPage() {
   // sincroniza la fila abierta para que el modal muestre el estado más reciente.
   async function onCambioModal() {
     const data = await cargar();
+    cargarResumen();
     if (seleccionada) {
       const actualizada = data.find((f) => f.medidorId === seleccionada.medidorId);
       if (actualizada) setSeleccionada(actualizada);
@@ -207,6 +218,24 @@ export default function LecturasPage() {
       </div>
 
       {importAbierto && <InformeLecturasPanel onCerrar={() => setImportAbierto(false)} />}
+
+      {resumen && resumen.total > 0 && (
+        <div className="mb-3 sm:mb-4">
+          <div className="mb-1 flex items-center justify-between text-xs text-slate-600 dark:text-slate-400">
+            <span>
+              Avance del periodo: <strong className="text-slate-800 dark:text-slate-200">{resumen.tomadas}</strong> de{" "}
+              {resumen.total} tomadas
+            </span>
+            <span>{Math.round((resumen.tomadas / resumen.total) * 100)}%</span>
+          </div>
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+            <div
+              className="h-full rounded-full bg-brand-500 transition-all"
+              style={{ width: `${Math.min(100, Math.round((resumen.tomadas / resumen.total) * 100))}%` }}
+            />
+          </div>
+        </div>
+      )}
 
       <div className="mb-3 flex flex-wrap items-center gap-2 sm:mb-4 sm:gap-3">
         <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
@@ -293,7 +322,7 @@ export default function LecturasPage() {
       )}
 
       {cargando ? (
-        <p className="text-slate-700 dark:text-slate-400">Cargando...</p>
+        <SkeletonLista filas={porPagina} />
       ) : verColaOffline && resultados.length === 0 ? (
         <p className="rounded-xl border border-brand-200 bg-white px-4 py-6 text-center text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900">
           No hay pendientes por sincronizar en este periodo.
