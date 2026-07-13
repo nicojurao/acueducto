@@ -571,7 +571,15 @@ export const api = {
     listPaginado: (
       page: number,
       limit: number,
-      filtros?: { q?: string; estadoFacturacion?: string; barrioId?: number; estratoId?: number; estadoPredio?: string }
+      filtros?: {
+        q?: string;
+        estadoFacturacion?: string;
+        barrioId?: number;
+        estratoId?: number;
+        estadoPredio?: string;
+        sort?: string;
+        dir?: "asc" | "desc";
+      }
     ) => {
       const qs = new URLSearchParams({ page: String(page), limit: String(limit) });
       if (filtros?.q) qs.set("q", filtros.q);
@@ -579,6 +587,8 @@ export const api = {
       if (filtros?.barrioId) qs.set("barrioId", String(filtros.barrioId));
       if (filtros?.estratoId) qs.set("estratoId", String(filtros.estratoId));
       if (filtros?.estadoPredio) qs.set("estadoPredio", filtros.estadoPredio);
+      if (filtros?.sort) qs.set("sort", filtros.sort);
+      if (filtros?.dir) qs.set("dir", filtros.dir);
       return request<{ data: Suscriptor[]; total: number; page: number; limit: number }>(
         `/api/suscriptores?${qs}`
       );
@@ -643,6 +653,8 @@ export const api = {
         modeloId?: number;
         diametroId?: number;
         tipo?: string;
+        sort?: string;
+        dir?: "asc" | "desc";
       }
     ) => {
       const qs = new URLSearchParams({ page: String(page), limit: String(limit) });
@@ -653,6 +665,8 @@ export const api = {
       if (filtros?.modeloId) qs.set("modeloId", String(filtros.modeloId));
       if (filtros?.diametroId) qs.set("diametroId", String(filtros.diametroId));
       if (filtros?.tipo) qs.set("tipo", filtros.tipo);
+      if (filtros?.sort) qs.set("sort", filtros.sort);
+      if (filtros?.dir) qs.set("dir", filtros.dir);
       return request<{ data: Medidor[]; total: number; page: number; limit: number }>(`/api/medidores?${qs}`);
     },
     create: (data: Partial<Medidor> & { marcaId?: number; modeloId?: number; diametroId?: number }) =>
@@ -870,11 +884,17 @@ export const api = {
       if (filtros?.q) qs.set("q", filtros.q);
       return request<ItemInventario[]>(`/api/inventario/items?${qs}`);
     },
-    listPaginado: (page: number, limit: number, filtros?: { categoria?: number; estado?: string; q?: string }) => {
+    listPaginado: (
+      page: number,
+      limit: number,
+      filtros?: { categoria?: number; estado?: string; q?: string; sort?: string; dir?: "asc" | "desc" }
+    ) => {
       const qs = new URLSearchParams({ page: String(page), limit: String(limit) });
       if (filtros?.categoria) qs.set("categoria", String(filtros.categoria));
       if (filtros?.estado) qs.set("estado", filtros.estado);
       if (filtros?.q) qs.set("q", filtros.q);
+      if (filtros?.sort) qs.set("sort", filtros.sort);
+      if (filtros?.dir) qs.set("dir", filtros.dir);
       return request<{ data: ItemInventario[]; total: number; page: number; limit: number }>(
         `/api/inventario/items?${qs}`
       );

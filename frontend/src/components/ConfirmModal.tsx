@@ -139,7 +139,15 @@ export function useErrorHandler() {
       setError(null);
       await fn();
     } catch (err) {
-      setError(err instanceof Error ? err.message.replace(/^Error \d+: /, "") : "Error inesperado");
+      // Un TypeError de fetch significa que la petición ni llegó al servidor ("Failed to
+      // fetch", en inglés y críptico) — se traduce a algo accionable. OJO: el error original
+      // se relanza intacto, porque la cola offline detecta "err instanceof TypeError" para
+      // decidir si guarda en el dispositivo (ver offlineQueue.ts / LecturaModal.tsx).
+      if (err instanceof TypeError) {
+        setError("Sin conexión con el servidor. Revisa tu internet e intenta de nuevo.");
+      } else {
+        setError(err instanceof Error ? err.message.replace(/^Error \d+: /, "") : "Error inesperado");
+      }
       throw err;
     }
   }

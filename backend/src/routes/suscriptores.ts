@@ -84,13 +84,35 @@ suscriptoresRouter.get("/", async (req, res) => {
   if (page) {
     const pageNum = Math.max(1, Number(page) || 1);
     const limitNum = Math.max(1, Number(limit) || 10);
+    // Orden por clic en el encabezado de la tabla. "codigo" (NUID, el default) compara numérico
+    // cuando ambos lados son números; el resto alfabético. Clave desconocida = cae al default.
+    const dir = String(req.query.dir) === "desc" ? -1 : 1;
+    const sortKey = String(req.query.sort ?? "codigo");
 
     const todos = await prisma.suscriptor.findMany({ where, include });
-    todos.sort((a, b) => {
-      const na = Number(a.codigo);
-      const nb = Number(b.codigo);
+
+    type Fila = (typeof todos)[number];
+    const numerico = (a: string, b: string) => {
+      const na = Number(a);
+      const nb = Number(b);
       if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
-      return a.codigo.localeCompare(b.codigo);
+      return a.localeCompare(b);
+    };
+    const CLAVES: Record<string, (s: Fila) => string> = {
+      codigo: (s) => s.codigo,
+      nombre: (s) => s.nombre,
+      ruta: (s) => s.ruta ?? "",
+      barrio: (s) => s.barrioCat?.nombre ?? "",
+      estrato: (s) => s.estratoCat?.codigo ?? "",
+      estadoPredio: (s) => s.estadoPredio,
+      estadoFacturacion: (s) => s.estadoFacturacion,
+    };
+    const clave = CLAVES[sortKey] ?? CLAVES.codigo;
+    todos.sort((a, b) => {
+      const va = clave(a);
+      const vb = clave(b);
+      const cmp = sortKey === "codigo" || sortKey === "estrato" ? numerico(va, vb) : va.localeCompare(vb);
+      return dir * cmp;
     });
 
     const total = todos.length;

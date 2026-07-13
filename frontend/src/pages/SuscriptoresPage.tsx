@@ -30,6 +30,9 @@ import ImportExcelModal from "../components/ImportExcelModal";
 import { useConfirm, useErrorHandler } from "../components/ConfirmModal";
 import { useEsMovil } from "../lib/useEsMovil";
 import { SkeletonTabla } from "../components/Skeleton";
+import BusquedaInput from "../components/BusquedaInput";
+import { useFiltroPersistente } from "../lib/useFiltroPersistente";
+import ThOrdenable, { Orden, alternarOrden } from "../components/ThOrdenable";
 
 const inputClass =
   "rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:placeholder:text-slate-500";
@@ -81,12 +84,18 @@ function ListadoTab() {
   const [total, setTotal] = useState(0);
   const [pagina, setPagina] = useState(1);
   const [porPagina, setPorPagina] = useState(() => (esMovil ? 5 : 10));
-  const [filtro, setFiltro] = useState("");
-  const [filtroDebounced, setFiltroDebounced] = useState("");
-  const [estadoFiltro, setEstadoFiltro] = useState(searchParams.get("estado") ?? "");
-  const [barrioFiltro, setBarrioFiltro] = useState("");
-  const [estratoFiltro, setEstratoFiltro] = useState("");
-  const [estadoPredioFiltro, setEstadoPredioFiltro] = useState("");
+  const [filtro, setFiltro] = useFiltroPersistente("suscriptores.q", "");
+  const [filtroDebounced, setFiltroDebounced] = useState(filtro);
+  // El query param (?estado=..., al llegar desde el Dashboard) le gana al filtro recordado.
+  const [estadoFiltro, setEstadoFiltro] = useFiltroPersistente("suscriptores.estado", "");
+  const [barrioFiltro, setBarrioFiltro] = useFiltroPersistente("suscriptores.barrio", "");
+  const [estratoFiltro, setEstratoFiltro] = useFiltroPersistente("suscriptores.estrato", "");
+  const [estadoPredioFiltro, setEstadoPredioFiltro] = useFiltroPersistente("suscriptores.predio", "");
+  useEffect(() => {
+    const e = searchParams.get("estado");
+    if (e) setEstadoFiltro(e);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [barrios, setBarrios] = useState<{ id: number; nombre: string }[]>([]);
   const [estratos, setEstratos] = useState<Estrato[]>([]);
   const [filtrosAbiertos, setFiltrosAbiertos] = useState(false);
@@ -94,6 +103,7 @@ function ListadoTab() {
   const [cargando, setCargando] = useState(true);
   const [detalleId, setDetalleId] = useState<number | null>(null);
   const [seleccionados, setSeleccionados] = useState<Set<number>>(new Set());
+  const [orden, setOrden] = useState<Orden>({ campo: "codigo", dir: "asc" });
 
   function alternarSeleccion(id: number) {
     setSeleccionados((prev) => {
@@ -139,6 +149,8 @@ function ListadoTab() {
       barrioId: barrioFiltro ? Number(barrioFiltro) : undefined,
       estratoId: estratoFiltro ? Number(estratoFiltro) : undefined,
       estadoPredio: estadoPredioFiltro,
+      sort: orden.campo,
+      dir: orden.dir,
     });
     setSuscriptores(resultado.data);
     setTotal(resultado.total);
@@ -149,7 +161,7 @@ function ListadoTab() {
   useEffect(() => {
     cargar();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pagina, porPagina, filtroDebounced, estadoFiltro, barrioFiltro, estratoFiltro, estadoPredioFiltro]);
+  }, [pagina, porPagina, filtroDebounced, estadoFiltro, barrioFiltro, estratoFiltro, estadoPredioFiltro, orden]);
 
   function limpiarFiltros() {
     setFiltro("");
@@ -199,12 +211,11 @@ function ListadoTab() {
 
       <div className="mb-3 flex flex-col gap-3 sm:mb-4">
         <div className="flex items-center gap-2">
-          <Search className="h-4 w-4 shrink-0 text-slate-600" />
-          <input
+          <BusquedaInput
             placeholder="Buscar por nombre, NUID o ruta..."
             value={filtro}
-            onChange={(e) => setFiltro(e.target.value)}
-            className={`${inputClass} w-full max-w-sm`}
+            onChange={setFiltro}
+            className="w-full max-w-sm"
           />
           <button
             onClick={() => setFiltrosAbiertos((v) => !v)}
@@ -294,13 +305,13 @@ function ListadoTab() {
                       className="h-4 w-4 rounded border-slate-300"
                     />
                   </th>
-                  <th className="px-3 py-2 font-medium sm:px-4 sm:py-3">NUID</th>
-                  <th className="px-3 py-2 font-medium sm:px-4 sm:py-3">Nombre</th>
-                  <th className="px-3 py-2 font-medium sm:px-4 sm:py-3">Ruta</th>
-                  <th className="hidden px-4 py-3 font-medium md:table-cell">Barrio</th>
-                  <th className="hidden px-4 py-3 font-medium md:table-cell">Estrato</th>
-                  <th className="hidden px-4 py-3 font-medium md:table-cell">Predio</th>
-                  <th className="px-3 py-2 font-medium sm:px-4 sm:py-3">Estado</th>
+                  <ThOrdenable campo="codigo" orden={orden} onOrdenar={(c) => setOrden(alternarOrden(orden, c))}>NUID</ThOrdenable>
+                  <ThOrdenable campo="nombre" orden={orden} onOrdenar={(c) => setOrden(alternarOrden(orden, c))}>Nombre</ThOrdenable>
+                  <ThOrdenable campo="ruta" orden={orden} onOrdenar={(c) => setOrden(alternarOrden(orden, c))}>Ruta</ThOrdenable>
+                  <ThOrdenable campo="barrio" orden={orden} onOrdenar={(c) => setOrden(alternarOrden(orden, c))} className="hidden px-4 py-3 font-medium md:table-cell">Barrio</ThOrdenable>
+                  <ThOrdenable campo="estrato" orden={orden} onOrdenar={(c) => setOrden(alternarOrden(orden, c))} className="hidden px-4 py-3 font-medium md:table-cell">Estrato</ThOrdenable>
+                  <ThOrdenable campo="estadoPredio" orden={orden} onOrdenar={(c) => setOrden(alternarOrden(orden, c))} className="hidden px-4 py-3 font-medium md:table-cell">Predio</ThOrdenable>
+                  <ThOrdenable campo="estadoFacturacion" orden={orden} onOrdenar={(c) => setOrden(alternarOrden(orden, c))}>Estado</ThOrdenable>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">

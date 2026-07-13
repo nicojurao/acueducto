@@ -20,6 +20,8 @@ import LecturaModal from "../components/LecturaModal";
 import { PendienteLectura, PendienteNovedad, useColaPendientes, useColaPendientesNovedad } from "../lib/offlineQueue";
 import { useEsMovil } from "../lib/useEsMovil";
 import { SkeletonLista } from "../components/Skeleton";
+import BusquedaInput from "../components/BusquedaInput";
+import { useFiltroPersistente } from "../lib/useFiltroPersistente";
 
 function periodoActual(): string {
   const now = new Date();
@@ -63,7 +65,7 @@ export default function LecturasPage() {
   const [busqueda, setBusqueda] = useState("");
   const [busquedaDebounced, setBusquedaDebounced] = useState("");
   const [verColaOffline, setVerColaOffline] = useState(false);
-  const [filtroEstado, setFiltroEstado] = useState<FiltroEstado>("todos");
+  const [filtroEstado, setFiltroEstado] = useFiltroPersistente<FiltroEstado>("lecturas.estado", "todos");
   const [pagina, setPagina] = useState(1);
   const [seleccionada, setSeleccionada] = useState<LecturaPendiente | null>(null);
   const [importAbierto, setImportAbierto] = useState(false);
@@ -248,15 +250,14 @@ export default function LecturasPage() {
           />
         </label>
         <div className="flex items-center gap-2">
-          <Search className="h-4 w-4 shrink-0 text-slate-600" />
-          <input
+          <BusquedaInput
             placeholder="Buscar por NUID, nombre o ruta..."
             value={busqueda}
-            onChange={(e) => {
-              setBusqueda(e.target.value);
+            onChange={(valor) => {
+              setBusqueda(valor);
               if (verColaOffline) setVerColaOffline(false);
             }}
-            className={`${inputClass} w-full max-w-sm`}
+            className="w-full max-w-sm"
             autoFocus
           />
         </div>

@@ -34,6 +34,9 @@ import { useConfirm, useErrorHandler } from "../components/ConfirmModal";
 import { useEsMovil } from "../lib/useEsMovil";
 import { SkeletonTabla, SkeletonLista } from "../components/Skeleton";
 import { useCierreAnimado } from "../lib/useCierreAnimado";
+import BusquedaInput from "../components/BusquedaInput";
+import { useFiltroPersistente } from "../lib/useFiltroPersistente";
+import ThOrdenable, { Orden, alternarOrden } from "../components/ThOrdenable";
 
 const inputClass =
   "rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:placeholder:text-slate-500";
@@ -97,18 +100,25 @@ function InventarioTab() {
   const [lotes, setLotes] = useState<Lote[]>([]);
   const [detalleMedidor, setDetalleMedidor] = useState<Medidor | null>(null);
   const [detalleSuscriptorId, setDetalleSuscriptorId] = useState<number | null>(null);
-  const [filtro, setFiltro] = useState("");
-  const [filtroDebounced, setFiltroDebounced] = useState("");
-  const [filtroEstado, setFiltroEstado] = useState(searchParams.get("estado") ?? "");
-  const [filtroMarca, setFiltroMarca] = useState("");
-  const [filtroCondicion, setFiltroCondicion] = useState("");
-  const [filtroModelo, setFiltroModelo] = useState("");
-  const [filtroDiametro, setFiltroDiametro] = useState("");
-  const [filtroTipo, setFiltroTipo] = useState("");
+  const [filtro, setFiltro] = useFiltroPersistente("medidores.q", "");
+  const [filtroDebounced, setFiltroDebounced] = useState(filtro);
+  // El query param (?estado=..., al llegar desde el Dashboard) le gana al filtro recordado.
+  const [filtroEstado, setFiltroEstado] = useFiltroPersistente("medidores.estado", "");
+  const [filtroMarca, setFiltroMarca] = useFiltroPersistente("medidores.marca", "");
+  const [filtroCondicion, setFiltroCondicion] = useFiltroPersistente("medidores.condicion", "");
+  const [filtroModelo, setFiltroModelo] = useFiltroPersistente("medidores.modelo", "");
+  const [filtroDiametro, setFiltroDiametro] = useFiltroPersistente("medidores.diametro", "");
+  const [filtroTipo, setFiltroTipo] = useFiltroPersistente("medidores.tipo", "");
+  useEffect(() => {
+    const e = searchParams.get("estado");
+    if (e) setFiltroEstado(e);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [diametros, setDiametros] = useState<DiametroMedidor[]>([]);
   const [filtrosAbiertos, setFiltrosAbiertos] = useState(false);
   const [pagina, setPagina] = useState(1);
-  const porPagina = esMovil ? 5 : 10;
+  const [porPagina, setPorPagina] = useState(() => (esMovil ? 5 : 10));
+  const [orden, setOrden] = useState<Orden>({ campo: "serial", dir: "asc" });
   const [cargando, setCargando] = useState(true);
   const { error, run } = useErrorHandler();
   const { pedirConfirmacion, modal } = useConfirm();
@@ -155,6 +165,8 @@ function InventarioTab() {
         modeloId: filtroModelo ? Number(filtroModelo) : undefined,
         diametroId: filtroDiametro ? Number(filtroDiametro) : undefined,
         tipo: filtroTipo,
+        sort: orden.campo,
+        dir: orden.dir,
       }),
       api.marcas.list(),
       api.modelos.list(),
@@ -174,7 +186,7 @@ function InventarioTab() {
   useEffect(() => {
     cargar();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pagina, porPagina, filtroDebounced, filtroEstado, filtroMarca, filtroCondicion, filtroModelo, filtroDiametro, filtroTipo]);
+  }, [pagina, porPagina, filtroDebounced, filtroEstado, filtroMarca, filtroCondicion, filtroModelo, filtroDiametro, filtroTipo, orden]);
 
   const modelosDeMarca = useMemo(
     () => modelos.filter((mo) => String(mo.marcaId) === nuevo.marcaId),
@@ -410,12 +422,11 @@ function InventarioTab() {
 
       <div className="mb-3 flex flex-col gap-3 sm:mb-4">
         <div className="flex items-center gap-2">
-          <Search className="h-4 w-4 shrink-0 text-slate-600" />
-          <input
+          <BusquedaInput
             placeholder="Buscar por serial, tipo o marca..."
             value={filtro}
-            onChange={(e) => setFiltro(e.target.value)}
-            className={`${inputClass} w-full max-w-sm`}
+            onChange={setFiltro}
+            className="w-full max-w-sm"
           />
           <button
             onClick={() => setFiltrosAbiertos((v) => !v)}
@@ -467,6 +478,16 @@ function InventarioTab() {
             <option value="volumetrico">Volumétrico</option>
             <option value="velocidad">Velocidad</option>
           </select>
+          <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+            Mostrar
+            <select value={porPagina} onChange={(e) => setPorPagina(Number(e.target.value))} className={inputClass}>
+              {[5, 10, 25, 50, 100].map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </label>
           {hayFiltrosActivos && (
             <button
               onClick={limpiarFiltros}
@@ -494,13 +515,13 @@ function InventarioTab() {
                     className="h-4 w-4 rounded border-slate-300"
                   />
                 </th>
-                <th className="px-3 py-2 font-medium sm:px-4 sm:py-3">Serial</th>
-                <th className="px-3 py-2 font-medium sm:px-4 sm:py-3">Tipo</th>
-                <th className="px-3 py-2 font-medium sm:px-4 sm:py-3">Marca</th>
-                <th className="px-3 py-2 font-medium sm:px-4 sm:py-3">Modelo</th>
-                <th className="px-3 py-2 font-medium sm:px-4 sm:py-3">Diámetro</th>
-                <th className="px-3 py-2 font-medium sm:px-4 sm:py-3">Lote</th>
-                <th className="px-3 py-2 font-medium sm:px-4 sm:py-3">Estado</th>
+                <ThOrdenable campo="serial" orden={orden} onOrdenar={(c) => setOrden(alternarOrden(orden, c))}>Serial</ThOrdenable>
+                <ThOrdenable campo="tipo" orden={orden} onOrdenar={(c) => setOrden(alternarOrden(orden, c))}>Tipo</ThOrdenable>
+                <ThOrdenable campo="marca" orden={orden} onOrdenar={(c) => setOrden(alternarOrden(orden, c))}>Marca</ThOrdenable>
+                <ThOrdenable campo="modelo" orden={orden} onOrdenar={(c) => setOrden(alternarOrden(orden, c))}>Modelo</ThOrdenable>
+                <ThOrdenable campo="diametro" orden={orden} onOrdenar={(c) => setOrden(alternarOrden(orden, c))}>Diámetro</ThOrdenable>
+                <ThOrdenable campo="lote" orden={orden} onOrdenar={(c) => setOrden(alternarOrden(orden, c))}>Lote</ThOrdenable>
+                <ThOrdenable campo="estado" orden={orden} onOrdenar={(c) => setOrden(alternarOrden(orden, c))}>Estado</ThOrdenable>
                 <th className="px-3 py-2 font-medium sm:px-4 sm:py-3"></th>
               </tr>
             </thead>

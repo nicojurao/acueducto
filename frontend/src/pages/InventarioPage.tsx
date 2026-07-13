@@ -40,6 +40,9 @@ import { useEsMovil } from "../lib/useEsMovil";
 import { useAuth } from "../contexts/AuthContext";
 import { SkeletonTabla, SkeletonLista } from "../components/Skeleton";
 import { useCierreAnimado } from "../lib/useCierreAnimado";
+import BusquedaInput from "../components/BusquedaInput";
+import { useFiltroPersistente } from "../lib/useFiltroPersistente";
+import ThOrdenable, { Orden, alternarOrden } from "../components/ThOrdenable";
 
 const GRID_STROKE = "#475569";
 
@@ -132,14 +135,15 @@ function ItemsTab({
   const { usuario } = useAuth();
   const puedeEditar = usuario?.permisos?.includes("inventario_avanzado") ?? false;
   const esMovil = useEsMovil();
-  const porPagina = esMovil ? 5 : 10;
+  const [porPagina, setPorPagina] = useState(() => (esMovil ? 5 : 10));
   const [filas, setFilas] = useState<ItemInventario[]>([]);
   const [total, setTotal] = useState(0);
   const [pagina, setPagina] = useState(1);
   const [cargando, setCargando] = useState(true);
-  const [busqueda, setBusqueda] = useState("");
-  const [busquedaDebounced, setBusquedaDebounced] = useState("");
-  const [categoriaFiltro, setCategoriaFiltro] = useState("");
+  const [busqueda, setBusqueda] = useFiltroPersistente("inventario.q", "");
+  const [busquedaDebounced, setBusquedaDebounced] = useState(busqueda);
+  const [categoriaFiltro, setCategoriaFiltro] = useFiltroPersistente("inventario.categoria", "");
+  const [orden, setOrden] = useState<Orden>({ campo: "nombre", dir: "asc" });
   const [modalAbierto, setModalAbierto] = useState<"nuevo" | ItemInventario | null>(null);
   const [detalle, setDetalle] = useState<ItemInventario | null>(null);
   const { pedirConfirmacion, modal } = useConfirm();
@@ -170,6 +174,8 @@ function ItemsTab({
       const resultado = await api.inventario.listPaginado(pagina, porPagina, {
         q: busquedaDebounced || undefined,
         categoria: categoriaFiltro ? Number(categoriaFiltro) : undefined,
+        sort: orden.campo,
+        dir: orden.dir,
       });
       setFilas(resultado.data);
       setTotal(resultado.total);
@@ -182,9 +188,9 @@ function ItemsTab({
   useEffect(() => {
     cargar();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pagina, porPagina, busquedaDebounced, categoriaFiltro]);
+  }, [pagina, porPagina, busquedaDebounced, categoriaFiltro, orden]);
 
-  useEffect(() => setPagina(1), [busquedaDebounced, categoriaFiltro]);
+  useEffect(() => setPagina(1), [busquedaDebounced, categoriaFiltro, porPagina]);
 
   function eliminar(item: ItemInventario) {
     pedirConfirmacion(`¿Eliminar "${item.nombre}" del inventario?`, async () => {
@@ -219,12 +225,11 @@ function ItemsTab({
       )}
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <div className="flex items-center gap-2">
-          <Search className="h-4 w-4 shrink-0 text-slate-400" />
-          <input
+          <BusquedaInput
             placeholder="Buscar por nombre, código o categoría..."
             value={busqueda}
-            onChange={(e) => setBusqueda(e.target.value)}
-            className={`${inputClass} w-full max-w-xs`}
+            onChange={setBusqueda}
+            className="w-full max-w-xs"
           />
         </div>
         <select value={categoriaFiltro} onChange={(e) => setCategoriaFiltro(e.target.value)} className={inputClass}>
@@ -235,6 +240,16 @@ function ItemsTab({
             </option>
           ))}
         </select>
+        <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+          Mostrar
+          <select value={porPagina} onChange={(e) => setPorPagina(Number(e.target.value))} className={inputClass}>
+            {[5, 10, 25, 50, 100].map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </label>
         <button
           onClick={exportarExcel}
           className="flex items-center gap-1.5 rounded-lg border border-brand-200 px-3 py-2 text-sm font-medium text-brand-700 hover:bg-brand-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
@@ -288,11 +303,11 @@ function ItemsTab({
                     className="h-4 w-4 rounded border-slate-300"
                   />
                 </th>
-                <th className="px-4 py-2.5">Ítem</th>
-                <th className="px-4 py-2.5">Categoría</th>
-                <th className="px-4 py-2.5">Disponible</th>
-                <th className="px-4 py-2.5">Estado</th>
-                <th className="px-4 py-2.5">Ubicación</th>
+                <ThOrdenable campo="nombre" orden={orden} onOrdenar={(c) => setOrden(alternarOrden(orden, c))} className="px-4 py-2.5">Ítem</ThOrdenable>
+                <ThOrdenable campo="categoria" orden={orden} onOrdenar={(c) => setOrden(alternarOrden(orden, c))} className="px-4 py-2.5">Categoría</ThOrdenable>
+                <ThOrdenable campo="cantidad" orden={orden} onOrdenar={(c) => setOrden(alternarOrden(orden, c))} className="px-4 py-2.5">Disponible</ThOrdenable>
+                <ThOrdenable campo="estado" orden={orden} onOrdenar={(c) => setOrden(alternarOrden(orden, c))} className="px-4 py-2.5">Estado</ThOrdenable>
+                <ThOrdenable campo="ubicacion" orden={orden} onOrdenar={(c) => setOrden(alternarOrden(orden, c))} className="px-4 py-2.5">Ubicación</ThOrdenable>
                 <th className="px-4 py-2.5"></th>
               </tr>
             </thead>

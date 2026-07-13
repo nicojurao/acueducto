@@ -5,6 +5,7 @@ import { comprimirFoto } from "../lib/comprimirImagen";
 import { useConfirm, useErrorHandler } from "../components/ConfirmModal";
 import { useAuth } from "../contexts/AuthContext";
 import { useCierreAnimado } from "../lib/useCierreAnimado";
+import BusquedaInput from "../components/BusquedaInput";
 
 const inputClass =
   "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:placeholder:text-slate-500";
@@ -427,15 +428,12 @@ export default function UsuariosPage() {
         </div>
       </div>
 
-      <div className="relative mb-4 max-w-sm">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-600" />
-        <input
-          placeholder="Buscar por nombre o correo..."
-          value={busqueda}
-          onChange={(e) => setBusqueda(e.target.value)}
-          className={`${inputClass} pl-9`}
-        />
-      </div>
+      <BusquedaInput
+        placeholder="Buscar por nombre o correo..."
+        value={busqueda}
+        onChange={setBusqueda}
+        className="mb-4 max-w-sm"
+      />
 
       {cargando ? (
         <p className="text-slate-700 dark:text-slate-400">Cargando...</p>

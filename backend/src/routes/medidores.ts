@@ -709,11 +709,26 @@ medidoresRouter.get("/", async (req, res) => {
   if (page) {
     const pageNum = Math.max(1, Number(page) || 1);
     const limitNum = Math.max(1, Number(limit) || 10);
+    // Orden por clic en el encabezado de la tabla. Whitelist de claves (nada de pasar el campo
+    // crudo a Prisma); relaciones se ordenan por su nombre visible, y "sort: 'nulls last'" no
+    // hace falta: Prisma pone los null al final en asc por defecto en Postgres.
+    const dir: "asc" | "desc" = String(req.query.dir) === "desc" ? "desc" : "asc";
+    const ORDENES: Record<string, object> = {
+      serial: { serial: dir },
+      tipo: { tipo: dir },
+      marca: { marcaCat: { nombre: dir } },
+      modelo: { modeloCat: { nombre: dir } },
+      diametro: { diametroCat: { valor: dir } },
+      lote: { lote: { serialInicial: dir } },
+      estado: { estado: dir },
+    };
+    const orderBy = ORDENES[String(req.query.sort ?? "")] ?? { id: "asc" };
+
     const [data, total] = await Promise.all([
       prisma.medidor.findMany({
         where,
         include: { suscriptor: true, marcaCat: true, modeloCat: true, diametroCat: true, lote: true },
-        orderBy: { id: "asc" },
+        orderBy,
         skip: (pageNum - 1) * limitNum,
         take: limitNum,
       }),

@@ -146,9 +146,21 @@ itemsInventarioRouter.get("/", async (req, res) => {
   if (page) {
     const pageNum = Math.max(1, Number(page) || 1);
     const limitNum = Math.max(1, Number(limit) || 10);
+    // Orden por clic en el encabezado de la tabla (whitelist de claves). "Disponible" no se
+    // puede ordenar acá: es un valor calculado con los préstamos activos, no una columna.
+    const dir: "asc" | "desc" = String(req.query.dir) === "desc" ? "desc" : "asc";
+    const ORDENES: Record<string, object> = {
+      nombre: { nombre: dir },
+      categoria: { categoriaCat: { nombre: dir } },
+      cantidad: { cantidad: dir },
+      estado: { estado: dir },
+      ubicacion: { ubicacionCat: { nombre: dir } },
+    };
+    const orderBy = ORDENES[String(req.query.sort ?? "")] ?? { nombre: "asc" };
+
     const [items, total] = await Promise.all([
       prisma.itemInventario.findMany({
-        where, include: includeCatalogos, orderBy: { nombre: "asc" }, skip: (pageNum - 1) * limitNum, take: limitNum,
+        where, include: includeCatalogos, orderBy, skip: (pageNum - 1) * limitNum, take: limitNum,
       }),
       prisma.itemInventario.count({ where }),
     ]);
