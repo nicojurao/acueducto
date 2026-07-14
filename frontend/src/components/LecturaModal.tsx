@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { X, Camera, AlertCircle, CheckCircle2, Pencil, Trash2, MapPin, Loader2, CloudOff } from "lucide-react";
+import { X, Camera, AlertCircle, CheckCircle2, Pencil, Trash2, MapPin, Loader2, CloudOff, UserRound } from "lucide-react";
 import { api, urlFoto, LecturaPendiente } from "../api/client";
 import { useConfirm, useErrorHandler } from "./ConfirmModal";
 import CamaraModal from "./CamaraModal";
 import NovedadDetailModal from "./NovedadDetailModal";
+import SuscriptorDetailModal from "./SuscriptorDetailModal";
 import { useAuth } from "../contexts/AuthContext";
 import { PendienteLectura, agregarPendiente, eliminarPendiente, agregarPendienteNovedad } from "../lib/offlineQueue";
 import { comprimirFoto, comprimirFotos } from "../lib/comprimirImagen";
@@ -56,6 +57,7 @@ export default function LecturaModal({
   const [foto, setFoto] = useState<File | null>(null);
   const [quitarFoto, setQuitarFoto] = useState(false);
   const [camaraAbierta, setCamaraAbierta] = useState(false);
+  const [verSuscriptor, setVerSuscriptor] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [obteniendoUbicacion, setObteniendoUbicacion] = useState(false);
 
@@ -237,9 +239,18 @@ export default function LecturaModal({
               NUID {fila.suscriptor.codigo} · Ruta {fila.suscriptor.ruta ?? "-"} · {periodo}
             </p>
           </div>
-          <button onClick={cerrar} className="rounded-lg p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800">
-            <X className="h-5 w-5" />
-          </button>
+          <div className="flex shrink-0 items-center gap-1">
+            <button
+              onClick={() => setVerSuscriptor(true)}
+              title="Ver suscriptor"
+              className="flex items-center gap-1 rounded-lg p-1.5 text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+            >
+              <UserRound className="h-4 w-4" />
+            </button>
+            <button onClick={cerrar} className="rounded-lg p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800">
+              <X className="h-5 w-5" />
+            </button>
+          </div>
         </div>
 
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-5">
@@ -536,6 +547,10 @@ export default function LecturaModal({
             onCambio();
           }}
         />
+      )}
+
+      {verSuscriptor && (
+        <SuscriptorDetailModal suscriptorId={fila.suscriptor.id} onClose={() => setVerSuscriptor(false)} />
       )}
     </div>
   );
