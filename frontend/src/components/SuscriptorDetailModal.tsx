@@ -70,6 +70,22 @@ export default function SuscriptorDetailModal({
   >([]);
   const [lecturaDetalle, setLecturaDetalle] = useState<(typeof historico)[number] | null>(null);
   const [barraHover, setBarraHover] = useState<string | null>(null);
+  const [rangoGrafico, setRangoGrafico] = useState<6 | 12 | "todo">(12);
+  const historicoFiltrado = rangoGrafico === "todo" ? historico : historico.slice(-rangoGrafico);
+  const [descargandoInforme, setDescargandoInforme] = useState(false);
+  const [errorInforme, setErrorInforme] = useState<string | null>(null);
+  async function descargarInformePdf() {
+    setDescargandoInforme(true);
+    setErrorInforme(null);
+    try {
+      const meses = rangoGrafico === "todo" ? undefined : rangoGrafico;
+      await api.reportes.consumoSuscriptorPdf(suscriptorId, meses);
+    } catch (err) {
+      setErrorInforme(err instanceof Error ? err.message.replace(/^Error \d+: /, "") : "Error inesperado");
+    } finally {
+      setDescargandoInforme(false);
+    }
+  }
   const [cargando, setCargando] = useState(true);
   const [editandoUbicacion, setEditandoUbicacion] = useState(false);
   const [guardandoUbicacion, setGuardandoUbicacion] = useState(false);
@@ -1318,27 +1334,55 @@ export default function SuscriptorDetailModal({
             </div>
 
             <div>
-              <div className="mb-2 flex items-center justify-between">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">
                   Historial de consumo mensual (m³){suscriptor.cotitularDe && " — ya dividido"}
                 </h3>
-                {historico.some((h) => !h.sinLectura) && (
+                {historicoFiltrado.some((h) => !h.sinLectura) && (
                   <span className="text-xs text-slate-700 dark:text-slate-400">
                     Promedio:{" "}
                     <strong className="text-slate-700 dark:text-slate-200">
                       {(
-                        historico.filter((h) => !h.sinLectura).reduce((acc, h) => acc + h.consumo, 0) /
-                        historico.filter((h) => !h.sinLectura).length
+                        historicoFiltrado.filter((h) => !h.sinLectura).reduce((acc, h) => acc + h.consumo, 0) /
+                        historicoFiltrado.filter((h) => !h.sinLectura).length
                       ).toLocaleString("es-CO", { maximumFractionDigits: 1 })}{" "}
                       m³
                     </strong>
                   </span>
                 )}
               </div>
-              {historico.length > 0 ? (
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div className="inline-flex rounded-lg border border-slate-200 p-0.5 dark:border-slate-700">
+                  {([6, 12, "todo"] as const).map((r) => (
+                    <button
+                      key={r}
+                      onClick={() => setRangoGrafico(r)}
+                      className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                        rangoGrafico === r
+                          ? "bg-[#00487f] text-white"
+                          : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700"
+                      }`}
+                    >
+                      {r === "todo" ? "Todo" : `${r} meses`}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  onClick={descargarInformePdf}
+                  disabled={descargandoInforme}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-700"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  {descargandoInforme ? "Generando..." : "Descargar informe PDF"}
+                </button>
+              </div>
+              {errorInforme && (
+                <p className="mb-2 text-xs text-red-600 dark:text-red-400">{errorInforme}</p>
+              )}
+              {historicoFiltrado.length > 0 ? (
                 <>
                   <ResponsiveContainer width="100%" height={260}>
-                    <BarChart data={historico}>
+                    <BarChart data={historicoFiltrado}>
                       <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} opacity={0.3} />
                       <XAxis dataKey="periodo" stroke={GRID_STROKE} tick={{ fill: "#94a3b8", fontSize: 11 }} />
                       <YAxis stroke={GRID_STROKE} tick={{ fill: "#94a3b8", fontSize: 12 }} />
@@ -1353,11 +1397,11 @@ export default function SuscriptorDetailModal({
                             : [v, "Consumo"]
                         }
                       />
-                      {historico.some((h) => !h.sinLectura) && (
+                      {historicoFiltrado.some((h) => !h.sinLectura) && (
                         <ReferenceLine
                           y={
-                            historico.filter((h) => !h.sinLectura).reduce((acc, h) => acc + h.consumo, 0) /
-                            historico.filter((h) => !h.sinLectura).length
+                            historicoFiltrado.filter((h) => !h.sinLectura).reduce((acc, h) => acc + h.consumo, 0) /
+                            historicoFiltrado.filter((h) => !h.sinLectura).length
                           }
                           stroke="#fb923c"
                           strokeDasharray="4 4"
@@ -1365,7 +1409,7 @@ export default function SuscriptorDetailModal({
                         />
                       )}
                       <Bar dataKey="consumo" radius={[4, 4, 0, 0]} minPointSize={6}>
-                        {historico.map((h) => (
+                        {historicoFiltrado.map((h) => (
                           <Cell
                             key={h.periodo}
                             fill={h.sinLectura ? "#f87171" : "#00487f"}
@@ -1381,9 +1425,9 @@ export default function SuscriptorDetailModal({
                       </Bar>
                     </BarChart>
                   </ResponsiveContainer>
-                  {historico.some((h) => h.sinLectura) && (
+                  {historicoFiltrado.some((h) => h.sinLectura) && (
                     <div className="mt-2 space-y-1 rounded-lg border border-red-200 bg-red-50 p-2 dark:border-red-500/30 dark:bg-red-500/10">
-                      {historico
+                      {historicoFiltrado
                         .filter((h) => h.sinLectura)
                         .map((h) => (
                           <button

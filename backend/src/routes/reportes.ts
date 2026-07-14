@@ -1,6 +1,8 @@
 import { Router } from "express";
+import PDFDocument from "pdfkit";
 import { prisma } from "../lib/prisma.js";
 import { crearInformeExcel, enviarExcel } from "../lib/excelBranding.js";
+import { encabezadoPdf, tituloSeccionPdf, tarjetaDatosPdf, COLOR_MARCA } from "../lib/pdfBranding.js";
 
 export const reportesRouter = Router();
 
@@ -177,9 +179,9 @@ function mesFacturableActual(): string {
 // el consumo en partes iguales entre el titular y todos sus cotitulares.
 // Los meses entre la primera lectura y el periodo actual que no tengan lectura se
 // marcan con sinLectura=true (y el motivo de la novedad, si se registró uno).
-reportesRouter.get("/consumo-suscriptor/:id", async (req, res) => {
-  const suscriptorId = Number(req.params.id);
-
+// Extraído para reusarse también en el PDF del informe de suscriptor (misma lógica de huecos,
+// cotitulares y novedades, sin duplicarla).
+async function historicoSuscriptor(suscriptorId: number) {
   const medidoresPropios = await prisma.medidor.findMany({
     where: { suscriptorId },
     include: {
@@ -235,7 +237,7 @@ reportesRouter.get("/consumo-suscriptor/:id", async (req, res) => {
     }
   }
 
-  if (historico.length === 0) return res.json([]);
+  if (historico.length === 0) return [];
 
   historico.sort((a, b) => a.periodo.localeCompare(b.periodo));
 
@@ -256,6 +258,9 @@ reportesRouter.get("/consumo-suscriptor/:id", async (req, res) => {
     novedadId?: number;
     fotos?: string[];
     medidorId?: number;
+    lecturaId?: number;
+    fechaRegistro?: string;
+    capturadoPor?: string | null;
   }[] = [];
 
   // El rango llega hasta el mes calendario actual (o hasta el último periodo con novedad,
@@ -293,7 +298,128 @@ reportesRouter.get("/consumo-suscriptor/:id", async (req, res) => {
     }
   }
 
-  res.json(completo);
+  return completo;
+}
+
+reportesRouter.get("/consumo-suscriptor/:id", async (req, res) => {
+  res.json(await historicoSuscriptor(Number(req.params.id)));
+});
+
+// Tabla simple con encabezado en el color de marca y filas alternadas — mismo estilo que la de
+// inventario.ts, reescrita acá para no tener que exportarla desde otro router.
+type ColumnaPdf = { titulo: string; clave: string; ancho: number; align?: "left" | "right" };
+function tablaPdf(doc: PDFKit.PDFDocument, columnas: ColumnaPdf[], filas: Record<string, string>[]) {
+  const x = doc.page.margins.left;
+  const anchoTotal = columnas.reduce((a, c) => a + c.ancho, 0);
+  const altoFila = 18;
+
+  function dibujarEncabezado(y: number) {
+    doc.rect(x, y, anchoTotal, altoFila).fill(COLOR_MARCA);
+    let cx = x;
+    doc.font("Helvetica-Bold").fontSize(8).fillColor("#fff");
+    for (const col of columnas) {
+      doc.text(col.titulo, cx + 4, y + 5, { width: col.ancho - 8, align: col.align ?? "left" });
+      cx += col.ancho;
+    }
+    doc.font("Helvetica").fillColor("#0f172a");
+    return y + altoFila;
+  }
+
+  let y = dibujarEncabezado(doc.y);
+  filas.forEach((fila, i) => {
+    if (y + altoFila > doc.page.height - doc.page.margins.bottom) {
+      doc.addPage();
+      y = dibujarEncabezado(doc.page.margins.top);
+    }
+    if (i % 2 === 1) doc.rect(x, y, anchoTotal, altoFila).fill("#f1f5f9");
+    doc.fillColor("#0f172a").font("Helvetica").fontSize(8);
+    let cx = x;
+    for (const col of columnas) {
+      doc.text(fila[col.clave] ?? "", cx + 4, y + 5, { width: col.ancho - 8, align: col.align ?? "left" });
+      cx += col.ancho;
+    }
+    y += altoFila;
+  });
+  if (filas.length === 0) {
+    doc.font("Helvetica").fontSize(9).fillColor("#64748b").text("Sin registros.", x, y + 8);
+  }
+  doc.y = y + 10;
+}
+
+const ESTADO_FACTURACION_LABELS_PDF: Record<string, string> = {
+  sin_medidor: "Sin medidor",
+  instalado_prueba: "Instalado",
+  facturando: "Facturando por medición",
+  inactivo: "Medidor inactivo / dañado",
+};
+
+// Informe de un suscriptor: datos básicos + tabla de lecturas y consumos, mismo histórico que
+// alimenta el gráfico de barras de su ficha (con los meses "sin lectura" incluidos).
+reportesRouter.get("/consumo-suscriptor/:id/pdf", async (req, res) => {
+  const suscriptorId = Number(req.params.id);
+  const suscriptor = await prisma.suscriptor.findUnique({
+    where: { id: suscriptorId },
+    include: { barrioCat: true, estratoCat: true },
+  });
+  if (!suscriptor) return res.status(404).json({ error: "No encontrado" });
+
+  const historico = await historicoSuscriptor(suscriptorId);
+  // ?meses=6|12 filtra el mismo rango que el gráfico; sin parámetro manda el histórico completo.
+  const meses = Number(req.query.meses);
+  const filas = meses > 0 ? historico.slice(-meses) : historico;
+
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `inline; filename="informe-${suscriptor.codigo}.pdf"`);
+
+  const doc = new PDFDocument({ margin: 40, size: "A4" });
+  doc.pipe(res);
+
+  encabezadoPdf(doc, "Informe de suscriptor", `Gestión Comercial · NUID ${suscriptor.codigo}`);
+
+  tarjetaDatosPdf(doc, [
+    ["NUID", suscriptor.codigo],
+    ["Nombre", suscriptor.nombre],
+    ["Identificación", suscriptor.identificacion ?? "—"],
+    ["Ruta", suscriptor.ruta ?? "—"],
+    ["Barrio", suscriptor.barrioCat?.nombre ?? "—"],
+    ["Estrato", suscriptor.estratoCat ? `${suscriptor.estratoCat.codigo} — ${suscriptor.estratoCat.etiqueta}` : "—"],
+    ["Dirección", suscriptor.direccion ?? "—"],
+    ["Estado de facturación", ESTADO_FACTURACION_LABELS_PDF[suscriptor.estadoFacturacion] ?? suscriptor.estadoFacturacion],
+  ]);
+
+  tituloSeccionPdf(doc, "Historial de lecturas y consumos");
+  tablaPdf(
+    doc,
+    [
+      { titulo: "PERIODO", clave: "periodo", ancho: 70 },
+      { titulo: "LECTURA", clave: "lectura", ancho: 90, align: "right" },
+      { titulo: "CONSUMO (m³)", clave: "consumo", ancho: 90, align: "right" },
+      { titulo: "ESTADO", clave: "estado", ancho: 130 },
+      { titulo: "CAPTURADO POR", clave: "capturadoPor", ancho: 135 },
+    ],
+    filas.map((f) => ({
+      periodo: f.periodo,
+      lectura: f.valorLectura != null ? f.valorLectura.toLocaleString("es-CO", { maximumFractionDigits: 2 }) : "—",
+      consumo: f.sinLectura ? "—" : f.consumo.toLocaleString("es-CO", { maximumFractionDigits: 2 }),
+      estado: f.sinLectura ? `Sin lectura${f.motivo ? ` — ${f.motivo}` : ""}` : "Tomada",
+      capturadoPor: f.sinLectura ? "—" : f.capturadoPor ?? "—",
+    }))
+  );
+
+  if (filas.length > 0) {
+    const totalConsumo = filas.filter((f) => !f.sinLectura).reduce((acc, f) => acc + f.consumo, 0);
+    const cantidadConLectura = filas.filter((f) => !f.sinLectura).length;
+    doc.moveDown(0.3);
+    doc.font("Helvetica-Bold").fontSize(9).fillColor("#0f172a").text(
+      `Consumo total del periodo: ${totalConsumo.toLocaleString("es-CO", { maximumFractionDigits: 2 })} m³` +
+        (cantidadConLectura > 0
+          ? ` · Promedio mensual: ${(totalConsumo / cantidadConLectura).toLocaleString("es-CO", { maximumFractionDigits: 2 })} m³`
+          : "")
+    );
+    doc.font("Helvetica");
+  }
+
+  doc.end();
 });
 
 async function consumoAgrupadoPorPeriodo(

@@ -1156,6 +1156,10 @@ export const api = {
           capturadoPor?: string | null;
         }[]
       >(`/api/reportes/consumo-suscriptor/${id}`),
+    consumoSuscriptorPdf: (id: number, meses?: number) => {
+      const qs = meses ? `?meses=${meses}` : "";
+      return descargarArchivo(`/api/reportes/consumo-suscriptor/${id}/pdf${qs}`, `informe-suscriptor-${id}.pdf`, true);
+    },
     porRuta: (periodo: string) =>
       request<{ ruta: string; usuarios: number; consumo: number }[]>(`/api/reportes/por-ruta?periodo=${periodo}`),
     porBarrio: (periodo: string, estratos?: string[]) => {
