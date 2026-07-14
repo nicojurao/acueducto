@@ -23,9 +23,21 @@ import { SkeletonLista } from "../components/Skeleton";
 import BusquedaInput from "../components/BusquedaInput";
 import { useFiltroPersistente } from "../lib/useFiltroPersistente";
 
+// Las lecturas del mes no empiezan a capturarse hasta el día 20, así que antes de esa fecha se
+// muestra el mes anterior (que sí tiene datos) en vez del mes actual vacío. Mismo criterio que
+// frontend/src/pages/InicioPage.tsx y ReportesPage.tsx.
 function periodoActual(): string {
   const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  let anio = now.getFullYear();
+  let mes = now.getMonth() + 1;
+  if (now.getDate() < 20) {
+    mes -= 1;
+    if (mes === 0) {
+      mes = 12;
+      anio -= 1;
+    }
+  }
+  return `${anio}-${String(mes).padStart(2, "0")}`;
 }
 
 const inputClass =

@@ -3,9 +3,19 @@ import { prisma } from "../lib/prisma.js";
 
 export const dashboardRouter = Router();
 
+// Las lecturas del mes no empiezan a capturarse hasta el día 20 (mismo criterio que
+// mesFacturableActual() en reportes.ts y el periodo por defecto de ReportesPage.tsx). Antes de
+// esa fecha, el mes calendario en curso todavía no es el periodo facturable: KPIs, atípicos y
+// pendientes deben seguir mostrando el mes anterior.
 function periodoActualStr(): string {
   const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  let anio = now.getFullYear();
+  let mes = now.getDate() < 20 ? now.getMonth() : now.getMonth() + 1;
+  if (mes === 0) {
+    mes = 12;
+    anio -= 1;
+  }
+  return `${anio}-${String(mes).padStart(2, "0")}`;
 }
 
 function primerDiaMes(periodo: string): Date {
