@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { X, Gauge, Users, MapPin, ChevronDown, ChevronUp, FileText, Download, Pencil, Trash2 } from "lucide-react";
+import { X, Gauge, Users, MapPin, ChevronDown, ChevronUp, Download, Pencil, Trash2 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Cell } from "recharts";
 import {
   api,
@@ -18,11 +18,10 @@ import {
   LecturaPendiente,
 } from "../api/client";
 import MapaPredios from "./MapaPredios";
-import MedidorCombobox from "./MedidorCombobox";
 import LecturaDetalleModal from "./LecturaDetalleModal";
 import LecturaModal from "./LecturaModal";
+import AsignarMedidorModal from "./AsignarMedidorModal";
 import { useConfirm } from "./ConfirmModal";
-import { comprimirFotos } from "../lib/comprimirImagen";
 import { HistorialSeccion } from "./HistorialTimeline";
 import { useAuth } from "../contexts/AuthContext";
 import { useCierreAnimado } from "../lib/useCierreAnimado";
@@ -139,9 +138,7 @@ export default function SuscriptorDetailModal({
     certificado: "",
   });
   const [actaCalibracionArchivo, setActaCalibracionArchivo] = useState<File | null>(null);
-  const [subiendoActaCalibracion, setSubiendoActaCalibracion] = useState(false);
   const [actaFirmadaArchivo, setActaFirmadaArchivo] = useState<File | null>(null);
-  const [subiendoActaFirmada, setSubiendoActaFirmada] = useState(false);
   const [guardandoEstado, setGuardandoEstado] = useState(false);
   const [gapAbierto, setGapAbierto] = useState<(typeof historico)[number] | null>(null);
 
@@ -810,335 +807,40 @@ export default function SuscriptorDetailModal({
               </div>
 
               {asignando && (
-                <form
-                  className="mb-3 flex flex-col gap-2 rounded-lg border border-slate-200 p-3 dark:border-slate-800"
+                <AsignarMedidorModal
+                  editandoMedidorId={editandoMedidorId}
+                  editandoEsRetirado={editandoEsRetirado}
+                  editandoActaId={editandoActaId}
+                  editandoActaCalibracionUrl={editandoActaCalibracionUrl}
+                  editandoDiametroActual={editandoDiametroActual}
+                  formMedidor={formMedidor}
+                  setFormMedidor={setFormMedidor}
+                  formActa={formActa}
+                  setFormActa={setFormActa}
+                  marcas={marcas}
+                  modelos={modelos}
+                  lotes={lotes}
+                  medidoresBodega={medidoresBodega}
+                  instaladores={instaladores}
+                  fotos={fotos}
+                  setFotos={setFotos}
+                  fotosExistentes={fotosExistentes}
+                  quitarFotoExistente={quitarFotoExistente}
+                  fileInputRef={fileInputRef}
+                  actaCalibracionArchivo={actaCalibracionArchivo}
+                  setActaCalibracionArchivo={setActaCalibracionArchivo}
+                  actaFirmadaArchivo={actaFirmadaArchivo}
+                  setActaFirmadaArchivo={setActaFirmadaArchivo}
+                  actaPorMedidor={actaPorMedidor}
+                  guardandoActa={guardandoActa}
                   onSubmit={onSubmitAsignacion}
-                >
-                  {editandoMedidorId ? (
-                    <>
-                      <p className="text-xs font-medium text-slate-700">
-                        {editandoEsRetirado ? "Editando medidor retirado (historial)" : "Editando el medidor instalado"}
-                      </p>
-                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                        <input
-                          placeholder="Serial"
-                          value={formMedidor.serial}
-                          onChange={(e) => setFormMedidor({ ...formMedidor, serial: e.target.value })}
-                          className={inputClass}
-                        />
-                        <select
-                          value={formMedidor.marcaId}
-                          onChange={(e) =>
-                            setFormMedidor({ ...formMedidor, marcaId: e.target.value, modeloId: "", diametroId: "" })
-                          }
-                          className={inputClass}
-                        >
-                          <option value="">Marca...</option>
-                          {marcas.map((m) => (
-                            <option key={m.id} value={m.id}>
-                              {m.nombre}
-                            </option>
-                          ))}
-                        </select>
-                        <select
-                          value={formMedidor.modeloId}
-                          onChange={(e) => setFormMedidor({ ...formMedidor, modeloId: e.target.value, diametroId: "" })}
-                          className={inputClass}
-                          disabled={!formMedidor.marcaId}
-                        >
-                          <option value="">Modelo...</option>
-                          {modelos
-                            .filter((mo) => String(mo.marcaId) === formMedidor.marcaId)
-                            .map((mo) => (
-                              <option key={mo.id} value={mo.id}>
-                                {mo.nombre}
-                              </option>
-                            ))}
-                        </select>
-                        <select
-                          value={formMedidor.diametroId}
-                          onChange={(e) => setFormMedidor({ ...formMedidor, diametroId: e.target.value })}
-                          className={inputClass}
-                          disabled={!formMedidor.modeloId}
-                        >
-                          <option value="">Diámetro...</option>
-                          {(modelos.find((mo) => String(mo.id) === formMedidor.modeloId)?.diametros ?? []).map((d) => (
-                            <option key={d.id} value={d.id}>
-                              {d.valor}
-                            </option>
-                          ))}
-                          {editandoDiametroActual &&
-                            String(editandoDiametroActual.id) === formMedidor.diametroId &&
-                            !(modelos.find((mo) => String(mo.id) === formMedidor.modeloId)?.diametros ?? []).some(
-                              (d) => d.id === editandoDiametroActual.id
-                            ) && (
-                              <option value={editandoDiametroActual.id}>
-                                {editandoDiametroActual.valor} (no vinculado a este modelo en el catálogo)
-                              </option>
-                            )}
-                        </select>
-                        <select
-                          value={formMedidor.loteId}
-                          onChange={(e) => setFormMedidor({ ...formMedidor, loteId: e.target.value })}
-                          className={inputClass}
-                        >
-                          <option value="">Lote...</option>
-                          {lotes.map((l) => (
-                            <option key={l.id} value={l.id}>
-                              {l.serialInicial}-{l.serialFinal}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                        <label className="flex flex-col gap-1 text-xs text-slate-600 dark:text-slate-300">
-                          Fecha fabricación
-                          <input
-                            type="date"
-                            value={formMedidor.fechaFabricacion}
-                            onChange={(e) => setFormMedidor({ ...formMedidor, fechaFabricacion: e.target.value })}
-                            className={inputClass}
-                          />
-                        </label>
-                        <label className="flex flex-col gap-1 text-xs text-slate-600 dark:text-slate-300">
-                          Fecha certificación
-                          <input
-                            type="date"
-                            value={formMedidor.fechaCertificacion}
-                            onChange={(e) => setFormMedidor({ ...formMedidor, fechaCertificacion: e.target.value })}
-                            className={inputClass}
-                          />
-                        </label>
-                        <label className="flex flex-col gap-1 text-xs text-slate-600 dark:text-slate-300">
-                          N° certificado
-                          <input
-                            value={formMedidor.certificado}
-                            onChange={(e) => setFormMedidor({ ...formMedidor, certificado: e.target.value })}
-                            className={inputClass}
-                          />
-                        </label>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <label className="text-xs font-medium text-slate-700">Medidor en bodega</label>
-                      <MedidorCombobox
-                        medidores={medidoresBodega}
-                        value={formActa.medidorId}
-                        onChange={(id) => setFormActa({ ...formActa, medidorId: id })}
-                      />
-                    </>
-                  )}
-                  {editandoMedidorId && !editandoActaId && (
-                    <p className="text-xs text-slate-600 dark:text-slate-400">
-                      Este medidor no tiene acta de instalación. Completa fecha e instalador si
-                      quieres generarla ahora (opcional, pero obligatorio si vas a adjuntar fotos o
-                      el escaneo firmado más abajo).
-                    </p>
-                  )}
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                        <input
-                          type="date"
-                          value={formActa.fechaInstalacion}
-                          onChange={(e) => setFormActa({ ...formActa, fechaInstalacion: e.target.value })}
-                          className={inputClass}
-                          required={!editandoMedidorId || !!editandoActaId || !!actaFirmadaArchivo || fotos.length > 0}
-                        />
-                        <select
-                          value={formActa.instaladoPor}
-                          onChange={(e) => setFormActa({ ...formActa, instaladoPor: e.target.value })}
-                          className={inputClass}
-                          required={!editandoMedidorId || !!editandoActaId || !!actaFirmadaArchivo || fotos.length > 0}
-                        >
-                          <option value="">Instalado por...</option>
-                          {instaladores.map((u) => (
-                            <option key={u.id} value={u.nombre}>
-                              {u.nombre}
-                            </option>
-                          ))}
-                          {formActa.instaladoPor && !instaladores.some((u) => u.nombre === formActa.instaladoPor) && (
-                            <option value={formActa.instaladoPor}>{formActa.instaladoPor} (usuario inactivo/eliminado)</option>
-                          )}
-                        </select>
-                      </div>
-                      {editandoEsRetirado && (
-                        <label className="flex flex-col gap-1 text-xs font-medium text-slate-700 dark:text-slate-300">
-                          Fecha de retiro
-                          <input
-                            type="date"
-                            value={formActa.fechaRetiro}
-                            onChange={(e) => setFormActa({ ...formActa, fechaRetiro: e.target.value })}
-                            className={inputClass}
-                            required
-                          />
-                        </label>
-                      )}
-                      <textarea
-                        placeholder="Observaciones (opcional)"
-                        value={formActa.observaciones}
-                        onChange={(e) => setFormActa({ ...formActa, observaciones: e.target.value })}
-                        className={`${inputClass} min-h-[60px]`}
-                      />
-                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      {editandoMedidorId && (
-                        <div className="min-w-0">
-                          <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">
-                            Acta de calibración (escaneada)
-                          </label>
-                          {editandoActaCalibracionUrl && !actaCalibracionArchivo && (
-                            <div className="mb-1 flex items-center gap-2">
-                              <a
-                                href={urlFoto(editandoActaCalibracionUrl)}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400"
-                              >
-                                Ver acta actual
-                              </a>
-                              <button
-                                type="button"
-                                disabled={subiendoActaCalibracion}
-                                onClick={async () => {
-                                  if (!editandoMedidorId) return;
-                                  setSubiendoActaCalibracion(true);
-                                  try {
-                                    await api.medidores.quitarActaCalibracion(editandoMedidorId);
-                                    setEditandoActaCalibracionUrl(null);
-                                    cargarDetalle();
-                                  } finally {
-                                    setSubiendoActaCalibracion(false);
-                                  }
-                                }}
-                                className="text-xs font-medium text-red-500 hover:underline"
-                              >
-                                Quitar
-                              </button>
-                            </div>
-                          )}
-                          <input
-                            type="file"
-                            accept="image/*,application/pdf"
-                            onChange={(e) => setActaCalibracionArchivo(e.target.files?.[0] ?? null)}
-                            className={`${inputClass} w-full`}
-                          />
-                        </div>
-                      )}
-                      <div className="min-w-0">
-                        {fotosExistentes.length > 0 && (
-                          <>
-                            <label className="mb-1 block text-xs font-medium text-slate-700">Fotos actuales</label>
-                            <div className="mb-2 flex flex-wrap gap-2">
-                              {fotosExistentes.map((foto) => (
-                                <div key={foto} className="group relative">
-                                  <img
-                                    src={urlFoto(foto)}
-                                    alt="Foto de instalación"
-                                    className="h-14 w-14 rounded-lg border border-slate-200 object-cover dark:border-slate-700"
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => quitarFotoExistente(foto)}
-                                    title="Quitar foto"
-                                    className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-red-600 text-white shadow hover:bg-red-500"
-                                  >
-                                    <X className="h-3 w-3" />
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          </>
-                        )}
-                        <label className="mb-1 block text-xs font-medium text-slate-700">
-                          {editandoActaId ? "Agregar más fotos" : "Fotos"}
-                        </label>
-                        <input
-                          ref={fileInputRef}
-                          type="file"
-                          accept="image/*"
-                          multiple
-                          onChange={async (e) => setFotos(await comprimirFotos(Array.from(e.target.files ?? [])))}
-                          className={`${inputClass} w-full`}
-                        />
-                        {fotos.length > 0 && (
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            {fotos.map((f, i) => (
-                              <img
-                                key={i}
-                                src={URL.createObjectURL(f)}
-                                alt={f.name}
-                                className="h-14 w-14 rounded-lg border border-slate-200 object-cover dark:border-slate-700"
-                              />
-                            ))}
-                          </div>
-                        )}
-                  </div>
-                  </div>
-                  {editandoMedidorId && (
-                    <div>
-                      <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">
-                        Acta de instalación firmada (escaneada en PDF)
-                      </label>
-                      <p className="mb-1 text-xs text-slate-500 dark:text-slate-400">
-                        El PDF de "Ver/imprimir acta" es solo la plantilla para imprimir y firmar a
-                        mano; sube aquí el escaneo ya firmado.
-                        {!editandoActaId && " Como este medidor no tiene acta, hay que completar fecha e instalador arriba para poder guardar el escaneo."}
-                      </p>
-                      {editandoMedidorId && actaPorMedidor[editandoMedidorId]?.actaFirmadaUrl && !actaFirmadaArchivo && (
-                        <div className="mb-1 flex items-center gap-2">
-                          <a
-                            href={urlFoto(actaPorMedidor[editandoMedidorId].actaFirmadaUrl!)}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400"
-                          >
-                            Ver acta firmada
-                          </a>
-                          <button
-                            type="button"
-                            disabled={subiendoActaFirmada}
-                            onClick={async () => {
-                              if (!editandoActaId) return;
-                              setSubiendoActaFirmada(true);
-                              try {
-                                await api.actas.quitarFirmada(editandoActaId);
-                                cargarDetalle();
-                              } finally {
-                                setSubiendoActaFirmada(false);
-                              }
-                            }}
-                            className="text-xs font-medium text-red-500 hover:underline"
-                          >
-                            Quitar
-                          </button>
-                        </div>
-                      )}
-                      <input
-                        type="file"
-                        accept="image/*,application/pdf"
-                        onChange={(e) => setActaFirmadaArchivo(e.target.files?.[0] ?? null)}
-                        className={`${inputClass} w-full`}
-                      />
-                    </div>
-                  )}
-                  <div className="flex gap-2">
-                    <button
-                      type="submit"
-                      disabled={guardandoActa}
-                      className="flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-500 disabled:opacity-50"
-                    >
-                      <FileText className="h-3.5 w-3.5" />
-                      {guardandoActa ? "Guardando..." : editandoMedidorId ? "Guardar cambios" : "Registrar instalación"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={cerrarFormulario}
-                      className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                    >
-                      Cancelar
-                    </button>
-                  </div>
-                </form>
+                  onClose={cerrarFormulario}
+                  onActaCalibracionQuitada={() => {
+                    setEditandoActaCalibracionUrl(null);
+                    cargarDetalle();
+                  }}
+                  onActaFirmadaQuitada={cargarDetalle}
+                />
               )}
 
               <div className="space-y-3">
