@@ -91,6 +91,7 @@ function ListadoTab() {
   const [barrioFiltro, setBarrioFiltro] = useFiltroPersistente("suscriptores.barrio", "");
   const [estratoFiltro, setEstratoFiltro] = useFiltroPersistente("suscriptores.estrato", "");
   const [estadoPredioFiltro, setEstadoPredioFiltro] = useFiltroPersistente("suscriptores.predio", "");
+  const [conCotitularFiltro, setConCotitularFiltro] = useFiltroPersistente("suscriptores.conCotitular", "");
   useEffect(() => {
     const e = searchParams.get("estado");
     if (e) setEstadoFiltro(e);
@@ -139,7 +140,7 @@ function ListadoTab() {
 
   useEffect(() => {
     setPagina(1);
-  }, [filtroDebounced, estadoFiltro, barrioFiltro, estratoFiltro, estadoPredioFiltro, porPagina]);
+  }, [filtroDebounced, estadoFiltro, barrioFiltro, estratoFiltro, estadoPredioFiltro, conCotitularFiltro, porPagina]);
 
   async function cargar() {
     setCargando(true);
@@ -149,6 +150,7 @@ function ListadoTab() {
       barrioId: barrioFiltro ? Number(barrioFiltro) : undefined,
       estratoId: estratoFiltro ? Number(estratoFiltro) : undefined,
       estadoPredio: estadoPredioFiltro,
+      conCotitular: conCotitularFiltro === "1",
       sort: orden.campo,
       dir: orden.dir,
     });
@@ -161,7 +163,7 @@ function ListadoTab() {
   useEffect(() => {
     cargar();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pagina, porPagina, filtroDebounced, estadoFiltro, barrioFiltro, estratoFiltro, estadoPredioFiltro, orden]);
+  }, [pagina, porPagina, filtroDebounced, estadoFiltro, barrioFiltro, estratoFiltro, estadoPredioFiltro, conCotitularFiltro, orden]);
 
   function limpiarFiltros() {
     setFiltro("");
@@ -169,10 +171,16 @@ function ListadoTab() {
     setBarrioFiltro("");
     setEstratoFiltro("");
     setEstadoPredioFiltro("");
+    setConCotitularFiltro("");
   }
 
   const hayFiltrosActivos =
-    filtro !== "" || estadoFiltro !== "" || barrioFiltro !== "" || estratoFiltro !== "" || estadoPredioFiltro !== "";
+    filtro !== "" ||
+    estadoFiltro !== "" ||
+    barrioFiltro !== "" ||
+    estratoFiltro !== "" ||
+    estadoPredioFiltro !== "" ||
+    conCotitularFiltro !== "";
   const totalPaginas = Math.max(1, Math.ceil(total / porPagina));
 
   return (
@@ -263,6 +271,15 @@ function ListadoTab() {
               </option>
             ))}
           </select>
+          <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+            <input
+              type="checkbox"
+              checked={conCotitularFiltro === "1"}
+              onChange={(e) => setConCotitularFiltro(e.target.checked ? "1" : "")}
+              className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500 dark:border-slate-700"
+            />
+            Con cotitular
+          </label>
           <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
             Mostrar
             <select

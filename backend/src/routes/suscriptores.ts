@@ -60,7 +60,7 @@ async function cargarResolutorEstrato() {
 // por NUID ascendente (numérico cuando es posible) para que la tabla de la UI no cargue
 // miles de filas de una vez.
 suscriptoresRouter.get("/", async (req, res) => {
-  const { page, limit, q, estadoFacturacion, barrioId, estratoId, estadoPredio } = req.query;
+  const { page, limit, q, estadoFacturacion, barrioId, estratoId, estadoPredio, conCotitular } = req.query;
   const search = q ? String(q).trim().toUpperCase() : "";
 
   const filtros: any[] = [];
@@ -77,6 +77,13 @@ suscriptoresRouter.get("/", async (req, res) => {
   if (barrioId) filtros.push({ barrioId: Number(barrioId) });
   if (estratoId) filtros.push({ estratoId: Number(estratoId) });
   if (estadoPredio) filtros.push({ estadoPredio: String(estadoPredio) });
+  // Suscriptores que comparten un medidor (acometida multiusuario): el titular (tiene
+  // cotitulares en alguno de sus medidores) o el propio cotitular (cotitularDe no nulo).
+  if (conCotitular === "1") {
+    filtros.push({
+      OR: [{ medidores: { some: { cotitulares: { some: {} } } } }, { cotitularDe: { isNot: null } }],
+    });
+  }
 
   const where = filtros.length > 0 ? { AND: filtros } : undefined;
   const include = { medidores: true, barrioCat: true, estratoCat: true };

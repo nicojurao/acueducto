@@ -362,6 +362,34 @@ export interface Aforo {
   createdAt: string;
 }
 
+export interface AforoKpis {
+  meses: number;
+  totalPuntos: number;
+  puntosActivos: number;
+  totalRegistros: number;
+  caudalPromedio: number;
+  ultimoCaudal: number | null;
+  ultimoPunto: string | null;
+  ultimaFecha: string | null;
+  nombresPuntos: string[];
+  resumenPorPunto: {
+    puntoAforoId: number;
+    nombre: string;
+    ultimoCaudal: number | null;
+    ultimaFecha: string | null;
+    promedio: number;
+    registros: number;
+  }[];
+  alertasCaudalBajo: {
+    puntoAforoId: number;
+    nombre: string;
+    ultimoCaudal: number;
+    promedio: number;
+    ultimaFecha: string | null;
+  }[];
+  tendencia: Record<string, number | string>[];
+}
+
 export interface CategoriaInventario {
   id: number;
   nombre: string;
@@ -577,6 +605,7 @@ export const api = {
         barrioId?: number;
         estratoId?: number;
         estadoPredio?: string;
+        conCotitular?: boolean;
         sort?: string;
         dir?: "asc" | "desc";
       }
@@ -587,6 +616,7 @@ export const api = {
       if (filtros?.barrioId) qs.set("barrioId", String(filtros.barrioId));
       if (filtros?.estratoId) qs.set("estratoId", String(filtros.estratoId));
       if (filtros?.estadoPredio) qs.set("estadoPredio", filtros.estadoPredio);
+      if (filtros?.conCotitular) qs.set("conCotitular", "1");
       if (filtros?.sort) qs.set("sort", filtros.sort);
       if (filtros?.dir) qs.set("dir", filtros.dir);
       return request<{ data: Suscriptor[]; total: number; page: number; limit: number }>(
@@ -875,6 +905,7 @@ export const api = {
     },
     remove: (id: number) => request<void>(`/api/aforos/${id}`, { method: "DELETE" }),
     verPdf: (id: number) => descargarArchivo(`/api/aforos/${id}/pdf`, `aforo-${id}.pdf`, true),
+    kpis: (meses?: number) => request<AforoKpis>(`/api/aforos/kpis${meses ? `?meses=${meses}` : ""}`),
   },
   inventario: {
     list: (filtros?: { categoria?: number; estado?: string; q?: string }) => {
