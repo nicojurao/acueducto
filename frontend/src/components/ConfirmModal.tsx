@@ -23,7 +23,7 @@ function ConfirmModal({
   onCancelar: () => void;
 }) {
   return (
-    <div className={`fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-4 ${saliendo ? "animate-fade-out" : "animate-fade-in"}`}>
+    <div className={`fixed inset-0 z-[2200] flex items-center justify-center bg-black/50 p-4 ${saliendo ? "animate-fade-out" : "animate-fade-in"}`}>
       <div className={`w-full max-w-sm rounded-xl bg-white p-5 shadow-xl dark:bg-slate-900 ${saliendo ? "animate-scale-out" : "animate-scale-in"}`}>
         {estado === "exito" ? (
           <div className="flex items-center gap-2 text-sm font-medium text-emerald-700 dark:text-emerald-400">
