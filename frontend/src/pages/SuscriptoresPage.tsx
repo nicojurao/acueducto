@@ -34,6 +34,7 @@ import { SkeletonTabla } from "../components/Skeleton";
 import BusquedaInput from "../components/BusquedaInput";
 import { useFiltroPersistente } from "../lib/useFiltroPersistente";
 import ThOrdenable, { Orden, alternarOrden } from "../components/ThOrdenable";
+import { useAuth } from "../contexts/AuthContext";
 import { inputClass } from "../lib/ui";
 import EmptyState from "../components/EmptyState";
 
@@ -80,6 +81,8 @@ export default function SuscriptoresPage() {
 function ListadoTab() {
   const [searchParams] = useSearchParams();
   const esMovil = useEsMovil();
+  const { usuario } = useAuth();
+  const puedeEditar = usuario?.permisos?.includes("suscriptores_avanzado") ?? false;
   const [suscriptores, setSuscriptores] = useState<Suscriptor[]>([]);
   const [total, setTotal] = useState(0);
   const [pagina, setPagina] = useState(1);
@@ -185,24 +188,26 @@ function ListadoTab() {
 
   return (
     <div>
-      <div className="mb-3 flex flex-wrap items-center gap-2 sm:mb-4">
-        <button
-          onClick={() => setImportAbierto((v) => !v)}
-          className="flex items-center gap-1.5 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-        >
-          <Upload className="h-4 w-4" />
-          Importar / exportar Excel
-        </button>
-        {seleccionados.size > 0 && (
+      {puedeEditar && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 sm:mb-4">
           <button
-            onClick={() => api.suscriptores.export([...seleccionados])}
-            className="flex items-center gap-1.5 rounded-lg border border-brand-200 px-4 py-2 text-sm font-medium text-brand-700 hover:bg-brand-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+            onClick={() => setImportAbierto((v) => !v)}
+            className="flex items-center gap-1.5 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
           >
-            <Download className="h-4 w-4" />
-            Exportar seleccionados ({seleccionados.size})
+            <Upload className="h-4 w-4" />
+            Importar / exportar Excel
           </button>
-        )}
-      </div>
+          {seleccionados.size > 0 && (
+            <button
+              onClick={() => api.suscriptores.export([...seleccionados])}
+              className="flex items-center gap-1.5 rounded-lg border border-brand-200 px-4 py-2 text-sm font-medium text-brand-700 hover:bg-brand-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+            >
+              <Download className="h-4 w-4" />
+              Exportar seleccionados ({seleccionados.size})
+            </button>
+          )}
+        </div>
+      )}
 
       {importAbierto && (
         <ImportExcelModal
@@ -314,14 +319,16 @@ function ListadoTab() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-brand-100 bg-brand-50 text-left text-brand-800 dark:border-slate-800 dark:bg-slate-800/50 dark:text-slate-400">
-                  <th className="w-8 px-3 py-2 sm:px-4 sm:py-3">
-                    <input
-                      type="checkbox"
-                      checked={suscriptores.length > 0 && seleccionados.size === suscriptores.length}
-                      onChange={alternarSeleccionTodos}
-                      className="h-4 w-4 rounded border-slate-300"
-                    />
-                  </th>
+                  {puedeEditar && (
+                    <th className="w-8 px-3 py-2 sm:px-4 sm:py-3">
+                      <input
+                        type="checkbox"
+                        checked={suscriptores.length > 0 && seleccionados.size === suscriptores.length}
+                        onChange={alternarSeleccionTodos}
+                        className="h-4 w-4 rounded border-slate-300"
+                      />
+                    </th>
+                  )}
                   <ThOrdenable campo="codigo" orden={orden} onOrdenar={(c) => setOrden(alternarOrden(orden, c))}>NUID</ThOrdenable>
                   <ThOrdenable campo="nombre" orden={orden} onOrdenar={(c) => setOrden(alternarOrden(orden, c))}>Nombre</ThOrdenable>
                   <ThOrdenable campo="ruta" orden={orden} onOrdenar={(c) => setOrden(alternarOrden(orden, c))}>Ruta</ThOrdenable>
@@ -338,14 +345,16 @@ function ListadoTab() {
                     onClick={() => setDetalleId(s.id)}
                     className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/40"
                   >
-                    <td className="px-3 py-1.5 sm:px-4 sm:py-2.5" onClick={(e) => e.stopPropagation()}>
-                      <input
-                        type="checkbox"
-                        checked={seleccionados.has(s.id)}
-                        onChange={() => alternarSeleccion(s.id)}
-                        className="h-4 w-4 rounded border-slate-300"
-                      />
-                    </td>
+                    {puedeEditar && (
+                      <td className="px-3 py-1.5 sm:px-4 sm:py-2.5" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={seleccionados.has(s.id)}
+                          onChange={() => alternarSeleccion(s.id)}
+                          className="h-4 w-4 rounded border-slate-300"
+                        />
+                      </td>
+                    )}
                     <td className="px-3 py-1.5 sm:px-4 sm:py-2.5">{s.codigo}</td>
                     <td className="px-3 py-1.5 sm:px-4 sm:py-2.5">{s.nombre}</td>
                     <td className="px-3 py-1.5 sm:px-4 sm:py-2.5">{s.ruta ?? "-"}</td>
@@ -371,7 +380,7 @@ function ListadoTab() {
                 ))}
                 {suscriptores.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="px-4 py-6">
+                    <td colSpan={puedeEditar ? 8 : 7} className="px-4 py-6">
                       <EmptyState mensaje="Sin resultados." />
                     </td>
                   </tr>
@@ -384,12 +393,14 @@ function ListadoTab() {
             {suscriptores.map((s) => (
               <ListCard key={s.id}>
                 <div className="flex items-start gap-2">
-                  <input
-                    type="checkbox"
-                    checked={seleccionados.has(s.id)}
-                    onChange={() => alternarSeleccion(s.id)}
-                    className="mt-1 h-4 w-4 shrink-0 rounded border-slate-300"
-                  />
+                  {puedeEditar && (
+                    <input
+                      type="checkbox"
+                      checked={seleccionados.has(s.id)}
+                      onChange={() => alternarSeleccion(s.id)}
+                      className="mt-1 h-4 w-4 shrink-0 rounded border-slate-300"
+                    />
+                  )}
                   <button
                     type="button"
                     onClick={() => setDetalleId(s.id)}
@@ -466,6 +477,8 @@ function ListadoTab() {
 }
 
 function BarriosEstratosTab() {
+  const { usuario } = useAuth();
+  const puedeEditar = usuario?.permisos?.includes("suscriptores_avanzado") ?? false;
   const [barrios, setBarrios] = useState<Barrio[]>([]);
   const [estratos, setEstratos] = useState<Estrato[]>([]);
   const [cargando, setCargando] = useState(true);
@@ -588,22 +601,24 @@ function BarriosEstratosTab() {
           </div>
         )}
 
-        <form onSubmit={crearBarrio} className="mb-3 flex gap-2">
-          <input
-            placeholder="Nombre del barrio nuevo"
-            value={nuevoBarrio}
-            onChange={(e) => setNuevoBarrio(e.target.value)}
-            className={`${inputClass} flex-1`}
-          />
-          <button
-            type="submit"
-            disabled={creando}
-            className="flex shrink-0 items-center gap-1.5 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-500 disabled:opacity-50"
-          >
-            <Plus className="h-4 w-4" />
-            Crear
-          </button>
-        </form>
+        {puedeEditar && (
+          <form onSubmit={crearBarrio} className="mb-3 flex gap-2">
+            <input
+              placeholder="Nombre del barrio nuevo"
+              value={nuevoBarrio}
+              onChange={(e) => setNuevoBarrio(e.target.value)}
+              className={`${inputClass} flex-1`}
+            />
+            <button
+              type="submit"
+              disabled={creando}
+              className="flex shrink-0 items-center gap-1.5 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-500 disabled:opacity-50"
+            >
+              <Plus className="h-4 w-4" />
+              Crear
+            </button>
+          </form>
+        )}
 
         {cargando ? (
           <p className="text-sm text-slate-700 dark:text-slate-400">Cargando...</p>
@@ -637,23 +652,25 @@ function BarriosEstratosTab() {
                     {b.suscriptores} {b.suscriptores === 1 ? "suscriptor" : "suscriptores"}
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => iniciarEdicionBarrio(b)}
-                    title="Editar barrio"
-                    className="text-slate-600 hover:text-brand-600"
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    onClick={() => eliminarBarrio(b)}
-                    disabled={b.suscriptores > 0}
-                    title={b.suscriptores > 0 ? "No se puede eliminar: tiene suscriptores asignados" : "Eliminar barrio"}
-                    className="text-slate-600 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-30"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </div>
+                {puedeEditar && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => iniciarEdicionBarrio(b)}
+                      title="Editar barrio"
+                      className="text-slate-600 hover:text-brand-600"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      onClick={() => eliminarBarrio(b)}
+                      disabled={b.suscriptores > 0}
+                      title={b.suscriptores > 0 ? "No se puede eliminar: tiene suscriptores asignados" : "Eliminar barrio"}
+                      className="text-slate-600 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-30"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )}
               </div>
               )
             )}
@@ -677,28 +694,30 @@ function BarriosEstratosTab() {
           </div>
         )}
 
-        <form onSubmit={crearEstrato} className="mb-3 flex gap-2">
-          <input
-            placeholder="Código (ej. 5)"
-            value={nuevoEstratoCodigo}
-            onChange={(e) => setNuevoEstratoCodigo(e.target.value)}
-            className={`${inputClass} w-28`}
-          />
-          <input
-            placeholder="Etiqueta (ej. Medio - Alto)"
-            value={nuevoEstratoEtiqueta}
-            onChange={(e) => setNuevoEstratoEtiqueta(e.target.value)}
-            className={`${inputClass} flex-1`}
-          />
-          <button
-            type="submit"
-            disabled={creandoEstrato}
-            className="flex shrink-0 items-center gap-1.5 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-500 disabled:opacity-50"
-          >
-            <Plus className="h-4 w-4" />
-            Crear
-          </button>
-        </form>
+        {puedeEditar && (
+          <form onSubmit={crearEstrato} className="mb-3 flex gap-2">
+            <input
+              placeholder="Código (ej. 5)"
+              value={nuevoEstratoCodigo}
+              onChange={(e) => setNuevoEstratoCodigo(e.target.value)}
+              className={`${inputClass} w-28`}
+            />
+            <input
+              placeholder="Etiqueta (ej. Medio - Alto)"
+              value={nuevoEstratoEtiqueta}
+              onChange={(e) => setNuevoEstratoEtiqueta(e.target.value)}
+              className={`${inputClass} flex-1`}
+            />
+            <button
+              type="submit"
+              disabled={creandoEstrato}
+              className="flex shrink-0 items-center gap-1.5 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-500 disabled:opacity-50"
+            >
+              <Plus className="h-4 w-4" />
+              Crear
+            </button>
+          </form>
+        )}
 
         {cargando ? (
           <p className="text-sm text-slate-700 dark:text-slate-400">Cargando...</p>
@@ -743,21 +762,25 @@ function BarriosEstratosTab() {
                   <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-400">
                     {e.codigo}
                   </span>
-                  <button
-                    onClick={() => iniciarEdicionEstrato(e)}
-                    title="Editar estrato"
-                    className="text-slate-600 hover:text-brand-600"
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    onClick={() => eliminarEstrato(e)}
-                    disabled={e.suscriptores > 0}
-                    title={e.suscriptores > 0 ? "No se puede eliminar: tiene suscriptores asignados" : "Eliminar estrato"}
-                    className="text-slate-600 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-30"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                  {puedeEditar && (
+                    <>
+                      <button
+                        onClick={() => iniciarEdicionEstrato(e)}
+                        title="Editar estrato"
+                        className="text-slate-600 hover:text-brand-600"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        onClick={() => eliminarEstrato(e)}
+                        disabled={e.suscriptores > 0}
+                        title={e.suscriptores > 0 ? "No se puede eliminar: tiene suscriptores asignados" : "Eliminar estrato"}
+                        className="text-slate-600 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-30"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
               )

@@ -115,6 +115,7 @@ export default function SuscriptorDetailModal({
   const { saliendo, cerrar } = useCierreAnimado(onClose);
   const [instaladores, setInstaladores] = useState<{ id: number; nombre: string }[]>([]);
   const { usuario } = useAuth();
+  const puedeEditar = usuario?.permisos?.includes("suscriptores_avanzado") ?? false;
 
   const [medidorCotitularAbierto, setMedidorCotitularAbierto] = useState<number | null>(null);
   const [nuevoCotitularNuid, setNuevoCotitularNuid] = useState("");
@@ -515,55 +516,79 @@ export default function SuscriptorDetailModal({
             <div className="flex flex-wrap gap-4">
               <div>
                 <div className="text-xs uppercase text-slate-700 dark:text-slate-400">Estado de facturación</div>
-                <select
-                  value={suscriptor.estadoFacturacion}
-                  disabled={guardandoEstado}
-                  onChange={(e) => cambiarEstadoFacturacion(e.target.value)}
-                  className="mt-1 rounded-full border-0 px-2.5 py-1 text-xs font-medium"
-                  style={{
-                    backgroundColor: ESTADO_FACTURACION_HEX[suscriptor.estadoFacturacion].bg,
-                    color: ESTADO_FACTURACION_HEX[suscriptor.estadoFacturacion].text,
-                  }}
-                >
-                  {Object.entries(ESTADO_FACTURACION_LABELS).map(([valor, label]) => (
-                    <option
-                      key={valor}
-                      value={valor}
-                      style={{ backgroundColor: ESTADO_FACTURACION_HEX[valor].bg, color: ESTADO_FACTURACION_HEX[valor].text }}
-                    >
-                      {label}
-                    </option>
-                  ))}
-                </select>
+                {puedeEditar ? (
+                  <select
+                    value={suscriptor.estadoFacturacion}
+                    disabled={guardandoEstado}
+                    onChange={(e) => cambiarEstadoFacturacion(e.target.value)}
+                    className="mt-1 rounded-full border-0 px-2.5 py-1 text-xs font-medium"
+                    style={{
+                      backgroundColor: ESTADO_FACTURACION_HEX[suscriptor.estadoFacturacion].bg,
+                      color: ESTADO_FACTURACION_HEX[suscriptor.estadoFacturacion].text,
+                    }}
+                  >
+                    {Object.entries(ESTADO_FACTURACION_LABELS).map(([valor, label]) => (
+                      <option
+                        key={valor}
+                        value={valor}
+                        style={{ backgroundColor: ESTADO_FACTURACION_HEX[valor].bg, color: ESTADO_FACTURACION_HEX[valor].text }}
+                      >
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <span
+                    className="mt-1 inline-block rounded-full px-2.5 py-1 text-xs font-medium"
+                    style={{
+                      backgroundColor: ESTADO_FACTURACION_HEX[suscriptor.estadoFacturacion].bg,
+                      color: ESTADO_FACTURACION_HEX[suscriptor.estadoFacturacion].text,
+                    }}
+                  >
+                    {ESTADO_FACTURACION_LABELS[suscriptor.estadoFacturacion]}
+                  </span>
+                )}
                 {errorEstado && <p className="mt-1 max-w-xs text-xs text-red-600 dark:text-red-400">{errorEstado}</p>}
               </div>
               <div>
                 <div className="text-xs uppercase text-slate-700 dark:text-slate-400">Estado del predio</div>
-                <select
-                  value={suscriptor.estadoPredio}
-                  disabled={guardandoPredio}
-                  onChange={(e) => cambiarEstadoPredio(e.target.value)}
-                  className="mt-1 rounded-full border-0 px-2.5 py-1 text-xs font-medium"
-                  style={{
-                    backgroundColor: ESTADO_PREDIO_HEX[suscriptor.estadoPredio].bg,
-                    color: ESTADO_PREDIO_HEX[suscriptor.estadoPredio].text,
-                  }}
-                >
-                  {Object.entries(ESTADO_PREDIO_LABELS).map(([valor, label]) => (
-                    <option
-                      key={valor}
-                      value={valor}
-                      style={{ backgroundColor: ESTADO_PREDIO_HEX[valor].bg, color: ESTADO_PREDIO_HEX[valor].text }}
-                    >
-                      {label}
-                    </option>
-                  ))}
-                </select>
+                {puedeEditar ? (
+                  <select
+                    value={suscriptor.estadoPredio}
+                    disabled={guardandoPredio}
+                    onChange={(e) => cambiarEstadoPredio(e.target.value)}
+                    className="mt-1 rounded-full border-0 px-2.5 py-1 text-xs font-medium"
+                    style={{
+                      backgroundColor: ESTADO_PREDIO_HEX[suscriptor.estadoPredio].bg,
+                      color: ESTADO_PREDIO_HEX[suscriptor.estadoPredio].text,
+                    }}
+                  >
+                    {Object.entries(ESTADO_PREDIO_LABELS).map(([valor, label]) => (
+                      <option
+                        key={valor}
+                        value={valor}
+                        style={{ backgroundColor: ESTADO_PREDIO_HEX[valor].bg, color: ESTADO_PREDIO_HEX[valor].text }}
+                      >
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <span
+                    className="mt-1 inline-block rounded-full px-2.5 py-1 text-xs font-medium"
+                    style={{
+                      backgroundColor: ESTADO_PREDIO_HEX[suscriptor.estadoPredio].bg,
+                      color: ESTADO_PREDIO_HEX[suscriptor.estadoPredio].text,
+                    }}
+                  >
+                    {ESTADO_PREDIO_LABELS[suscriptor.estadoPredio]}
+                  </span>
+                )}
                 {errorPredio && <p className="mt-1 max-w-xs text-xs text-red-600 dark:text-red-400">{errorPredio}</p>}
               </div>
             </div>
 
-            {editandoInfo ? (
+            {editandoInfo && puedeEditar ? (
               <form onSubmit={onSubmitInfo} className="rounded-lg border border-slate-200 p-3 dark:border-slate-800">
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                   <label className="col-span-2 flex flex-col gap-1 text-xs font-medium text-slate-700 sm:col-span-3">
@@ -657,15 +682,17 @@ export default function SuscriptorDetailModal({
               </form>
             ) : (
               <div>
-                <div className="mb-2 flex justify-end">
-                  <button
-                    onClick={abrirEdicionInfo}
-                    className="inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:underline dark:text-brand-400"
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                    Editar información
-                  </button>
-                </div>
+                {puedeEditar && (
+                  <div className="mb-2 flex justify-end">
+                    <button
+                      onClick={abrirEdicionInfo}
+                      className="inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:underline dark:text-brand-400"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                      Editar información
+                    </button>
+                  </div>
+                )}
                 <div className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-3">
                   <div>
                     <div className="text-xs uppercase text-slate-700 dark:text-slate-400">NUID</div>
@@ -718,7 +745,7 @@ export default function SuscriptorDetailModal({
                     </span>
                   )}
                 </button>
-                {mapaAbierto && !editandoUbicacion && (
+                {mapaAbierto && !editandoUbicacion && puedeEditar && (
                   <button
                     onClick={() => setEditandoUbicacion(true)}
                     className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400"
@@ -789,7 +816,7 @@ export default function SuscriptorDetailModal({
                   <Gauge className="h-4 w-4 text-brand-500" />
                   Medidores
                 </h3>
-                {!asignando && suscriptor.estadoPredio !== "inactivo" && (
+                {puedeEditar && !asignando && suscriptor.estadoPredio !== "inactivo" && (
                   <button
                     onClick={abrirAsignacion}
                     className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400"
@@ -799,12 +826,12 @@ export default function SuscriptorDetailModal({
                       : "+ Asignar medidor"}
                   </button>
                 )}
-                {!asignando && suscriptor.estadoPredio === "inactivo" && (
+                {puedeEditar && !asignando && suscriptor.estadoPredio === "inactivo" && (
                   <span className="text-xs text-slate-600 dark:text-slate-400">Predio inactivo: no puede tener medidor</span>
                 )}
               </div>
 
-              {asignando && (
+              {asignando && puedeEditar && (
                 <AsignarMedidorModal
                   editandoMedidorId={editandoMedidorId}
                   editandoEsRetirado={editandoEsRetirado}
@@ -913,14 +940,16 @@ export default function SuscriptorDetailModal({
                           Descargar acta
                         </button>
                       )}
-                      <button
-                        onClick={() => abrirEdicion(m)}
-                        className="inline-flex items-center gap-1 text-xs font-medium text-slate-700 hover:text-brand-600 dark:text-slate-400"
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                        Editar
-                      </button>
-                      {actaPorMedidor[m.id] && (
+                      {puedeEditar && (
+                        <button
+                          onClick={() => abrirEdicion(m)}
+                          className="inline-flex items-center gap-1 text-xs font-medium text-slate-700 hover:text-brand-600 dark:text-slate-400"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                          Editar
+                        </button>
+                      )}
+                      {puedeEditar && actaPorMedidor[m.id] && (
                         <button
                           onClick={() => eliminarAsignacion(m)}
                           className="inline-flex items-center gap-1 text-xs font-medium text-slate-700 hover:text-red-600 dark:text-slate-400"
@@ -942,18 +971,20 @@ export default function SuscriptorDetailModal({
                                 <span>
                                   {c.suscriptor.nombre} (NUID {c.suscriptor.codigo})
                                 </span>
-                                <button
-                                  onClick={() => quitarCotitular(m.id, c.suscriptor.id, c.suscriptor.nombre)}
-                                  className="text-slate-500 hover:text-red-600 dark:text-slate-400"
-                                  title="Quitar cotitular"
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </button>
+                                {puedeEditar && (
+                                  <button
+                                    onClick={() => quitarCotitular(m.id, c.suscriptor.id, c.suscriptor.nombre)}
+                                    className="text-slate-500 hover:text-red-600 dark:text-slate-400"
+                                    title="Quitar cotitular"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                )}
                               </li>
                             ))}
                           </ul>
                         )}
-                        {medidorCotitularAbierto === m.id ? (
+                        {puedeEditar && (medidorCotitularAbierto === m.id ? (
                           <form onSubmit={(e) => agregarCotitular(m.id, e)} className="flex items-center gap-2">
                             <input
                               autoFocus
@@ -987,7 +1018,7 @@ export default function SuscriptorDetailModal({
                           >
                             + Agregar cotitular por NUID
                           </button>
-                        )}
+                        ))}
                         {errorCotitular && medidorCotitularAbierto === m.id && (
                           <p className="mt-1 text-xs text-red-600 dark:text-red-400">{errorCotitular}</p>
                         )}
@@ -1016,7 +1047,7 @@ export default function SuscriptorDetailModal({
                           el {fmtFecha(a.fechaRetiro)}
                         </div>
                         <div className="text-xs text-slate-600 dark:text-slate-400">Instalado por: {a.instaladoPor}</div>
-                        {a.medidor && (
+                        {a.medidor && puedeEditar && (
                           <button
                             type="button"
                             onClick={() => abrirEdicionRetirado(a)}

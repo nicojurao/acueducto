@@ -39,7 +39,7 @@ function valor(row: any[], idx: number): string | undefined {
 // Solo trae los suscriptores que YA tienen un medidor activo asignado (no los 4000+ completos):
 // la mayoría de suscriptores todavía no tienen medidor cargado, así que traerlos todos solo
 // generaba filas vacías que había que borrar a mano antes de poder trabajar la plantilla.
-medidoresRouter.get("/export", async (req, res) => {
+medidoresRouter.get("/export", soloAvanzado, async (req, res) => {
   // Sin "ids" exporta todos los suscriptores con medidor activo (uso normal: plantilla de
   // import/export). Con "ids" (coma-separado, IDs de Medidor) exporta solo esos — lo usa el
   // botón "Exportar seleccionados" del listado. Un medidor "en bodega" (sin suscriptor) no
