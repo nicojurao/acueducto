@@ -22,7 +22,7 @@ import { usuariosRouter } from "./routes/usuarios.js";
 import { rolesRouter } from "./routes/roles.js";
 import { barriosRouter } from "./routes/barrios.js";
 import { estratosRouter } from "./routes/estratos.js";
-import { puntosAforoRouter, aforosRouter } from "./routes/aforos.js";
+import { puntosAforoRouter, aforosRouter, aforosKpisRouter } from "./routes/aforos.js";
 import {
   itemsInventarioRouter,
   prestamosInventarioRouter,
@@ -122,6 +122,7 @@ app.use("/api/diametros", requirePermiso("catalogos"), diametrosRouter);
 app.use("/api/lotes", requirePermiso("catalogos"), lotesRouter);
 app.use("/api/actas", requirePermiso("actas"), actasRouter);
 app.use("/api/puntos-aforo", requirePermiso("aforos_ver", "aforos_avanzado"), puntosAforoRouter);
+app.use("/api/aforos/kpis", requirePermiso("aforos_ver", "aforos_avanzado"), aforosKpisRouter);
 app.use("/api/aforos", requirePermiso("aforos_ver", "aforos_avanzado"), aforosRouter);
 app.use("/api/inventario/items", requirePermiso("inventario_ver", "inventario_avanzado"), itemsInventarioRouter);
 app.use("/api/inventario/prestamos", requirePermiso("inventario_ver", "inventario_avanzado"), prestamosInventarioRouter);

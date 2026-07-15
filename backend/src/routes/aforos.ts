@@ -14,6 +14,7 @@ import { requirePermiso } from "../middleware/auth.js";
 
 export const puntosAforoRouter = Router();
 export const aforosRouter = Router();
+export const aforosKpisRouter = Router();
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -405,6 +406,111 @@ aforosRouter.get("/:id/pdf", async (req, res) => {
   }
 
   doc.end();
+});
+
+// Dashboard de Aforos: KPIs generales + tendencia de caudal por punto en el tiempo + alertas de
+// caudal bajo. "Caudal bajo" se define de forma relativa a cada punto (por debajo del 50 % de su
+// propio promedio histórico), no con un umbral fijo, porque cada fuente tiene su propio rango.
+aforosKpisRouter.get("/", async (req, res) => {
+  const meses = Math.min(36, Math.max(1, Number(req.query.meses) || 12));
+  // Todo el manejo de meses es en UTC (igual que dashboard.ts) para que el bucketing por mes de
+  // los aforos y el cursor de la serie temporal coincidan sin desfases por zona horaria.
+  const ahora = new Date();
+  const desde = new Date(Date.UTC(ahora.getUTCFullYear(), ahora.getUTCMonth() - meses + 1, 1));
+
+  const [puntos, aforos] = await Promise.all([
+    prisma.puntoAforo.findMany({ orderBy: { nombre: "asc" } }),
+    prisma.aforo.findMany({
+      where: { fecha: { gte: desde } },
+      include: { puntoAforo: { select: { nombre: true } } },
+      orderBy: { fecha: "asc" },
+    }),
+  ]);
+
+  const totalRegistros = aforos.length;
+  const caudales = aforos.map((a) => Number(a.caudalLps));
+  const caudalPromedio = caudales.length ? suma(caudales) / caudales.length : 0;
+
+  // Último aforo global (los aforos vienen ordenados ascendente por fecha).
+  const ultimo = aforos.length ? aforos[aforos.length - 1] : null;
+
+  // Agrupa por punto para: último caudal, promedio del punto y detectar caudal bajo.
+  const porPunto = new Map<number, { nombre: string; valores: { fecha: Date; caudal: number }[] }>();
+  for (const a of aforos) {
+    const entrada = porPunto.get(a.puntoAforoId) ?? { nombre: a.puntoAforo.nombre, valores: [] };
+    entrada.valores.push({ fecha: a.fecha, caudal: Number(a.caudalLps) });
+    porPunto.set(a.puntoAforoId, entrada);
+  }
+
+  // Resumen por punto: último caudal medido y promedio del periodo.
+  const resumenPorPunto = Array.from(porPunto.entries()).map(([puntoAforoId, { nombre, valores }]) => {
+    const soloCaudales = valores.map((v) => v.caudal);
+    const prom = soloCaudales.length ? suma(soloCaudales) / soloCaudales.length : 0;
+    const ultimoDelPunto = valores[valores.length - 1];
+    return {
+      puntoAforoId,
+      nombre,
+      ultimoCaudal: ultimoDelPunto?.caudal ?? null,
+      ultimaFecha: ultimoDelPunto?.fecha ?? null,
+      promedio: Math.round(prom * 1000) / 1000,
+      registros: valores.length,
+    };
+  });
+
+  // Alertas de caudal bajo: el último aforo del punto quedó por debajo del 50 % del promedio
+  // histórico de ese mismo punto (se necesitan al menos 2 registros para tener referencia).
+  const alertasCaudalBajo = resumenPorPunto
+    .filter((p) => p.registros >= 2 && p.ultimoCaudal !== null && p.promedio > 0 && p.ultimoCaudal < p.promedio * 0.5)
+    .map((p) => ({
+      puntoAforoId: p.puntoAforoId,
+      nombre: p.nombre,
+      ultimoCaudal: p.ultimoCaudal!,
+      promedio: p.promedio,
+      ultimaFecha: p.ultimaFecha,
+    }));
+
+  // Serie temporal para la gráfica: una fila por mes (YYYY-MM), una columna por punto con el
+  // promedio de los aforos de ese punto en ese mes. Se rellenan todos los meses del rango para
+  // que la línea no tenga huecos raros aunque un mes no tenga aforos.
+  const nombresPuntos = resumenPorPunto.map((p) => p.nombre);
+  const porMes = new Map<string, Map<string, number[]>>();
+  for (const a of aforos) {
+    const mes = `${a.fecha.getUTCFullYear()}-${String(a.fecha.getUTCMonth() + 1).padStart(2, "0")}`;
+    const fila = porMes.get(mes) ?? new Map<string, number[]>();
+    const lista = fila.get(a.puntoAforo.nombre) ?? [];
+    lista.push(Number(a.caudalLps));
+    fila.set(a.puntoAforo.nombre, lista);
+    porMes.set(mes, fila);
+  }
+
+  const tendencia: Record<string, number | string>[] = [];
+  const cursor = new Date(desde);
+  while (cursor <= ahora) {
+    const mes = `${cursor.getUTCFullYear()}-${String(cursor.getUTCMonth() + 1).padStart(2, "0")}`;
+    const fila: Record<string, number | string> = { mes };
+    const datosMes = porMes.get(mes);
+    for (const nombre of nombresPuntos) {
+      const valores = datosMes?.get(nombre);
+      if (valores?.length) fila[nombre] = Math.round((suma(valores) / valores.length) * 1000) / 1000;
+    }
+    tendencia.push(fila);
+    cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+  }
+
+  res.json({
+    meses,
+    totalPuntos: puntos.length,
+    puntosActivos: puntos.filter((p) => p.activo).length,
+    totalRegistros,
+    caudalPromedio: Math.round(caudalPromedio * 1000) / 1000,
+    ultimoCaudal: ultimo ? Number(ultimo.caudalLps) : null,
+    ultimoPunto: ultimo?.puntoAforo.nombre ?? null,
+    ultimaFecha: ultimo?.fecha ?? null,
+    nombresPuntos,
+    resumenPorPunto,
+    alertasCaudalBajo,
+    tendencia,
+  });
 });
 
 aforosRouter.delete("/:id", requirePermiso("aforos_avanzado"), async (req, res) => {
