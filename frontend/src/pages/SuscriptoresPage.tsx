@@ -27,6 +27,7 @@ import {
 } from "../api/client";
 import SuscriptorDetailModal from "../components/SuscriptorDetailModal";
 import ImportExcelModal from "../components/ImportExcelModal";
+import ListCard from "../components/ListCard";
 import { useConfirm, useErrorHandler } from "../components/ConfirmModal";
 import { useEsMovil } from "../lib/useEsMovil";
 import { SkeletonTabla } from "../components/Skeleton";
@@ -309,7 +310,7 @@ function ListadoTab() {
         <SkeletonTabla columnas={7} filas={porPagina} />
       ) : (
         <>
-          <div className="overflow-x-auto rounded-xl border border-brand-200 bg-white shadow-sm animate-content-in dark:border-slate-800 dark:bg-slate-900">
+          <div className="hidden md:block overflow-x-auto rounded-xl border border-brand-200 bg-white shadow-sm animate-content-in dark:border-slate-800 dark:bg-slate-900">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-brand-100 bg-brand-50 text-left text-brand-800 dark:border-slate-800 dark:bg-slate-800/50 dark:text-slate-400">
@@ -377,6 +378,47 @@ function ListadoTab() {
                 )}
               </tbody>
             </table>
+          </div>
+
+          <div className="space-y-2 md:hidden">
+            {suscriptores.map((s) => (
+              <ListCard key={s.id}>
+                <div className="flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    checked={seleccionados.has(s.id)}
+                    onChange={() => alternarSeleccion(s.id)}
+                    className="mt-1 h-4 w-4 shrink-0 rounded border-slate-300"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setDetalleId(s.id)}
+                    className="min-w-0 flex-1 text-left"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold text-slate-800 dark:text-slate-100">{s.codigo}</span>
+                      <span
+                        className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
+                          ESTADO_FACTURACION_COLORS[s.estadoFacturacion]
+                        }`}
+                      >
+                        {ESTADO_FACTURACION_LABELS[s.estadoFacturacion]}
+                      </span>
+                    </div>
+                    <div className="truncate text-sm text-slate-700 dark:text-slate-300">{s.nombre}</div>
+                    <div className="mt-1 flex items-center justify-between gap-2">
+                      <span className="text-xs text-slate-600 dark:text-slate-400">
+                        {s.barrioCat?.nombre ?? "-"} · Ruta {s.ruta ?? "-"}
+                      </span>
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${ESTADO_PREDIO_COLORS[s.estadoPredio]}`}>
+                        {ESTADO_PREDIO_LABELS[s.estadoPredio]}
+                      </span>
+                    </div>
+                  </button>
+                </div>
+              </ListCard>
+            ))}
+            {suscriptores.length === 0 && <EmptyState mensaje="Sin resultados." />}
           </div>
 
           <div className="mt-3 flex flex-wrap items-center justify-between gap-3 sm:mt-4">

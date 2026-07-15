@@ -7,6 +7,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { useCierreAnimado } from "../lib/useCierreAnimado";
 import BusquedaInput from "../components/BusquedaInput";
 import EmptyState from "../components/EmptyState";
+import ListCard from "../components/ListCard";
 
 const inputClass =
   "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:placeholder:text-slate-500";
@@ -439,7 +440,8 @@ export default function UsuariosPage() {
       {cargando ? (
         <p className="text-slate-700 dark:text-slate-400">Cargando...</p>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-brand-200 bg-white shadow-sm animate-content-in dark:border-slate-800 dark:bg-slate-900">
+        <>
+        <div className="hidden md:block overflow-x-auto rounded-xl border border-brand-200 bg-white shadow-sm animate-content-in dark:border-slate-800 dark:bg-slate-900">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-brand-100 bg-brand-50 text-left text-brand-800 dark:border-slate-800 dark:bg-slate-800/50 dark:text-slate-400">
@@ -524,6 +526,65 @@ export default function UsuariosPage() {
             </tbody>
           </table>
         </div>
+
+        <div className="space-y-2 md:hidden">
+          {filtrados.map((u) => (
+            <ListCard key={u.id}>
+              <div className="flex items-start gap-3">
+                {u.foto ? (
+                  <img src={urlFoto(u.foto)} alt="" className="h-10 w-10 shrink-0 rounded-full object-cover" />
+                ) : (
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-100 text-xs font-semibold text-brand-700 dark:bg-brand-500/15 dark:text-brand-400">
+                    {iniciales(u.nombre)}
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium text-slate-800 dark:text-slate-100">
+                    {u.nombre}
+                    {yo?.id === u.id && (
+                      <span className="ml-2 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-normal text-slate-700 dark:bg-slate-800 dark:text-slate-400">
+                        Tú
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-xs text-slate-600">@{u.nombreUsuario}</div>
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-700 dark:bg-violet-500/15 dark:text-violet-400">
+                      {u.rol.nombre}
+                    </span>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                        u.activo
+                          ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400"
+                          : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400"
+                      }`}
+                    >
+                      {u.activo ? "Activo" : "Inactivo"}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-start gap-3 text-slate-600">
+                  <button onClick={() => abrirEdicion(u)} className="hover:text-brand-600">
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    onClick={() => eliminar(u)}
+                    disabled={yo?.id === u.id}
+                    className="hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            </ListCard>
+          ))}
+          {filtrados.length === 0 && (
+            <EmptyState
+              mensaje={usuarios.length === 0 ? "Aún no hay usuarios." : "Ningún usuario coincide con la búsqueda."}
+            />
+          )}
+        </div>
+        </>
       )}
     </div>
   );

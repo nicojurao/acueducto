@@ -3,6 +3,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsi
 import { Waves, Plus, Trash2, ChevronLeft, ChevronRight, Image as ImageIcon, FileText, Gauge, MapPin, Activity, AlertTriangle } from "lucide-react";
 import { api, Aforo, AforoKpis, PuntoAforo, urlFoto } from "../api/client";
 import AforoModal from "../components/AforoModal";
+import ListCard from "../components/ListCard";
 import KpiCard from "../components/KpiCard";
 import ChartCard from "../components/ChartCard";
 import { useConfirm, useErrorHandler } from "../components/ConfirmModal";
@@ -212,7 +213,7 @@ function PuntosTab({ puntos, recargar }: { puntos: PuntoAforo[]; recargar: () =>
         )}
       </div>
 
-      <div className="overflow-x-auto rounded-xl border border-brand-200 bg-white shadow-sm animate-content-in dark:border-slate-800 dark:bg-slate-900">
+      <div className="hidden md:block overflow-x-auto rounded-xl border border-brand-200 bg-white shadow-sm animate-content-in dark:border-slate-800 dark:bg-slate-900">
         <table className="w-full text-left text-sm">
           <thead className="border-b border-brand-100 bg-brand-50 text-xs uppercase text-brand-800 dark:border-slate-800 dark:bg-transparent dark:text-slate-400">
             <tr>
@@ -244,6 +245,28 @@ function PuntosTab({ puntos, recargar }: { puntos: PuntoAforo[]; recargar: () =>
             )}
           </tbody>
         </table>
+      </div>
+
+      <div className="space-y-2 md:hidden">
+        {puntos.map((p) => (
+          <ListCard key={p.id}>
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0 flex-1">
+                <div className="font-medium text-slate-800 dark:text-slate-100">{p.nombre}</div>
+                {p.descripcion && (
+                  <div className="truncate text-xs text-slate-600 dark:text-slate-400">{p.descripcion}</div>
+                )}
+                <div className="text-xs text-slate-600 dark:text-slate-400">{p.registros ?? 0} registros</div>
+              </div>
+              <button onClick={() => eliminar(p)} className="shrink-0 rounded-lg p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10">
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
+          </ListCard>
+        ))}
+        {puntos.length === 0 && (
+          <p className="px-2 py-4 text-center text-sm text-slate-600">Todavía no hay puntos de aforo registrados.</p>
+        )}
       </div>
       {modal}
     </div>

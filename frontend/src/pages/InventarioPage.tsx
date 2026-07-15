@@ -33,6 +33,7 @@ import {
 } from "../api/client";
 import ItemInventarioModal, { UNIDAD_ABREVIADA } from "../components/ItemInventarioModal";
 import ItemInventarioDetalleModal from "../components/ItemInventarioDetalleModal";
+import ListCard from "../components/ListCard";
 import KpiCard from "../components/KpiCard";
 import ChartCard from "../components/ChartCard";
 import { useConfirm, useErrorHandler } from "../components/ConfirmModal";
@@ -290,7 +291,8 @@ function ItemsTab({
           mensaje={busqueda.trim() ? `Sin resultados para "${busqueda}".` : "No hay ítems registrados en el inventario."}
         />
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-brand-200 bg-white shadow-sm animate-content-in dark:border-slate-800 dark:bg-slate-900">
+        <>
+        <div className="hidden md:block overflow-x-auto rounded-xl border border-brand-200 bg-white shadow-sm animate-content-in dark:border-slate-800 dark:bg-slate-900">
           <table className="w-full text-left text-sm">
             <thead className="border-b border-brand-100 bg-brand-50 text-xs uppercase text-brand-800 dark:border-slate-800 dark:bg-transparent dark:text-slate-400">
               <tr>
@@ -369,6 +371,56 @@ function ItemsTab({
             </tbody>
           </table>
         </div>
+
+        <div className="space-y-2 md:hidden">
+          {filas.map((item) => (
+            <ListCard key={item.id}>
+              <div className="flex items-start gap-3">
+                <button
+                  onClick={() => setDetalle(item)}
+                  className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                >
+                  {item.fotoUrl ? (
+                    <img src={urlFoto(item.fotoUrl)} alt="" className="h-12 w-12 shrink-0 rounded-lg object-cover" />
+                  ) : (
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-400 dark:bg-slate-800">
+                      <ImageIcon className="h-5 w-5" />
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-medium text-slate-800 hover:underline dark:text-slate-100">{item.nombre}</div>
+                    {item.codigo && <div className="text-xs text-slate-600 dark:text-slate-400">{item.codigo}</div>}
+                    <span className={`mt-1 inline-block rounded-full px-2 py-0.5 text-xs font-medium ${ESTADO_COLORS[item.estado]}`}>
+                      {ESTADO_LABELS[item.estado] ?? item.estado}
+                    </span>
+                  </div>
+                </button>
+                {puedeEditar && (
+                  <div className="flex shrink-0 flex-col items-end gap-1">
+                    <button
+                      onClick={() => setModalAbierto(item)}
+                      className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </button>
+                    <button onClick={() => eliminar(item)} className="rounded-lg p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10">
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                )}
+              </div>
+              <div className="mt-2 flex items-center justify-between text-xs text-slate-600 dark:text-slate-400">
+                <span>
+                  {item.categoriaCat?.nombre ?? "-"} · {item.ubicacionCat?.nombre ?? "-"}
+                </span>
+                <span>
+                  Disponible: {item.disponible} / {item.cantidad} {UNIDAD_ABREVIADA[item.unidadMedida] ?? item.unidadMedida}
+                </span>
+              </div>
+            </ListCard>
+          ))}
+        </div>
+        </>
       )}
 
       {!cargando && total > 0 && (
