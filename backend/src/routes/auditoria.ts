@@ -61,21 +61,30 @@ auditoriaRouter.get("/:id/cambios", async (req, res) => {
 
   const idsMedidor = [...new Set(items.filter((i) => i.entidad === "medidor").map((i) => i.entidadId))];
   const idsSuscriptor = [...new Set(items.filter((i) => i.entidad === "suscriptor").map((i) => i.entidadId))];
-  const [medidores, suscriptores] = await Promise.all([
+  const idsUsuario = [...new Set(items.filter((i) => i.entidad === "usuario").map((i) => i.entidadId))];
+  const [medidores, suscriptores, usuariosEntidad] = await Promise.all([
     idsMedidor.length
       ? prisma.medidor.findMany({ where: { id: { in: idsMedidor } }, select: { id: true, serial: true } })
       : [],
     idsSuscriptor.length
       ? prisma.suscriptor.findMany({ where: { id: { in: idsSuscriptor } }, select: { id: true, nombre: true, codigo: true } })
       : [],
+    idsUsuario.length
+      ? prisma.usuario.findMany({ where: { id: { in: idsUsuario } }, select: { id: true, nombre: true } })
+      : [],
   ]);
   const nombreMedidor = new Map(medidores.map((m) => [m.id, m.serial ?? `#${m.id}`]));
   const nombreSuscriptor = new Map(suscriptores.map((s) => [s.id, `${s.nombre} (${s.codigo})`]));
+  const nombreUsuarioEntidad = new Map(usuariosEntidad.map((u) => [u.id, u.nombre]));
 
   const data = items.map((i) => ({
     ...i,
     entidadNombre:
-      i.entidad === "medidor" ? nombreMedidor.get(i.entidadId) ?? `#${i.entidadId}` : nombreSuscriptor.get(i.entidadId) ?? `#${i.entidadId}`,
+      i.entidad === "medidor"
+        ? nombreMedidor.get(i.entidadId) ?? `#${i.entidadId}`
+        : i.entidad === "usuario"
+        ? nombreUsuarioEntidad.get(i.entidadId) ?? `#${i.entidadId}`
+        : nombreSuscriptor.get(i.entidadId) ?? `#${i.entidadId}`,
   }));
 
   res.json(data);

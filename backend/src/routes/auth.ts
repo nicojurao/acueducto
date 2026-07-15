@@ -8,6 +8,7 @@ import { guardarArchivo, borrarArchivo } from "../lib/storage.js";
 import { resumenDispositivo } from "../lib/userAgent.js";
 import { geolocalizarIp } from "../lib/geoip.js";
 import { registrarCambioContrasena } from "../lib/historial.js";
+import { ipCliente } from "../lib/ip.js";
 
 export const authRouter = Router();
 
@@ -77,10 +78,11 @@ authRouter.post("/login", limiteLogin, async (req, res) => {
   // la geolocalización por IP pega a un servicio externo — se resuelve después, en segundo
   // plano, para no demorar el login si ip-api.com está lento o caído (ver lib/geoip.ts).
   const userAgent = req.headers["user-agent"];
+  const ip = ipCliente(req);
   const sesion = await prisma.inicioSesion.create({
     data: {
       usuarioId: usuario.id,
-      ip: req.ip,
+      ip,
       userAgent: userAgent ?? null,
       dispositivo: resumenDispositivo(userAgent),
     },
@@ -88,7 +90,7 @@ authRouter.post("/login", limiteLogin, async (req, res) => {
 
   res.json({ token, usuario: perfil(usuario) });
 
-  geolocalizarIp(req.ip).then((geo) => {
+  geolocalizarIp(ip).then((geo) => {
     if (geo.ciudad || geo.region || geo.pais) {
       prisma.inicioSesion.update({ where: { id: sesion.id }, data: geo }).catch(() => {});
     }
