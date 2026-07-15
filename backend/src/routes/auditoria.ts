@@ -1,7 +1,33 @@
 import { Router } from "express";
+import ExcelJS from "exceljs";
 import { prisma } from "../lib/prisma.js";
+import { COLOR_MARCA_ARGB, enviarExcel } from "../lib/excelBranding.js";
 
 export const auditoriaRouter = Router();
+
+const MOTIVO_LABELS_EXCEL: Record<string, string> = {
+  usuario_no_existe: "Usuario/cédula inexistente",
+  contrasena_incorrecta: "Contraseña incorrecta",
+  cuenta_inactiva: "Cuenta inactiva",
+};
+
+function fmtFechaExcel(f: Date): string {
+  return f.toLocaleString("es-CO", { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function hojaConEstilo(wb: ExcelJS.Workbook, nombre: string, columnas: { titulo: string; ancho?: number }[]) {
+  const ws = wb.addWorksheet(nombre);
+  ws.columns = columnas.map((c) => ({ width: c.ancho ?? 20 }));
+  const fila = ws.addRow(columnas.map((c) => c.titulo));
+  fila.eachCell((cell) => {
+    cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: COLOR_MARCA_ARGB } };
+    cell.alignment = { vertical: "middle" };
+  });
+  fila.height = 18;
+  ws.views = [{ state: "frozen", ySplit: 1 }];
+  return ws;
+}
 
 // El JWT de sesión dura 30 días (ver firmarToken en middleware/auth.js) y no hay forma de
 // invalidarlo antes (no hay logout server-side ni lista de revocación) — así que una sesión
@@ -79,6 +105,75 @@ auditoriaRouter.get("/fallidos", async (req, res) => {
   ]);
 
   res.json({ data: items, total, page, limit });
+});
+
+// Excel con todo el historial (sin paginar, ambas tablas completas): sesiones exitosas en una
+// hoja y los intentos fallidos en otra. Pensado como respaldo/reporte para llevar afuera de la
+// app, no para uso diario (para eso están las pantallas paginadas de arriba).
+auditoriaRouter.get("/export", async (_req, res) => {
+  const [sesiones, fallidos] = await Promise.all([
+    prisma.inicioSesion.findMany({
+      include: { usuario: { select: { nombre: true, nombreUsuario: true } } },
+      orderBy: { fecha: "desc" },
+    }),
+    prisma.intentoLoginFallido.findMany({ orderBy: { fecha: "desc" } }),
+  ]);
+
+  // Mismo cálculo de ipNueva/dispositivoNuevo que en GET /, pero sobre el histórico completo.
+  const porUsuarioIp = new Map<string, number>();
+  const porUsuarioDispositivo = new Map<string, number>();
+  for (const s of [...sesiones].reverse()) {
+    const claveIp = `${s.usuarioId}|${s.ip ?? ""}`;
+    if (!porUsuarioIp.has(claveIp)) porUsuarioIp.set(claveIp, s.fecha.getTime());
+    const claveDisp = `${s.usuarioId}|${s.dispositivo ?? ""}`;
+    if (!porUsuarioDispositivo.has(claveDisp)) porUsuarioDispositivo.set(claveDisp, s.fecha.getTime());
+  }
+
+  const wb = new ExcelJS.Workbook();
+
+  const wsSesiones = hojaConEstilo(wb, "Inicios de sesión", [
+    { titulo: "Fecha", ancho: 20 },
+    { titulo: "Usuario", ancho: 22 },
+    { titulo: "IP", ancho: 18 },
+    { titulo: "Ubicación", ancho: 28 },
+    { titulo: "Dispositivo", ancho: 22 },
+    { titulo: "IP nueva", ancho: 12 },
+    { titulo: "Dispositivo nuevo", ancho: 16 },
+  ]);
+  sesiones.forEach((s) => {
+    const ubicacion = [s.ciudad, s.region, s.pais].filter(Boolean).join(", ") || "-";
+    const ipNueva = porUsuarioIp.get(`${s.usuarioId}|${s.ip ?? ""}`) === s.fecha.getTime();
+    const dispositivoNuevo = porUsuarioDispositivo.get(`${s.usuarioId}|${s.dispositivo ?? ""}`) === s.fecha.getTime();
+    wsSesiones.addRow([
+      fmtFechaExcel(s.fecha),
+      s.usuario?.nombre ?? "Usuario eliminado",
+      s.ip ?? "-",
+      ubicacion,
+      s.dispositivo ?? "-",
+      ipNueva ? "Sí" : "No",
+      dispositivoNuevo ? "Sí" : "No",
+    ]);
+  });
+
+  const wsFallidos = hojaConEstilo(wb, "Intentos fallidos", [
+    { titulo: "Fecha", ancho: 20 },
+    { titulo: "Intentó entrar como", ancho: 24 },
+    { titulo: "Motivo", ancho: 24 },
+    { titulo: "IP", ancho: 18 },
+    { titulo: "Dispositivo", ancho: 22 },
+  ]);
+  fallidos.forEach((f) => {
+    wsFallidos.addRow([
+      fmtFechaExcel(f.fecha),
+      f.identificador,
+      MOTIVO_LABELS_EXCEL[f.motivo] ?? f.motivo,
+      f.ip ?? "-",
+      f.dispositivo ?? "-",
+    ]);
+  });
+
+  const buffer = Buffer.from(await wb.xlsx.writeBuffer());
+  enviarExcel(res, buffer, `auditoria-${new Date().toISOString().slice(0, 10)}.xlsx`);
 });
 
 // Cambios (HistorialCambio) hechos por el mismo usuario entre este login y el siguiente login

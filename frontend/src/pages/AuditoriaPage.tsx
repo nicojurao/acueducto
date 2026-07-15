@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState } from "react";
-import { ShieldCheck, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, MapPin, Monitor, AlertTriangle, XCircle } from "lucide-react";
+import { ShieldCheck, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, MapPin, Monitor, AlertTriangle, XCircle, Download } from "lucide-react";
 import { api, InicioSesion, HistorialCambio, IntentoLoginFallido, Usuario } from "../api/client";
 import { useEsMovil } from "../lib/useEsMovil";
 import { inputClass } from "../lib/ui";
@@ -365,10 +365,19 @@ export default function AuditoriaPage() {
 
   return (
     <div>
-      <h1 className="mb-3 flex items-center gap-2 text-xl font-bold text-slate-800 dark:text-slate-100">
-        <ShieldCheck className="h-5 w-5 text-brand-500" />
-        Auditoría de sesiones
-      </h1>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h1 className="flex items-center gap-2 text-xl font-bold text-slate-800 dark:text-slate-100">
+          <ShieldCheck className="h-5 w-5 text-brand-500" />
+          Auditoría de sesiones
+        </h1>
+        <button
+          onClick={() => api.auditoria.export()}
+          className="flex items-center gap-1.5 rounded-lg border border-brand-200 px-3 py-1.5 text-sm font-medium text-brand-700 hover:bg-brand-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+        >
+          <Download className="h-4 w-4" />
+          Exportar a Excel
+        </button>
+      </div>
 
       <div className="mb-4 flex gap-2 border-b border-slate-200 dark:border-slate-800">
         {TABS.map((t) => (

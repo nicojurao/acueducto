@@ -887,6 +887,7 @@ export const api = {
         `/api/auditoria/fallidos?${qs}`
       );
     },
+    export: () => descargarArchivo(`/api/auditoria/export`, `auditoria-${new Date().toISOString().slice(0, 10)}.xlsx`),
   },
   puntosAforo: {
     list: () => request<PuntoAforo[]>("/api/puntos-aforo"),
