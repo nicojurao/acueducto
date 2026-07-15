@@ -41,6 +41,9 @@ model Suscriptor {
   medidores           Medidor[]
   cotitularDe         Cotitular?
   actas               ActaInstalacion[]
+
+  @@index([barrioId])
+  @@index([estratoId])
 }
 
 // Catálogo de barrios, editable desde la pestaña de Barrios/Estratos. Permite pre-registrar
@@ -138,6 +141,9 @@ model Medidor {
   cotitulares         Cotitular[]
   actas               ActaInstalacion[]
   novedadesLectura    NovedadLectura[]
+
+  @@index([suscriptorId])
+  @@index([estado])
 }
 
 model ActaInstalacion {
@@ -161,6 +167,9 @@ model ActaInstalacion {
                                // mano; esto guarda el escaneo YA FIRMADO, documento legal distinto
                                // de las fotos de evidencia de la instalación.
   createdAt         DateTime  @default(now())
+
+  @@index([suscriptorId])
+  @@index([medidorId])
 }
 
 // Registro de auditoría: un renglón por cada campo que cambió en un Medidor o Suscriptor
@@ -212,6 +221,7 @@ model Lectura {
   fechaRegistro   DateTime  @default(now())
 
   @@unique([medidorId, periodo])
+  @@index([periodo])
 }
 
 model Usuario {
@@ -308,6 +318,8 @@ model PrestamoInventario {
   fechaDevolucion DateTime? // null = todavía está prestado
   observaciones   String?
   createdAt       DateTime       @default(now())
+
+  @@index([itemId, fechaDevolucion])
 }
 
 // Entradas (compra, reposición) y salidas (consumo, ej. tubos usados en una instalación) de
@@ -324,6 +336,8 @@ model MovimientoInventario {
   usuarioId     Int?
   usuario       Usuario?       @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
   createdAt     DateTime       @default(now())
+
+  @@index([itemId])
 }
 
 // Roles configurables. "admin" y "fontanero" vienen del sistema (esSistema=true) y no se
@@ -416,6 +430,9 @@ model Aforo {
   capturadoPor   Usuario?  @relation(fields: [capturadoPorId], references: [id], onDelete: SetNull)
 
   createdAt    DateTime   @default(now())
+
+  @@index([puntoAforoId])
+  @@index([fecha])
 }
 
 // Registro de que a un medidor NO se le pudo tomar lectura en un periodo, con el motivo
