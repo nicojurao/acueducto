@@ -286,6 +286,18 @@ model IntentoLoginFallido {
   @@index([identificador, fecha])
 }
 
+// Marca eventos de seguridad de todo el sistema, hoy solo "rotacion_secreto": cuando se rota
+// JWT_SECRET a mano (fuera de la app, editando .env), todo token emitido ANTES de ese momento
+// queda inválido de una — pero la app no tiene forma automática de enterarse de eso. Este
+// registro se inserta a mano en ese momento para que "sesión activa" en Auditoría sepa
+// descontar las sesiones que en realidad ya murieron por la rotación, no solo por los días
+// transcurridos.
+model EventoSeguridad {
+  id    Int      @id @default(autoincrement())
+  tipo  String   // "rotacion_secreto"
+  fecha DateTime @default(now())
+}
+
 // Inventario general del acueducto: herramientas, equipos e insumos de la operación (distinto
 // del inventario de Medidores, que ya tiene su propio módulo). Un mismo modelo cubre tanto
 // insumos apilables (ej. tubos, accesorios — cantidad alta, nunca se prestan) como equipos

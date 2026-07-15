@@ -21,16 +21,6 @@ function ubicacion(s: InicioSesion): string {
   return partes.length > 0 ? partes.join(", ") : "-";
 }
 
-// El token de sesión dura 1 día y no se puede invalidar antes (sin logout server-side ni
-// lista de revocación) — "activa" es una aproximación: sigue siendo válida mientras no pase
-// ese día, sin importar si el usuario cerró sesión en la app.
-const DURACION_TOKEN_DIAS = 1;
-function esActiva(fecha: string): boolean {
-  const limite = new Date();
-  limite.setDate(limite.getDate() - DURACION_TOKEN_DIAS);
-  return new Date(fecha) >= limite;
-}
-
 const MOTIVO_LABELS: Record<string, string> = {
   usuario_no_existe: "Usuario/cédula inexistente",
   contrasena_incorrecta: "Contraseña incorrecta",
@@ -235,12 +225,12 @@ function SesionesTab() {
                     <td className="hidden px-4 py-2.5 md:table-cell">
                       <span
                         className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                          esActiva(s.fecha)
+                          s.activa
                             ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400"
                             : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400"
                         }`}
                       >
-                        {esActiva(s.fecha) ? "Activa" : "Expirada"}
+                        {s.activa ? "Activa" : "Expirada"}
                       </span>
                     </td>
                     <td className="px-4 py-2.5 text-slate-400">

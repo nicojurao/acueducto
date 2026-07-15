@@ -306,6 +306,7 @@ export interface InicioSesion {
   fecha: string;
   ipNueva: boolean;
   dispositivoNuevo: boolean;
+  activa: boolean;
 }
 
 export interface IntentoLoginFallido {

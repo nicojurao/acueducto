@@ -30,25 +30,36 @@ function hojaConEstilo(wb: ExcelJS.Workbook, nombre: string, columnas: { titulo:
 }
 
 // El JWT de sesión dura 1 día (ver firmarToken en middleware/auth.js) y no hay forma de
-// invalidarlo antes (no hay logout server-side ni lista de revocación) — así que una sesión
-// sigue siendo válida criptográficamente mientras no pase ese día, sin importar si el
-// usuario "cerró sesión" en la app o cambió su contraseña. "Activa" acá es esa aproximación.
+// invalidarlo antes salvo rotando JWT_SECRET a mano (ver EventoSeguridad en schema.prisma) —
+// así que una sesión sigue siendo válida criptográficamente mientras no pase ese día NI se haya
+// rotado el secreto después de que se emitió. "Activa" acá es esa combinación.
 const DURACION_TOKEN_DIAS = 1;
 
+// El corte real de validez es el más reciente entre "hace 1 día" y la última rotación de
+// JWT_SECRET registrada — lo que haya pasado después invalida todo lo anterior.
+async function corteSesionActiva(): Promise<Date> {
+  const porDuracion = new Date();
+  porDuracion.setDate(porDuracion.getDate() - DURACION_TOKEN_DIAS);
+
+  const ultimaRotacion = await prisma.eventoSeguridad.findFirst({
+    where: { tipo: "rotacion_secreto" },
+    orderBy: { fecha: "desc" },
+  });
+
+  return ultimaRotacion && ultimaRotacion.fecha > porDuracion ? ultimaRotacion.fecha : porDuracion;
+}
+
 // Listado paginado de inicios de sesión, más recientes primero. Filtros opcionales por usuario
-// y por "solo activas" (dentro de la ventana de validez del token).
+// y por "solo activas" (dentro de la ventana de validez real del token).
 auditoriaRouter.get("/", async (req, res) => {
   const { usuarioId, activas } = req.query;
   const page = Math.max(1, Number(req.query.page) || 1);
   const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 30));
+  const corte = await corteSesionActiva();
 
   const filtros: any[] = [];
   if (usuarioId) filtros.push({ usuarioId: Number(usuarioId) });
-  if (activas === "1") {
-    const desde = new Date();
-    desde.setDate(desde.getDate() - DURACION_TOKEN_DIAS);
-    filtros.push({ fecha: { gte: desde } });
-  }
+  if (activas === "1") filtros.push({ fecha: { gte: corte } });
   const where = filtros.length > 0 ? { AND: filtros } : undefined;
 
   const [items, total] = await Promise.all([
@@ -85,6 +96,7 @@ auditoriaRouter.get("/", async (req, res) => {
     ...i,
     ipNueva: primeraVezIp.get(`${i.usuarioId}|${i.ip ?? ""}`) === i.fecha.getTime(),
     dispositivoNuevo: primeraVezDispositivo.get(`${i.usuarioId}|${i.dispositivo ?? ""}`) === i.fecha.getTime(),
+    activa: i.fecha >= corte,
   }));
 
   res.json({ data, total, page, limit });
@@ -111,6 +123,7 @@ auditoriaRouter.get("/fallidos", async (req, res) => {
 // hoja y los intentos fallidos en otra. Pensado como respaldo/reporte para llevar afuera de la
 // app, no para uso diario (para eso están las pantallas paginadas de arriba).
 auditoriaRouter.get("/export", async (_req, res) => {
+  const corte = await corteSesionActiva();
   const [sesiones, fallidos] = await Promise.all([
     prisma.inicioSesion.findMany({
       include: { usuario: { select: { nombre: true, nombreUsuario: true } } },
@@ -139,6 +152,7 @@ auditoriaRouter.get("/export", async (_req, res) => {
     { titulo: "Dispositivo", ancho: 22 },
     { titulo: "IP nueva", ancho: 12 },
     { titulo: "Dispositivo nuevo", ancho: 16 },
+    { titulo: "Activa", ancho: 10 },
   ]);
   sesiones.forEach((s) => {
     const ubicacion = [s.ciudad, s.region, s.pais].filter(Boolean).join(", ") || "-";
@@ -152,6 +166,7 @@ auditoriaRouter.get("/export", async (_req, res) => {
       s.dispositivo ?? "-",
       ipNueva ? "Sí" : "No",
       dispositivoNuevo ? "Sí" : "No",
+      s.fecha >= corte ? "Sí" : "No",
     ]);
   });
 
