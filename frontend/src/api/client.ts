@@ -304,6 +304,18 @@ export interface InicioSesion {
   region: string | null;
   pais: string | null;
   fecha: string;
+  ipNueva: boolean;
+  dispositivoNuevo: boolean;
+}
+
+export interface IntentoLoginFallido {
+  id: number;
+  identificador: string;
+  ip: string | null;
+  userAgent: string | null;
+  dispositivo: string | null;
+  motivo: "usuario_no_existe" | "contrasena_incorrecta" | "cuenta_inactiva";
+  fecha: string;
 }
 
 export interface ActaInstalacion {
@@ -868,6 +880,13 @@ export const api = {
       return request<{ data: InicioSesion[]; total: number; page: number; limit: number }>(`/api/auditoria?${qs}`);
     },
     cambios: (sesionId: number) => request<HistorialCambio[]>(`/api/auditoria/${sesionId}/cambios`),
+    fallidosPaginado: (page: number, limit: number, identificador?: string) => {
+      const qs = new URLSearchParams({ page: String(page), limit: String(limit) });
+      if (identificador) qs.set("identificador", identificador);
+      return request<{ data: IntentoLoginFallido[]; total: number; page: number; limit: number }>(
+        `/api/auditoria/fallidos?${qs}`
+      );
+    },
   },
   puntosAforo: {
     list: () => request<PuntoAforo[]>("/api/puntos-aforo"),

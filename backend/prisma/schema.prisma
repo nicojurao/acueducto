@@ -270,6 +270,22 @@ model InicioSesion {
   @@index([usuarioId, fecha])
 }
 
+// Un renglón por cada intento de login que falló (usuario/cédula inexistente, contraseña
+// incorrecta, cuenta inactiva). Sin FK a Usuario a propósito: el identificador puede no
+// corresponder a ningún usuario real (typo, o alguien probando cédulas al azar).
+model IntentoLoginFallido {
+  id            Int      @id @default(autoincrement())
+  identificador String
+  ip            String?
+  userAgent     String?
+  dispositivo   String?
+  motivo        String   // "usuario_no_existe" | "contrasena_incorrecta" | "cuenta_inactiva"
+  fecha         DateTime @default(now())
+
+  @@index([fecha])
+  @@index([identificador, fecha])
+}
+
 // Inventario general del acueducto: herramientas, equipos e insumos de la operación (distinto
 // del inventario de Medidores, que ya tiene su propio módulo). Un mismo modelo cubre tanto
 // insumos apilables (ej. tubos, accesorios — cantidad alta, nunca se prestan) como equipos

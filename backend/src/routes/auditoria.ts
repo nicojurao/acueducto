@@ -36,6 +36,48 @@ auditoriaRouter.get("/", async (req, res) => {
     prisma.inicioSesion.count({ where }),
   ]);
 
+  // "IP/dispositivo nuevo": primera vez que ESE usuario se conecta desde esa IP/dispositivo,
+  // comparado contra todo su historial (no solo la página actual) — para señalar de un vistazo
+  // un login desde un lugar/equipo que nunca había usado antes.
+  const usuarioIds = [...new Set(items.map((i) => i.usuarioId))];
+  const historialCompleto = usuarioIds.length
+    ? await prisma.inicioSesion.findMany({
+        where: { usuarioId: { in: usuarioIds } },
+        select: { usuarioId: true, ip: true, dispositivo: true, fecha: true },
+        orderBy: { fecha: "asc" },
+      })
+    : [];
+  const primeraVezIp = new Map<string, number>();
+  const primeraVezDispositivo = new Map<string, number>();
+  for (const h of historialCompleto) {
+    const claveIp = `${h.usuarioId}|${h.ip ?? ""}`;
+    if (!primeraVezIp.has(claveIp)) primeraVezIp.set(claveIp, h.fecha.getTime());
+    const claveDisp = `${h.usuarioId}|${h.dispositivo ?? ""}`;
+    if (!primeraVezDispositivo.has(claveDisp)) primeraVezDispositivo.set(claveDisp, h.fecha.getTime());
+  }
+  const data = items.map((i) => ({
+    ...i,
+    ipNueva: primeraVezIp.get(`${i.usuarioId}|${i.ip ?? ""}`) === i.fecha.getTime(),
+    dispositivoNuevo: primeraVezDispositivo.get(`${i.usuarioId}|${i.dispositivo ?? ""}`) === i.fecha.getTime(),
+  }));
+
+  res.json({ data, total, page, limit });
+});
+
+// Intentos de login fallidos, más recientes primero. Filtro opcional por identificador (cédula
+// o nombre de usuario que se intentó).
+auditoriaRouter.get("/fallidos", async (req, res) => {
+  const { identificador } = req.query;
+  const page = Math.max(1, Number(req.query.page) || 1);
+  const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 30));
+
+  const where = identificador ? { identificador: { contains: String(identificador), mode: "insensitive" as const } } : undefined;
+
+  const [items, total] = await Promise.all([
+    prisma.intentoLoginFallido.findMany({ where, orderBy: { fecha: "desc" }, skip: (page - 1) * limit, take: limit }),
+    prisma.intentoLoginFallido.count({ where }),
+  ]);
+
   res.json({ data: items, total, page, limit });
 });
 

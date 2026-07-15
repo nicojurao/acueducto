@@ -63,34 +63,57 @@ authRouter.post("/login", limiteLogin, async (req, res) => {
   }
 
   const valor = String(identificador).trim();
+  const ipIntento = ipCliente(req);
+  const userAgentIntento = req.headers["user-agent"];
+
+  async function registrarIntentoFallido(motivo: string) {
+    await prisma.intentoLoginFallido.create({
+      data: {
+        identificador: valor,
+        ip: ipIntento,
+        userAgent: userAgentIntento ?? null,
+        dispositivo: resumenDispositivo(userAgentIntento),
+        motivo,
+      },
+    });
+  }
+
   const usuario = await prisma.usuario.findFirst({
     where: { OR: [{ nombreUsuario: valor }, { cedula: valor }] },
     include: { rol: { include: { permisos: { include: { permiso: true } } } } },
   });
-  if (!usuario || !usuario.activo) return res.status(401).json({ error: "Credenciales inválidas" });
+  if (!usuario) {
+    await registrarIntentoFallido("usuario_no_existe");
+    return res.status(401).json({ error: "Credenciales inválidas" });
+  }
+  if (!usuario.activo) {
+    await registrarIntentoFallido("cuenta_inactiva");
+    return res.status(401).json({ error: "Credenciales inválidas" });
+  }
 
   const valido = await bcrypt.compare(password, usuario.passwordHash);
-  if (!valido) return res.status(401).json({ error: "Credenciales inválidas" });
+  if (!valido) {
+    await registrarIntentoFallido("contrasena_incorrecta");
+    return res.status(401).json({ error: "Credenciales inválidas" });
+  }
 
   const token = firmarToken({ id: usuario.id });
 
   // Registro de auditoría: la fila se crea antes de responder (rápido, solo INSERT local), pero
   // la geolocalización por IP pega a un servicio externo — se resuelve después, en segundo
   // plano, para no demorar el login si ip-api.com está lento o caído (ver lib/geoip.ts).
-  const userAgent = req.headers["user-agent"];
-  const ip = ipCliente(req);
   const sesion = await prisma.inicioSesion.create({
     data: {
       usuarioId: usuario.id,
-      ip,
-      userAgent: userAgent ?? null,
-      dispositivo: resumenDispositivo(userAgent),
+      ip: ipIntento,
+      userAgent: userAgentIntento ?? null,
+      dispositivo: resumenDispositivo(userAgentIntento),
     },
   });
 
   res.json({ token, usuario: perfil(usuario) });
 
-  geolocalizarIp(ip).then((geo) => {
+  geolocalizarIp(ipIntento).then((geo) => {
     if (geo.ciudad || geo.region || geo.pais) {
       prisma.inicioSesion.update({ where: { id: sesion.id }, data: geo }).catch(() => {});
     }
