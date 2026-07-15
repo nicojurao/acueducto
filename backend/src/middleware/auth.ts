@@ -20,8 +20,12 @@ declare global {
   }
 }
 
+// Duración del token de sesión — reducida de 30 a 1 día tras un incidente donde una contraseña
+// se cambió sin dejar rastro y una sesión vieja siguió activa igual (ver Auditoría de sesiones).
+// Con datos sensibles de suscriptores de por medio, se prefiere que la gente vuelva a loguearse
+// seguido en vez de dejar ventanas largas de token válido sin forma de revocarlo antes.
 export function firmarToken(payload: { id: number }): string {
-  return jwt.sign(payload, JWT_SECRET!, { expiresIn: "30d" });
+  return jwt.sign(payload, JWT_SECRET!, { expiresIn: "1d" });
 }
 
 // Token aparte para ver fotos (/uploads/*), NO el de sesión. Vive poco (20 min) y solo sirve

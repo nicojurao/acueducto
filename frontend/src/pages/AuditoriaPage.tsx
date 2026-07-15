@@ -21,10 +21,10 @@ function ubicacion(s: InicioSesion): string {
   return partes.length > 0 ? partes.join(", ") : "-";
 }
 
-// El token de sesión dura 30 días y no se puede invalidar antes (sin logout server-side ni
-// lista de revocación) — "activa" es una aproximación: sigue siendo válida mientras no pasen
-// esos 30 días, sin importar si el usuario cerró sesión en la app.
-const DURACION_TOKEN_DIAS = 30;
+// El token de sesión dura 1 día y no se puede invalidar antes (sin logout server-side ni
+// lista de revocación) — "activa" es una aproximación: sigue siendo válida mientras no pase
+// ese día, sin importar si el usuario cerró sesión en la app.
+const DURACION_TOKEN_DIAS = 1;
 function esActiva(fecha: string): boolean {
   const limite = new Date();
   limite.setDate(limite.getDate() - DURACION_TOKEN_DIAS);

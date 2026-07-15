@@ -29,11 +29,11 @@ function hojaConEstilo(wb: ExcelJS.Workbook, nombre: string, columnas: { titulo:
   return ws;
 }
 
-// El JWT de sesión dura 30 días (ver firmarToken en middleware/auth.js) y no hay forma de
+// El JWT de sesión dura 1 día (ver firmarToken en middleware/auth.js) y no hay forma de
 // invalidarlo antes (no hay logout server-side ni lista de revocación) — así que una sesión
-// sigue siendo válida criptográficamente mientras no pasen esos 30 días, sin importar si el
+// sigue siendo válida criptográficamente mientras no pase ese día, sin importar si el
 // usuario "cerró sesión" en la app o cambió su contraseña. "Activa" acá es esa aproximación.
-const DURACION_TOKEN_DIAS = 30;
+const DURACION_TOKEN_DIAS = 1;
 
 // Listado paginado de inicios de sesión, más recientes primero. Filtros opcionales por usuario
 // y por "solo activas" (dentro de la ventana de validez del token).
