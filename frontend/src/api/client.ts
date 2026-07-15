@@ -890,6 +890,7 @@ export const api = {
     },
     cambios: (sesionId: number) => request<HistorialCambio[]>(`/api/auditoria/${sesionId}/cambios`),
     revocar: (sesionId: number) => request<InicioSesion>(`/api/auditoria/${sesionId}/revocar`, { method: "PUT" }),
+    borrarCerradas: () => request<{ eliminadas: number }>(`/api/auditoria/cerradas`, { method: "DELETE" }),
     fallidosPaginado: (page: number, limit: number, identificador?: string) => {
       const qs = new URLSearchParams({ page: String(page), limit: String(limit) });
       if (identificador) qs.set("identificador", identificador);

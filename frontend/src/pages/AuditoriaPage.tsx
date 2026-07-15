@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState } from "react";
-import { ShieldCheck, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, MapPin, Monitor, AlertTriangle, XCircle, Download, LogOut } from "lucide-react";
+import { ShieldCheck, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, MapPin, Monitor, AlertTriangle, XCircle, Download, LogOut, Trash2 } from "lucide-react";
 import { api, InicioSesion, HistorialCambio, IntentoLoginFallido, Usuario } from "../api/client";
 import { useEsMovil } from "../lib/useEsMovil";
 import { inputClass } from "../lib/ui";
@@ -149,6 +149,17 @@ function SesionesTab() {
     );
   }
 
+  function borrarCerradas() {
+    pedirConfirmacion(
+      "¿Borrar del historial todas las sesiones ya cerradas? Las activas y las expiradas sin cerrar no se tocan. Esto no se puede deshacer.",
+      async () => {
+        await api.auditoria.borrarCerradas();
+        cargar();
+      },
+      { textoConfirmar: "Borrar", variante: "peligro" }
+    );
+  }
+
   const totalPaginas = Math.max(1, Math.ceil(total / porPagina));
 
   return (
@@ -180,6 +191,13 @@ function SesionesTab() {
           <option value="expirada">Expiradas</option>
           <option value="cerrada">Cerradas</option>
         </select>
+        <button
+          onClick={borrarCerradas}
+          className="flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+        >
+          <Trash2 className="h-4 w-4" />
+          Borrar cerradas
+        </button>
       </div>
 
       {cargando ? (

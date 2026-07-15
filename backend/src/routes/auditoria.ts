@@ -118,6 +118,14 @@ auditoriaRouter.put("/:id/revocar", async (req, res) => {
   res.json(actualizada);
 });
 
+// Borra del historial todas las sesiones ya cerradas a mano (revocada=true) — limpieza manual
+// desde la pantalla, para no dejar acumulando filas "muertas" que ya cumplieron su propósito.
+// No toca las expiradas-sin-cerrar-a-mano ni las activas.
+auditoriaRouter.delete("/cerradas", async (_req, res) => {
+  const { count } = await prisma.inicioSesion.deleteMany({ where: { revocada: true } });
+  res.json({ eliminadas: count });
+});
+
 // Intentos de login fallidos, más recientes primero. Filtro opcional por identificador (cédula
 // o nombre de usuario que se intentó).
 auditoriaRouter.get("/fallidos", async (req, res) => {
