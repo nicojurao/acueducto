@@ -19,6 +19,7 @@ import { Users, Gauge, AlertTriangle, ChevronRight, Percent, ChevronDown, Chevro
 import { api, ESTRATO_LABELS, ESTADO_FACTURACION_LABELS } from "../api/client";
 import KpiCard from "../components/KpiCard";
 import ChartCard from "../components/ChartCard";
+import { SkeletonLista } from "../components/Skeleton";
 import { useEsMovil } from "../lib/useEsMovil";
 
 const COLORES_ESTADO: Record<string, string> = {
@@ -255,7 +256,7 @@ export default function ReportesPage() {
       </div>
 
       {cargando || !kpis ? (
-        <p className="text-slate-700 dark:text-slate-400">Cargando...</p>
+        <SkeletonLista />
       ) : (
         <>
           <div className="mb-3 grid grid-cols-2 gap-2 sm:mb-6 sm:gap-4 md:grid-cols-4">

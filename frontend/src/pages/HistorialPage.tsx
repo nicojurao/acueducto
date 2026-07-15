@@ -4,6 +4,7 @@ import { api, HistorialCambio, Usuario } from "../api/client";
 import { useEsMovil } from "../lib/useEsMovil";
 import { inputClass } from "../lib/ui";
 import EmptyState from "../components/EmptyState";
+import { SkeletonTabla } from "../components/Skeleton";
 
 function fmtFechaHora(fecha: string): string {
   return new Date(fecha).toLocaleString("es-CO", {
@@ -99,7 +100,7 @@ export default function HistorialPage() {
       </div>
 
       {cargando ? (
-        <p className="text-slate-700 dark:text-slate-400">Cargando...</p>
+        <SkeletonTabla />
       ) : cambios.length === 0 ? (
         <EmptyState mensaje="No hay cambios registrados con estos filtros." />
       ) : (

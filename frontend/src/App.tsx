@@ -1,12 +1,14 @@
 import { lazy, Suspense, useState } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
-import { Menu, Loader2 } from "lucide-react";
+import { Menu, Loader2, CloudOff } from "lucide-react";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import RutaProtegida from "./components/RutaProtegida";
 import Sidebar from "./components/Sidebar";
 import LoginPage from "./pages/LoginPage";
 import InicioPage from "./pages/InicioPage";
+import NotFoundPage from "./pages/NotFoundPage";
+import { useOnline } from "./lib/useOnline";
 
 // Cada página pesada va en su propio chunk (React.lazy): el bundle inicial deja de traer
 // recharts/leaflet/etc. de todas las pantallas de una vez y solo baja lo que se navega. En el
@@ -36,6 +38,7 @@ function CargandoPagina() {
 
 function AppShell() {
   const [menuAbierto, setMenuAbierto] = useState(false);
+  const online = useOnline();
 
   return (
     <div className="flex h-dvh overflow-hidden">
@@ -51,6 +54,12 @@ function AppShell() {
           <img src="/logo-acbum.png" alt="Logo ACBUM" className="h-8 w-8 shrink-0 object-contain" />
           <span className="truncate text-xs font-bold">Acueducto Comunitario Barrios Unidos de Mocoa</span>
         </header>
+        {!online && (
+          <div className="flex shrink-0 items-center justify-center gap-1.5 bg-amber-500 px-3 py-1.5 text-xs font-medium text-amber-950">
+            <CloudOff className="h-3.5 w-3.5" />
+            Sin conexión — los cambios se guardan en el dispositivo y se sincronizan al volver la señal.
+          </div>
+        )}
         {/* pb con safe-area-inset: en celular, la barra de gestos/pestañas del navegador se
             superpone al final del contenido si no se le deja ese espacio de respeto. */}
         <main className="flex-1 overflow-y-auto bg-slate-50 p-3 pb-[max(1rem,env(safe-area-inset-bottom))] dark:bg-slate-950 sm:p-4 md:p-6">
@@ -145,6 +154,7 @@ function AppShell() {
                 </RutaProtegida>
               }
             />
+            <Route path="*" element={<NotFoundPage />} />
           </Routes>
           </Suspense>
         </main>

@@ -33,7 +33,7 @@ export default function MapaPage() {
       </div>
 
       {cargando ? (
-        <p className="text-slate-700 dark:text-slate-400">Cargando...</p>
+        <div className="flex-1 animate-pulse rounded-xl border border-brand-200 bg-slate-200 dark:border-slate-800 dark:bg-slate-800" />
       ) : (
         <MapaPredios suscriptores={suscriptores} onMarkerClick={(id) => setDetalleId(id)} className="flex-1" />
       )}
