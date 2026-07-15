@@ -878,10 +878,14 @@ export const api = {
     },
   },
   auditoria: {
-    listPaginado: (page: number, limit: number, filtros?: { usuarioId?: number; soloActivas?: boolean }) => {
+    listPaginado: (
+      page: number,
+      limit: number,
+      filtros?: { usuarioId?: number; estado?: "activa" | "expirada" | "cerrada" }
+    ) => {
       const qs = new URLSearchParams({ page: String(page), limit: String(limit) });
       if (filtros?.usuarioId) qs.set("usuarioId", String(filtros.usuarioId));
-      if (filtros?.soloActivas) qs.set("activas", "1");
+      if (filtros?.estado) qs.set("estado", filtros.estado);
       return request<{ data: InicioSesion[]; total: number; page: number; limit: number }>(`/api/auditoria?${qs}`);
     },
     cambios: (sesionId: number) => request<HistorialCambio[]>(`/api/auditoria/${sesionId}/cambios`),

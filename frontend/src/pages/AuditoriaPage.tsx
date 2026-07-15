@@ -114,7 +114,7 @@ function SesionesTab() {
   const [cargando, setCargando] = useState(true);
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
   const [usuarioFiltro, setUsuarioFiltro] = useState("");
-  const [soloActivas, setSoloActivas] = useState(false);
+  const [estadoFiltro, setEstadoFiltro] = useState<"" | "activa" | "expirada" | "cerrada">("");
   const [expandida, setExpandida] = useState<number | null>(null);
 
   useEffect(() => {
@@ -126,7 +126,7 @@ function SesionesTab() {
     api.auditoria
       .listPaginado(pagina, porPagina, {
         usuarioId: usuarioFiltro ? Number(usuarioFiltro) : undefined,
-        soloActivas,
+        estado: estadoFiltro || undefined,
       })
       .then((r) => {
         setSesiones(r.data);
@@ -135,9 +135,9 @@ function SesionesTab() {
       .finally(() => setCargando(false));
   }
 
-  useEffect(cargar, [pagina, porPagina, usuarioFiltro, soloActivas]);
+  useEffect(cargar, [pagina, porPagina, usuarioFiltro, estadoFiltro]);
 
-  useEffect(() => setPagina(1), [usuarioFiltro, soloActivas]);
+  useEffect(() => setPagina(1), [usuarioFiltro, estadoFiltro]);
 
   function revocar(s: InicioSesion) {
     pedirConfirmacion(
@@ -170,15 +170,16 @@ function SesionesTab() {
             </option>
           ))}
         </select>
-        <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
-          <input
-            type="checkbox"
-            checked={soloActivas}
-            onChange={(e) => setSoloActivas(e.target.checked)}
-            className="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500 dark:border-slate-700"
-          />
-          Solo sesiones activas (token aún vigente)
-        </label>
+        <select
+          value={estadoFiltro}
+          onChange={(e) => setEstadoFiltro(e.target.value as typeof estadoFiltro)}
+          className={inputClass}
+        >
+          <option value="">Todos los estados</option>
+          <option value="activa">Activas</option>
+          <option value="expirada">Expiradas</option>
+          <option value="cerrada">Cerradas</option>
+        </select>
       </div>
 
       {cargando ? (
@@ -262,14 +263,24 @@ function SesionesTab() {
                     </td>
                     <td className="px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
                       {s.activa && !esMiSesion && (
-                        <button
-                          onClick={() => revocar(s)}
-                          title="Cerrar esta sesión"
-                          className="flex items-center gap-1 text-xs font-medium text-slate-600 hover:text-red-600 dark:text-slate-400"
-                        >
-                          <LogOut className="h-3.5 w-3.5" />
-                          Cerrar
-                        </button>
+                        s.jti ? (
+                          <button
+                            onClick={() => revocar(s)}
+                            title="Cerrar esta sesión"
+                            className="flex items-center gap-1 text-xs font-medium text-slate-600 hover:text-red-600 dark:text-slate-400"
+                          >
+                            <LogOut className="h-3.5 w-3.5" />
+                            Cerrar
+                          </button>
+                        ) : (
+                          <span
+                            title="Esta sesión es de antes de que existiera el cierre individual — no se puede forzar, solo expira sola."
+                            className="flex items-center gap-1 text-xs text-slate-400 dark:text-slate-600"
+                          >
+                            <LogOut className="h-3.5 w-3.5" />
+                            No disponible
+                          </span>
+                        )
                       )}
                     </td>
                     <td className="px-4 py-2.5 text-slate-400">

@@ -50,16 +50,20 @@ async function corteSesionActiva(): Promise<Date> {
 }
 
 // Listado paginado de inicios de sesión, más recientes primero. Filtros opcionales por usuario
-// y por "solo activas" (dentro de la ventana de validez real del token).
+// y por estado: "activa" (dentro de la ventana de validez y sin revocar), "cerrada" (revocada a
+// mano, sin importar si además ya hubiera expirado sola) o "expirada" (venció el token sin que
+// nadie la cerrara a mano).
 auditoriaRouter.get("/", async (req, res) => {
-  const { usuarioId, activas } = req.query;
+  const { usuarioId, estado } = req.query;
   const page = Math.max(1, Number(req.query.page) || 1);
   const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 30));
   const corte = await corteSesionActiva();
 
   const filtros: any[] = [];
   if (usuarioId) filtros.push({ usuarioId: Number(usuarioId) });
-  if (activas === "1") filtros.push({ fecha: { gte: corte } });
+  if (estado === "activa") filtros.push({ fecha: { gte: corte }, revocada: false });
+  else if (estado === "cerrada") filtros.push({ revocada: true });
+  else if (estado === "expirada") filtros.push({ fecha: { lt: corte }, revocada: false });
   const where = filtros.length > 0 ? { AND: filtros } : undefined;
 
   const [items, total] = await Promise.all([
