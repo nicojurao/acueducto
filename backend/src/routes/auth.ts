@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import multer from "multer";
 import rateLimit from "express-rate-limit";
 import { prisma } from "../lib/prisma.js";
-import { firmarToken, firmarTokenMedia, requireAuth } from "../middleware/auth.js";
+import { firmarToken, firmarTokenMedia, requireAuth, nuevoJti } from "../middleware/auth.js";
 import { guardarArchivo, borrarArchivo } from "../lib/storage.js";
 import { resumenDispositivo } from "../lib/userAgent.js";
 import { geolocalizarIp } from "../lib/geoip.js";
@@ -38,7 +38,7 @@ function perfil(usuario: {
   fechaNacimiento: Date | null;
   foto: string | null;
   rol: { id: number; nombre: string; permisos: { permiso: { clave: string } }[] };
-}) {
+}, sesionId?: string) {
   return {
     id: usuario.id,
     nombre: usuario.nombre,
@@ -50,6 +50,7 @@ function perfil(usuario: {
     foto: usuario.foto,
     rol: { id: usuario.rol.id, nombre: usuario.rol.nombre },
     permisos: usuario.rol.permisos.map((rp) => rp.permiso.clave),
+    sesionId,
   };
 }
 
@@ -97,7 +98,8 @@ authRouter.post("/login", limiteLogin, async (req, res) => {
     return res.status(401).json({ error: "Credenciales inválidas" });
   }
 
-  const token = firmarToken({ id: usuario.id });
+  const jti = nuevoJti();
+  const token = firmarToken({ id: usuario.id, jti });
 
   // Registro de auditoría: la fila se crea antes de responder (rápido, solo INSERT local), pero
   // la geolocalización por IP pega a un servicio externo — se resuelve después, en segundo
@@ -105,13 +107,14 @@ authRouter.post("/login", limiteLogin, async (req, res) => {
   const sesion = await prisma.inicioSesion.create({
     data: {
       usuarioId: usuario.id,
+      jti,
       ip: ipIntento,
       userAgent: userAgentIntento ?? null,
       dispositivo: resumenDispositivo(userAgentIntento),
     },
   });
 
-  res.json({ token, usuario: perfil(usuario) });
+  res.json({ token, usuario: perfil(usuario, jti) });
 
   geolocalizarIp(ipIntento).then((geo) => {
     if (geo.ciudad || geo.region || geo.pais) {
@@ -126,7 +129,7 @@ authRouter.get("/me", requireAuth, async (req, res) => {
     include: { rol: { include: { permisos: { include: { permiso: true } } } } },
   });
   if (!usuario) return res.status(404).json({ error: "No encontrado" });
-  res.json(perfil(usuario));
+  res.json(perfil(usuario, req.usuario!.jti));
 });
 
 // Autoservicio: cualquier usuario autenticado puede editar su propio nombre, celular, fecha de
@@ -165,7 +168,7 @@ authRouter.put("/perfil", requireAuth, upload.single("foto"), async (req, res) =
   });
   await registrarCambios("usuario", existente.id, antes, camposUsuario(usuario), req.usuario!.id);
   if (password) await registrarCambioContrasena(existente.id, req.usuario!.id);
-  res.json(perfil(usuario));
+  res.json(perfil(usuario, req.usuario!.jti));
 });
 
 // Token de corta duración (20 min) solo para ver fotos vía /uploads/*. El frontend lo pide al

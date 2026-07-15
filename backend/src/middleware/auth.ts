@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
+import { randomUUID } from "node:crypto";
 import { prisma } from "../lib/prisma.js";
 
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -9,6 +10,7 @@ export interface UsuarioToken {
   id: number;
   rol: string;
   permisos: string[];
+  jti?: string;
 }
 
 declare global {
@@ -24,7 +26,14 @@ declare global {
 // se cambió sin dejar rastro y una sesión vieja siguió activa igual (ver Auditoría de sesiones).
 // Con datos sensibles de suscriptores de por medio, se prefiere que la gente vuelva a loguearse
 // seguido en vez de dejar ventanas largas de token válido sin forma de revocarlo antes.
-export function firmarToken(payload: { id: number }): string {
+// jti (JWT ID): identificador aleatorio único de ESTE token puntual, no del usuario — es lo que
+// permite revocar una sesión individual desde Auditoría (ver InicioSesion.jti/revocada en
+// schema.prisma) sin afectar las demás sesiones del mismo usuario en otros dispositivos.
+export function nuevoJti(): string {
+  return randomUUID();
+}
+
+export function firmarToken(payload: { id: number; jti: string }): string {
   return jwt.sign(payload, JWT_SECRET!, { expiresIn: "1d" });
 }
 
@@ -49,12 +58,22 @@ async function usuarioDesdeId(id: number): Promise<UsuarioToken | null> {
   };
 }
 
-// Valida un JWT de sesión normal y devuelve los datos del usuario (o null).
+// Valida un JWT de sesión normal y devuelve los datos del usuario (o null). Además de la firma
+// y expiración (que ya revisa jwt.verify), checkea que la sesión no haya sido revocada a mano
+// desde Auditoría — es la única forma de "cerrar sesión" de otro dispositivo antes de que el
+// token expire solo.
 export async function verificarToken(token: string): Promise<UsuarioToken | null> {
   try {
-    const payload = jwt.verify(token, JWT_SECRET!) as { id: number; tipo?: string };
+    const payload = jwt.verify(token, JWT_SECRET!) as { id: number; tipo?: string; jti?: string };
     if (payload.tipo) return null; // es un token de otro tipo (ej. "media"), no de sesión
-    return await usuarioDesdeId(payload.id);
+
+    if (payload.jti) {
+      const sesion = await prisma.inicioSesion.findUnique({ where: { jti: payload.jti } });
+      if (sesion?.revocada) return null;
+    }
+
+    const usuario = await usuarioDesdeId(payload.id);
+    return usuario ? { ...usuario, jti: payload.jti } : null;
   } catch {
     return null;
   }

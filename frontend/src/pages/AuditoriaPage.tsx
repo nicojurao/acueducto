@@ -1,10 +1,12 @@
 import { Fragment, useEffect, useState } from "react";
-import { ShieldCheck, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, MapPin, Monitor, AlertTriangle, XCircle, Download } from "lucide-react";
+import { ShieldCheck, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, MapPin, Monitor, AlertTriangle, XCircle, Download, LogOut } from "lucide-react";
 import { api, InicioSesion, HistorialCambio, IntentoLoginFallido, Usuario } from "../api/client";
 import { useEsMovil } from "../lib/useEsMovil";
 import { inputClass } from "../lib/ui";
 import EmptyState from "../components/EmptyState";
 import { SkeletonTabla } from "../components/Skeleton";
+import { useAuth } from "../contexts/AuthContext";
+import { useConfirm } from "../components/ConfirmModal";
 
 function fmtFechaHora(fecha: string): string {
   return new Date(fecha).toLocaleString("es-CO", {
@@ -104,6 +106,8 @@ function Paginacion({
 function SesionesTab() {
   const esMovil = useEsMovil();
   const porPagina = esMovil ? 5 : 10;
+  const { usuario } = useAuth();
+  const { pedirConfirmacion, modal: modalConfirmacion } = useConfirm();
   const [sesiones, setSesiones] = useState<InicioSesion[]>([]);
   const [total, setTotal] = useState(0);
   const [pagina, setPagina] = useState(1);
@@ -117,7 +121,7 @@ function SesionesTab() {
     api.usuarios.list().then(setUsuarios);
   }, []);
 
-  useEffect(() => {
+  function cargar() {
     setCargando(true);
     api.auditoria
       .listPaginado(pagina, porPagina, {
@@ -129,19 +133,32 @@ function SesionesTab() {
         setTotal(r.total);
       })
       .finally(() => setCargando(false));
-  }, [pagina, porPagina, usuarioFiltro, soloActivas]);
+  }
+
+  useEffect(cargar, [pagina, porPagina, usuarioFiltro, soloActivas]);
 
   useEffect(() => setPagina(1), [usuarioFiltro, soloActivas]);
+
+  function revocar(s: InicioSesion) {
+    pedirConfirmacion(
+      `¿Cerrar la sesión de ${s.usuario?.nombre ?? "este usuario"} iniciada el ${fmtFechaHora(s.fecha)}? La próxima vez que use la app desde ese dispositivo, le va a pedir volver a loguearse.`,
+      async () => {
+        await api.auditoria.revocar(s.id);
+        cargar();
+      }
+    );
+  }
 
   const totalPaginas = Math.max(1, Math.ceil(total / porPagina));
 
   return (
     <div>
+      {modalConfirmacion}
       <p className="mb-4 text-sm text-slate-600 dark:text-slate-400">
         Cada inicio de sesión, con la IP y ubicación aproximada desde donde se conectó. Haz clic en una fila para ver
         los cambios hechos en esa sesión (desde ese login hasta el siguiente del mismo usuario).{" "}
         <AlertTriangle className="inline h-3.5 w-3.5 text-amber-500" /> marca un login desde una IP o dispositivo que
-        ese usuario nunca había usado antes.
+        ese usuario nunca había usado antes. La fila marcada "Tú" es la sesión con la que estás conectado ahora mismo.
       </p>
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -165,7 +182,7 @@ function SesionesTab() {
       </div>
 
       {cargando ? (
-        <SkeletonTabla columnas={7} />
+        <SkeletonTabla columnas={9} />
       ) : sesiones.length === 0 ? (
         <EmptyState mensaje="No hay inicios de sesión registrados con estos filtros." />
       ) : (
@@ -179,21 +196,29 @@ function SesionesTab() {
                 <th className="hidden px-4 py-2.5 md:table-cell">Ubicación</th>
                 <th className="hidden px-4 py-2.5 md:table-cell">Dispositivo</th>
                 <th className="hidden px-4 py-2.5 md:table-cell">Estado</th>
+                <th className="px-4 py-2.5" />
                 <th className="w-8 px-4 py-2.5" />
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {sesiones.map((s) => (
+              {sesiones.map((s) => {
+                const esMiSesion = !!usuario?.sesionId && s.jti === usuario.sesionId;
+                return (
                 <Fragment key={s.id}>
                   <tr
                     onClick={() => setExpandida(expandida === s.id ? null : s.id)}
-                    className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/40"
+                    className={`cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/40 ${esMiSesion ? "bg-brand-50/50 dark:bg-brand-500/5" : ""}`}
                   >
                     <td className="whitespace-nowrap px-4 py-2.5 text-slate-700 dark:text-slate-400">
                       {fmtFechaHora(s.fecha)}
                     </td>
                     <td className="px-4 py-2.5 font-medium text-slate-800 dark:text-slate-100">
                       {s.usuario?.nombre ?? "Usuario eliminado"}
+                      {esMiSesion && (
+                        <span className="ml-2 rounded-full bg-brand-100 px-1.5 py-0.5 text-[10px] font-semibold text-brand-700 dark:bg-brand-500/15 dark:text-brand-400">
+                          Tú
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-2.5 text-slate-700 dark:text-slate-400">
                       <span className="flex items-center gap-1">
@@ -225,13 +250,27 @@ function SesionesTab() {
                     <td className="hidden px-4 py-2.5 md:table-cell">
                       <span
                         className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                          s.activa
+                          s.revocada
+                            ? "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-400"
+                            : s.activa
                             ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400"
                             : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400"
                         }`}
                       >
-                        {s.activa ? "Activa" : "Expirada"}
+                        {s.revocada ? "Cerrada" : s.activa ? "Activa" : "Expirada"}
                       </span>
+                    </td>
+                    <td className="px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
+                      {s.activa && !esMiSesion && (
+                        <button
+                          onClick={() => revocar(s)}
+                          title="Cerrar esta sesión"
+                          className="flex items-center gap-1 text-xs font-medium text-slate-600 hover:text-red-600 dark:text-slate-400"
+                        >
+                          <LogOut className="h-3.5 w-3.5" />
+                          Cerrar
+                        </button>
+                      )}
                     </td>
                     <td className="px-4 py-2.5 text-slate-400">
                       {expandida === s.id ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
@@ -239,13 +278,14 @@ function SesionesTab() {
                   </tr>
                   {expandida === s.id && (
                     <tr key={`${s.id}-cambios`}>
-                      <td colSpan={7} className="bg-slate-50 p-0 dark:bg-slate-800/30">
+                      <td colSpan={9} className="bg-slate-50 p-0 dark:bg-slate-800/30">
                         <CambiosDeSesion sesionId={s.id} />
                       </td>
                     </tr>
                   )}
                 </Fragment>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

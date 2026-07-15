@@ -250,15 +250,21 @@ model Usuario {
   sesiones        InicioSesion[]
 }
 
-// Un renglón por cada login exitoso, para auditoría. La "sesión" en sí es un JWT sin estado
-// (sin id ni logout explícito) — acá solo se registra el momento en que se emitió el token, no
-// se sabe cuándo terminó. Para agrupar "qué cambios se hicieron en esta sesión" se usa una
-// ventana de tiempo: desde este login hasta el siguiente login del mismo usuario (o hasta ahora,
-// si es el más reciente) — ver GET /api/auditoria/:id/cambios.
+// Un renglón por cada login exitoso, para auditoría. Cada login trae un "jti" propio (id
+// aleatorio único del token, ver firmarToken en middleware/auth.js) que permite revocarlo
+// individualmente: requireAuth valida el JWT normalmente (firma + expiración) y ADEMÁS busca
+// este renglón por jti — si existe y revocada=true, rechaza la sesión aunque el token siga
+// siendo válido criptográficamente. Es la única forma de "cerrar sesión" de otro dispositivo
+// que existe en este sistema, ya que el JWT en sí no tiene logout server-side.
+// Para agrupar "qué cambios se hicieron en esta sesión" se usa una ventana de tiempo: desde
+// este login hasta el siguiente login del mismo usuario (o hasta ahora, si es el más reciente)
+// — ver GET /api/auditoria/:id/cambios.
 model InicioSesion {
   id          Int      @id @default(autoincrement())
   usuarioId   Int
   usuario     Usuario  @relation(fields: [usuarioId], references: [id])
+  jti         String?  @unique
+  revocada    Boolean  @default(false)
   ip          String?
   userAgent   String?
   dispositivo String?  // resumen legible del userAgent (ej. "Android · Chrome")

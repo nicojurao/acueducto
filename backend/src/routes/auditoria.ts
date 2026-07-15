@@ -96,10 +96,22 @@ auditoriaRouter.get("/", async (req, res) => {
     ...i,
     ipNueva: primeraVezIp.get(`${i.usuarioId}|${i.ip ?? ""}`) === i.fecha.getTime(),
     dispositivoNuevo: primeraVezDispositivo.get(`${i.usuarioId}|${i.dispositivo ?? ""}`) === i.fecha.getTime(),
-    activa: i.fecha >= corte,
+    activa: i.fecha >= corte && !i.revocada,
   }));
 
   res.json({ data, total, page, limit });
+});
+
+// Cierra una sesión a la fuerza: marca revocada=true, así que el próximo request con ese token
+// (aunque siga vigente para el JWT) es rechazado por verificarToken en middleware/auth.js. Es la
+// única forma de "cerrar sesión" de otro dispositivo sin esperar a que el token expire solo.
+auditoriaRouter.put("/:id/revocar", async (req, res) => {
+  const sesion = await prisma.inicioSesion.findUnique({ where: { id: Number(req.params.id) } });
+  if (!sesion) return res.status(404).json({ error: "No encontrado" });
+  if (!sesion.jti) return res.status(400).json({ error: "Esta sesión es de antes de que existiera la revocación individual; ya no se puede cerrar a la fuerza (solo expira sola)." });
+
+  const actualizada = await prisma.inicioSesion.update({ where: { id: sesion.id }, data: { revocada: true } });
+  res.json(actualizada);
 });
 
 // Intentos de login fallidos, más recientes primero. Filtro opcional por identificador (cédula
@@ -166,7 +178,7 @@ auditoriaRouter.get("/export", async (_req, res) => {
       s.dispositivo ?? "-",
       ipNueva ? "Sí" : "No",
       dispositivoNuevo ? "Sí" : "No",
-      s.fecha >= corte ? "Sí" : "No",
+      s.fecha >= corte && !s.revocada ? "Sí" : "No",
     ]);
   });
 

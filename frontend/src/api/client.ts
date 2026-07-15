@@ -307,6 +307,8 @@ export interface InicioSesion {
   ipNueva: boolean;
   dispositivoNuevo: boolean;
   activa: boolean;
+  jti: string | null;
+  revocada: boolean;
 }
 
 export interface IntentoLoginFallido {
@@ -529,6 +531,7 @@ export interface Usuario {
   createdAt: string;
   rol: { id: number; nombre: string };
   permisos?: string[];
+  sesionId?: string;
 }
 
 export const api = {
@@ -881,6 +884,7 @@ export const api = {
       return request<{ data: InicioSesion[]; total: number; page: number; limit: number }>(`/api/auditoria?${qs}`);
     },
     cambios: (sesionId: number) => request<HistorialCambio[]>(`/api/auditoria/${sesionId}/cambios`),
+    revocar: (sesionId: number) => request<InicioSesion>(`/api/auditoria/${sesionId}/revocar`, { method: "PUT" }),
     fallidosPaginado: (page: number, limit: number, identificador?: string) => {
       const qs = new URLSearchParams({ page: String(page), limit: String(limit) });
       if (identificador) qs.set("identificador", identificador);
