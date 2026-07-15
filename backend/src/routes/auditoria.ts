@@ -3,13 +3,27 @@ import { prisma } from "../lib/prisma.js";
 
 export const auditoriaRouter = Router();
 
-// Listado paginado de inicios de sesión, más recientes primero. Filtro opcional por usuario.
+// El JWT de sesión dura 30 días (ver firmarToken en middleware/auth.js) y no hay forma de
+// invalidarlo antes (no hay logout server-side ni lista de revocación) — así que una sesión
+// sigue siendo válida criptográficamente mientras no pasen esos 30 días, sin importar si el
+// usuario "cerró sesión" en la app o cambió su contraseña. "Activa" acá es esa aproximación.
+const DURACION_TOKEN_DIAS = 30;
+
+// Listado paginado de inicios de sesión, más recientes primero. Filtros opcionales por usuario
+// y por "solo activas" (dentro de la ventana de validez del token).
 auditoriaRouter.get("/", async (req, res) => {
-  const { usuarioId } = req.query;
+  const { usuarioId, activas } = req.query;
   const page = Math.max(1, Number(req.query.page) || 1);
   const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 30));
 
-  const where = usuarioId ? { usuarioId: Number(usuarioId) } : undefined;
+  const filtros: any[] = [];
+  if (usuarioId) filtros.push({ usuarioId: Number(usuarioId) });
+  if (activas === "1") {
+    const desde = new Date();
+    desde.setDate(desde.getDate() - DURACION_TOKEN_DIAS);
+    filtros.push({ fecha: { gte: desde } });
+  }
+  const where = filtros.length > 0 ? { AND: filtros } : undefined;
 
   const [items, total] = await Promise.all([
     prisma.inicioSesion.findMany({

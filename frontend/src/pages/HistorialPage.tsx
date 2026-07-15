@@ -74,6 +74,7 @@ export default function HistorialPage() {
           <option value="">Todos los registros</option>
           <option value="medidor">Medidores</option>
           <option value="suscriptor">Suscriptores</option>
+          <option value="usuario">Usuarios</option>
         </select>
         <select value={usuarioFiltro} onChange={(e) => setUsuarioFiltro(e.target.value)} className={inputClass}>
           <option value="">Todos los usuarios</option>
@@ -121,7 +122,7 @@ export default function HistorialPage() {
                   <td className="whitespace-nowrap px-4 py-2.5 text-slate-700 dark:text-slate-400">{fmtFechaHora(c.fecha)}</td>
                   <td className="px-4 py-2.5">
                     <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                      {c.entidad === "medidor" ? "Medidor" : "Suscriptor"}
+                      {c.entidad === "medidor" ? "Medidor" : c.entidad === "usuario" ? "Usuario" : "Suscriptor"}
                     </span>{" "}
                     <span className="font-medium text-slate-800 dark:text-slate-100">{c.entidadNombre}</span>
                   </td>

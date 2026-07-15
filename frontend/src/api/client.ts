@@ -282,7 +282,7 @@ export interface DiametroMedidor {
 
 export interface HistorialCambio {
   id: number;
-  entidad: "medidor" | "suscriptor";
+  entidad: "medidor" | "suscriptor" | "usuario";
   entidadId: number;
   entidadNombre?: string;
   campo: string;
@@ -861,9 +861,10 @@ export const api = {
     },
   },
   auditoria: {
-    listPaginado: (page: number, limit: number, usuarioId?: number) => {
+    listPaginado: (page: number, limit: number, filtros?: { usuarioId?: number; soloActivas?: boolean }) => {
       const qs = new URLSearchParams({ page: String(page), limit: String(limit) });
-      if (usuarioId) qs.set("usuarioId", String(usuarioId));
+      if (filtros?.usuarioId) qs.set("usuarioId", String(filtros.usuarioId));
+      if (filtros?.soloActivas) qs.set("activas", "1");
       return request<{ data: InicioSesion[]; total: number; page: number; limit: number }>(`/api/auditoria?${qs}`);
     },
     cambios: (sesionId: number) => request<HistorialCambio[]>(`/api/auditoria/${sesionId}/cambios`),

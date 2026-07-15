@@ -1,6 +1,6 @@
 import { prisma } from "./prisma.js";
 
-type EntidadHistorial = "medidor" | "suscriptor";
+type EntidadHistorial = "medidor" | "suscriptor" | "usuario";
 
 const CONDICION_LABELS: Record<string, string> = { bueno: "Bueno", danado: "Dañado" };
 const ESTADO_MEDIDOR_LABELS: Record<string, string> = { instalado: "Instalado", en_bodega: "En bodega" };
@@ -51,6 +51,16 @@ export async function registrarCambios(
   }
 
   if (registros.length > 0) await prisma.historialCambio.createMany({ data: registros });
+}
+
+// Registro dedicado para cambios de contraseña: nunca se guarda la contraseña ni su hash en el
+// historial (sería un riesgo de seguridad guardarlo, aunque sea hasheado), solo el hecho de que
+// cambió, cuándo y quién lo hizo. usuarioId es quien EJECUTÓ el cambio (puede ser el mismo
+// usuario cambiando la suya, o un admin reseteándosela a otro).
+export async function registrarCambioContrasena(entidadId: number, usuarioId?: number): Promise<void> {
+  await prisma.historialCambio.create({
+    data: { entidad: "usuario", entidadId, campo: "Contraseña", valorAnterior: null, valorNuevo: "(cambiada)", usuarioId: usuarioId ?? null },
+  });
 }
 
 // "Snapshot" legible de un Medidor para comparar antes/después. Recibe el registro con las
