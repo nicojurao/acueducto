@@ -1277,6 +1277,7 @@ export const api = {
         periodo: string;
         suscriptoresActivos: number;
         medidoresActivos: number;
+        facturadosPorMedicion: number;
         consumoMesActual: number;
         promedioPorUsuario: number;
         lecturasPendientes: number;

@@ -8,7 +8,8 @@ import KpiCard from "../components/KpiCard";
 interface MedicionKpis {
   suscriptoresActivos: number;
   medidoresActivos: number;
-  consumoMesActual: number;
+  facturadosPorMedicion: number;
+  promedioPorUsuario: number;
   lecturasPendientes: number;
 }
 
@@ -95,10 +96,11 @@ function SeccionMedicion() {
       {!kpis ? (
         <p className="text-sm text-slate-700 dark:text-slate-400">Cargando...</p>
       ) : (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           <KpiCard label="Suscriptores activos" value={fmt(kpis.suscriptoresActivos)} icon={Users} />
           <KpiCard label="Medidores activos" value={fmt(kpis.medidoresActivos)} icon={Gauge} />
-          <KpiCard label="Consumo del mes" value={`${fmt(kpis.consumoMesActual)} m³`} icon={Droplet} />
+          <KpiCard label="Facturados por medición" value={fmt(kpis.facturadosPorMedicion)} icon={Gauge} />
+          <KpiCard label="Promedio del mes" value={`${fmt(kpis.promedioPorUsuario)} m³`} icon={Droplet} />
           <KpiCard
             label="Lecturas pendientes"
             value={fmt(kpis.lecturasPendientes)}

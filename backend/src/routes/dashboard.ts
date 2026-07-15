@@ -48,9 +48,14 @@ dashboardRouter.get("/kpis", async (req, res) => {
   const periodo = String(req.query.periodo ?? periodoActualStr());
   const fecha = primerDiaMes(periodo);
 
-  const [suscriptoresActivos, medidoresActivos, actual, anterior, anioAnterior] = await Promise.all([
-    prisma.suscriptor.count({ where: { medidores: { some: { activo: true } } } }),
+  // "Suscriptores activos" es sobre el PREDIO (estadoPredio), no sobre si ya tienen medidor —
+  // un predio activo sin medidor asignado todavía sigue siendo un suscriptor activo. Antes esto
+  // contaba "suscriptores con medidor activo", que en la práctica daba el mismo número que
+  // "medidores activos" (redundante, y no era lo que decía la etiqueta).
+  const [suscriptoresActivos, medidoresActivos, facturadosPorMedicion, actual, anterior, anioAnterior] = await Promise.all([
+    prisma.suscriptor.count({ where: { estadoPredio: "activo" } }),
     prisma.medidor.count({ where: { activo: true } }),
+    prisma.suscriptor.count({ where: { estadoFacturacion: "facturando" } }),
     sumaConsumoPeriodo(fecha),
     sumaConsumoPeriodo(mesAnterior(fecha)),
     sumaConsumoPeriodo(mismoMesAnioAnterior(fecha)),
@@ -63,6 +68,7 @@ dashboardRouter.get("/kpis", async (req, res) => {
     periodo,
     suscriptoresActivos,
     medidoresActivos,
+    facturadosPorMedicion,
     consumoMesActual: actual.consumo,
     promedioPorUsuario,
     lecturasPendientes: Math.max(lecturasPendientes, 0),
