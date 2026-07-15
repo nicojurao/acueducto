@@ -2,9 +2,8 @@ import { useEffect, useState } from "react";
 import { History, ChevronLeft, ChevronRight } from "lucide-react";
 import { api, HistorialCambio, Usuario } from "../api/client";
 import { useEsMovil } from "../lib/useEsMovil";
-
-const inputClass =
-  "rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:placeholder:text-slate-500";
+import { inputClass } from "../lib/ui";
+import EmptyState from "../components/EmptyState";
 
 function fmtFechaHora(fecha: string): string {
   return new Date(fecha).toLocaleString("es-CO", {
@@ -102,9 +101,7 @@ export default function HistorialPage() {
       {cargando ? (
         <p className="text-slate-700 dark:text-slate-400">Cargando...</p>
       ) : cambios.length === 0 ? (
-        <p className="rounded-xl border border-brand-200 bg-white px-4 py-6 text-center text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900">
-          No hay cambios registrados con estos filtros.
-        </p>
+        <EmptyState mensaje="No hay cambios registrados con estos filtros." />
       ) : (
         <div className="overflow-x-auto rounded-xl border border-brand-200 bg-white shadow-sm animate-content-in dark:border-slate-800 dark:bg-slate-900">
           <table className="w-full text-left text-sm">

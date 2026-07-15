@@ -1,13 +1,150 @@
 import { useEffect, useState } from "react";
-import { Waves, Plus, Trash2, ChevronLeft, ChevronRight, Image as ImageIcon, FileText } from "lucide-react";
-import { api, Aforo, PuntoAforo, urlFoto } from "../api/client";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import { Waves, Plus, Trash2, ChevronLeft, ChevronRight, Image as ImageIcon, FileText, Gauge, MapPin, Activity, AlertTriangle } from "lucide-react";
+import { api, Aforo, AforoKpis, PuntoAforo, urlFoto } from "../api/client";
 import AforoModal from "../components/AforoModal";
+import KpiCard from "../components/KpiCard";
+import ChartCard from "../components/ChartCard";
 import { useConfirm, useErrorHandler } from "../components/ConfirmModal";
 import { useEsMovil } from "../lib/useEsMovil";
 import { SkeletonLista } from "../components/Skeleton";
+import { inputClass } from "../lib/ui";
+import EmptyState from "../components/EmptyState";
 
-const inputClass =
-  "rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:placeholder:text-slate-500";
+const GRID_STROKE = "#475569";
+
+// Paleta cualitativa para distinguir las series (una por punto de aforo) en la gráfica de
+// tendencia. No es el azul de marca a propósito: forzar un solo color haría indistinguibles
+// los puntos entre sí.
+const COLORES_SERIE = ["#00487f", "#0ea5e9", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444", "#14b8a6", "#ec4899"];
+
+function DashboardTab() {
+  const [meses, setMeses] = useState(12);
+  const [kpis, setKpis] = useState<AforoKpis | null>(null);
+  const [cargando, setCargando] = useState(true);
+
+  useEffect(() => {
+    setCargando(true);
+    api.aforos
+      .kpis(meses)
+      .then(setKpis)
+      .finally(() => setCargando(false));
+  }, [meses]);
+
+  if (cargando && !kpis) return <SkeletonLista />;
+  if (!kpis) return null;
+
+  const fmtCaudal = (n: number | null) => (n === null ? "—" : `${n.toFixed(2)} L/s`);
+  const fmtFecha = (f: string | null) => (f ? new Date(f).toLocaleDateString() : "—");
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-end">
+        <div className="flex items-center gap-1 rounded-full border border-slate-200 p-1 dark:border-slate-800">
+          {([6, 12, 24] as const).map((m) => (
+            <button
+              key={m}
+              onClick={() => setMeses(m)}
+              className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                meses === m ? "bg-brand-600 text-white" : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+              }`}
+            >
+              {m} meses
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <KpiCard label="Puntos de aforo" value={`${kpis.puntosActivos}/${kpis.totalPuntos}`} hint="activos / total" icon={MapPin} />
+        <KpiCard label="Registros en el periodo" value={String(kpis.totalRegistros)} icon={Activity} />
+        <KpiCard label="Caudal promedio" value={fmtCaudal(kpis.caudalPromedio)} icon={Gauge} />
+        <KpiCard
+          label="Último caudal"
+          value={fmtCaudal(kpis.ultimoCaudal)}
+          hint={kpis.ultimoPunto ? `${kpis.ultimoPunto} · ${fmtFecha(kpis.ultimaFecha)}` : undefined}
+          icon={Waves}
+        />
+      </div>
+
+      {kpis.alertasCaudalBajo.length > 0 && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 dark:border-amber-500/30 dark:bg-amber-500/10">
+          <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-amber-800 dark:text-amber-300">
+            <AlertTriangle className="h-4 w-4" />
+            Alertas de caudal bajo
+          </div>
+          <ul className="space-y-1 text-sm text-amber-800 dark:text-amber-200">
+            {kpis.alertasCaudalBajo.map((a) => (
+              <li key={a.puntoAforoId}>
+                <span className="font-medium">{a.nombre}</span>: {a.ultimoCaudal.toFixed(2)} L/s
+                {" "}(promedio {a.promedio.toFixed(2)} L/s) · {fmtFecha(a.ultimaFecha)}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <ChartCard title={`Tendencia de caudal por punto (últimos ${kpis.meses} meses)`} span>
+        {kpis.tendencia.length === 0 || kpis.nombresPuntos.length === 0 ? (
+          <EmptyState mensaje="No hay aforos registrados en el periodo seleccionado." className="border-none" />
+        ) : (
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={kpis.tendencia}>
+              <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} opacity={0.2} />
+              <XAxis dataKey="mes" tick={{ fontSize: 11 }} />
+              <YAxis tick={{ fontSize: 11 }} unit=" L/s" width={60} />
+              <Tooltip formatter={(v: number) => `${v} L/s`} />
+              <Legend />
+              {kpis.nombresPuntos.map((nombre, i) => (
+                <Line
+                  key={nombre}
+                  type="monotone"
+                  dataKey={nombre}
+                  stroke={COLORES_SERIE[i % COLORES_SERIE.length]}
+                  strokeWidth={2}
+                  dot={{ r: 3 }}
+                  connectNulls
+                />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+        )}
+      </ChartCard>
+
+      <div className="overflow-x-auto rounded-xl border border-brand-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <table className="w-full text-left text-sm">
+          <thead className="border-b border-brand-100 bg-brand-50 text-xs uppercase text-brand-800 dark:border-slate-800 dark:bg-transparent dark:text-slate-400">
+            <tr>
+              <th className="px-4 py-2.5">Punto de aforo</th>
+              <th className="px-4 py-2.5">Último caudal</th>
+              <th className="px-4 py-2.5">Promedio</th>
+              <th className="px-4 py-2.5">Registros</th>
+              <th className="px-4 py-2.5">Última medición</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+            {kpis.resumenPorPunto.map((p) => (
+              <tr key={p.puntoAforoId}>
+                <td className="px-4 py-2.5 font-medium text-slate-800 dark:text-slate-100">{p.nombre}</td>
+                <td className="px-4 py-2.5 text-slate-700 dark:text-slate-400">{fmtCaudal(p.ultimoCaudal)}</td>
+                <td className="px-4 py-2.5 text-slate-700 dark:text-slate-400">{fmtCaudal(p.promedio)}</td>
+                <td className="px-4 py-2.5 text-slate-700 dark:text-slate-400">{p.registros}</td>
+                <td className="px-4 py-2.5 text-slate-700 dark:text-slate-400">{fmtFecha(p.ultimaFecha)}</td>
+              </tr>
+            ))}
+            {kpis.resumenPorPunto.length === 0 && (
+              <tr>
+                <td colSpan={5} className="px-4 py-6">
+                  <EmptyState mensaje="No hay aforos registrados en el periodo seleccionado." />
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 
 const METODO_LABELS: Record<string, string> = { volumetrico: "Volumétrico", flotador: "Flotador" };
 
@@ -181,9 +318,7 @@ function RegistrosTab({ puntos }: { puntos: PuntoAforo[] }) {
       {cargando ? (
         <SkeletonLista />
       ) : filas.length === 0 ? (
-        <p className="rounded-xl border border-brand-200 bg-white px-4 py-6 text-center text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900">
-          No hay registros de aforo{puntoFiltro ? " para este punto" : ""}.
-        </p>
+        <EmptyState mensaje={`No hay registros de aforo${puntoFiltro ? " para este punto" : ""}.`} />
       ) : (
         <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-brand-200 bg-white shadow-sm animate-content-in dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
           {filas.map((a) => (
@@ -262,7 +397,7 @@ function RegistrosTab({ puntos }: { puntos: PuntoAforo[] }) {
 }
 
 export default function AforosPage() {
-  const [tab, setTab] = useState<"registros" | "puntos">("registros");
+  const [tab, setTab] = useState<"dashboard" | "registros" | "puntos">("dashboard");
   const [puntos, setPuntos] = useState<PuntoAforo[]>([]);
 
   async function cargarPuntos() {
@@ -283,6 +418,7 @@ export default function AforosPage() {
       <div className="mb-4 flex items-center gap-1 rounded-full border border-slate-200 p-1 dark:border-slate-800 w-fit">
         {(
           [
+            ["dashboard", "Dashboard"],
             ["registros", "Registros de aforo"],
             ["puntos", "Puntos de aforo"],
           ] as [typeof tab, string][]
@@ -301,11 +437,9 @@ export default function AforosPage() {
         ))}
       </div>
 
-      {tab === "puntos" ? (
-        <PuntosTab puntos={puntos} recargar={cargarPuntos} />
-      ) : (
-        <RegistrosTab puntos={puntos} />
-      )}
+      {tab === "dashboard" && <DashboardTab />}
+      {tab === "registros" && <RegistrosTab puntos={puntos} />}
+      {tab === "puntos" && <PuntosTab puntos={puntos} recargar={cargarPuntos} />}
     </div>
   );
 }

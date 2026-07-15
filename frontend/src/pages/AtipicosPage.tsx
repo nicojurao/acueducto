@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowLeft, AlertTriangle, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
 import { api } from "../api/client";
 import SuscriptorDetailModal from "../components/SuscriptorDetailModal";
+import EmptyState from "../components/EmptyState";
 
 // Las lecturas del mes no empiezan a capturarse hasta el día 20, así que antes de esa fecha se
 // muestra el mes anterior (que sí tiene datos) en vez del mes actual vacío. Mismo criterio que
@@ -140,7 +141,7 @@ export default function AtipicosPage() {
       {cargando ? (
         <p className="text-slate-700 dark:text-slate-400">Cargando...</p>
       ) : atipicos.length === 0 ? (
-        <p className="text-slate-700 dark:text-slate-400">No hay consumos atípicos en este periodo.</p>
+        <EmptyState mensaje="No hay consumos atípicos en este periodo." />
       ) : (
         <div className="overflow-x-auto rounded-xl border border-brand-200 bg-white shadow-sm animate-content-in dark:border-slate-800 dark:bg-slate-900">
           <table className="w-full text-sm">

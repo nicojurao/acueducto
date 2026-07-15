@@ -33,9 +33,8 @@ import { SkeletonTabla } from "../components/Skeleton";
 import BusquedaInput from "../components/BusquedaInput";
 import { useFiltroPersistente } from "../lib/useFiltroPersistente";
 import ThOrdenable, { Orden, alternarOrden } from "../components/ThOrdenable";
-
-const inputClass =
-  "rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:placeholder:text-slate-500";
+import { inputClass } from "../lib/ui";
+import EmptyState from "../components/EmptyState";
 
 const TAMANOS_PAGINA = [5, 10, 25, 50, 100];
 
@@ -371,8 +370,8 @@ function ListadoTab() {
                 ))}
                 {suscriptores.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="px-4 py-6 text-center text-slate-600">
-                      Sin resultados.
+                    <td colSpan={8} className="px-4 py-6">
+                      <EmptyState mensaje="Sin resultados." />
                     </td>
                   </tr>
                 )}
@@ -616,9 +615,7 @@ function BarriosEstratosTab() {
               </div>
               )
             )}
-            {barrios.length === 0 && (
-              <p className="px-4 py-6 text-center text-sm text-slate-600">Aún no hay barrios registrados.</p>
-            )}
+            {barrios.length === 0 && <EmptyState mensaje="Aún no hay barrios registrados." />}
           </div>
         )}
       </div>
@@ -723,9 +720,7 @@ function BarriosEstratosTab() {
               </div>
               )
             )}
-            {estratos.length === 0 && (
-              <p className="px-4 py-6 text-center text-sm text-slate-600">Aún no hay estratos registrados.</p>
-            )}
+            {estratos.length === 0 && <EmptyState mensaje="Aún no hay estratos registrados." />}
           </div>
         )}
       </div>

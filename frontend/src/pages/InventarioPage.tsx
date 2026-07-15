@@ -43,6 +43,8 @@ import { useCierreAnimado } from "../lib/useCierreAnimado";
 import BusquedaInput from "../components/BusquedaInput";
 import { useFiltroPersistente } from "../lib/useFiltroPersistente";
 import ThOrdenable, { Orden, alternarOrden } from "../components/ThOrdenable";
+import { inputClass } from "../lib/ui";
+import EmptyState from "../components/EmptyState";
 
 const GRID_STROKE = "#475569";
 
@@ -109,9 +111,6 @@ function DashboardTab() {
     </div>
   );
 }
-
-const inputClass =
-  "rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:placeholder:text-slate-500";
 
 const ESTADO_LABELS: Record<string, string> = { bueno: "Bueno", regular: "Regular", dañado: "Dañado", de_baja: "De baja" };
 const ESTADO_COLORS: Record<string, string> = {
@@ -287,9 +286,9 @@ function ItemsTab({
       {cargando ? (
         <SkeletonTabla columnas={5} filas={porPagina} />
       ) : filas.length === 0 ? (
-        <p className="rounded-xl border border-brand-200 bg-white px-4 py-6 text-center text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900">
-          {busqueda.trim() ? `Sin resultados para "${busqueda}".` : "No hay ítems registrados en el inventario."}
-        </p>
+        <EmptyState
+          mensaje={busqueda.trim() ? `Sin resultados para "${busqueda}".` : "No hay ítems registrados en el inventario."}
+        />
       ) : (
         <div className="overflow-x-auto rounded-xl border border-brand-200 bg-white shadow-sm animate-content-in dark:border-slate-800 dark:bg-slate-900">
           <table className="w-full text-left text-sm">
@@ -584,9 +583,7 @@ function PrestamosTab() {
       {cargando ? (
         <SkeletonLista />
       ) : prestamos.length === 0 ? (
-        <p className="rounded-xl border border-brand-200 bg-white px-4 py-6 text-center text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900">
-          No hay préstamos {soloActivos ? "activos" : "registrados"}.
-        </p>
+        <EmptyState mensaje={`No hay préstamos ${soloActivos ? "activos" : "registrados"}.`} />
       ) : (
         <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-brand-200 bg-white shadow-sm animate-content-in dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
           {prestamos.map((p) => (
@@ -846,9 +843,7 @@ function MovimientosTab() {
       {cargando ? (
         <SkeletonLista />
       ) : movimientos.length === 0 ? (
-        <p className="rounded-xl border border-brand-200 bg-white px-4 py-6 text-center text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900">
-          No hay movimientos registrados.
-        </p>
+        <EmptyState mensaje="No hay movimientos registrados." />
       ) : (
         <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-brand-200 bg-white shadow-sm animate-content-in dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
           {movimientos.map((m) => (
@@ -1052,9 +1047,7 @@ function CatalogoSimpleTab({
       {cargando ? (
         <SkeletonLista />
       ) : filas.length === 0 ? (
-        <p className="rounded-xl border border-brand-200 bg-white px-4 py-6 text-center text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900">
-          No hay {titulo.toLowerCase()} registradas todavía.
-        </p>
+        <EmptyState mensaje={`No hay ${titulo.toLowerCase()} registradas todavía.`} />
       ) : (
         <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-brand-200 bg-white shadow-sm animate-content-in dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
           {filas.map((f) => (
@@ -1187,9 +1180,7 @@ function ProveedoresTab({ recargarCatalogos }: { recargarCatalogos: () => void }
       {cargando ? (
         <SkeletonLista />
       ) : filas.length === 0 ? (
-        <p className="rounded-xl border border-brand-200 bg-white px-4 py-6 text-center text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900">
-          No hay proveedores registrados todavía.
-        </p>
+        <EmptyState mensaje="No hay proveedores registrados todavía." />
       ) : (
         <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-brand-200 bg-white shadow-sm animate-content-in dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
           {filas.map((p) => (

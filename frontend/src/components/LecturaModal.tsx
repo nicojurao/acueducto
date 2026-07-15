@@ -9,13 +9,11 @@ import { useAuth } from "../contexts/AuthContext";
 import { PendienteLectura, agregarPendiente, eliminarPendiente, agregarPendienteNovedad } from "../lib/offlineQueue";
 import { comprimirFoto, comprimirFotos } from "../lib/comprimirImagen";
 import { useCierreAnimado } from "../lib/useCierreAnimado";
+import { inputClass } from "../lib/ui";
 
 function esErrorDeRed(err: unknown): boolean {
   return err instanceof TypeError || (err instanceof DOMException && err.name === "AbortError");
 }
-
-const inputClass =
-  "rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:placeholder:text-slate-500";
 
 // Intenta obtener la ubicación GPS del dispositivo; si no hay permiso o no está disponible,
 // la lectura se guarda igual, solo sin coordenadas.

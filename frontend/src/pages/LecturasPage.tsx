@@ -21,7 +21,9 @@ import { PendienteLectura, PendienteNovedad, useColaPendientes, useColaPendiente
 import { useEsMovil } from "../lib/useEsMovil";
 import { SkeletonLista } from "../components/Skeleton";
 import BusquedaInput from "../components/BusquedaInput";
+import EmptyState from "../components/EmptyState";
 import { useFiltroPersistente } from "../lib/useFiltroPersistente";
+import { inputClass } from "../lib/ui";
 
 // Las lecturas del mes no empiezan a capturarse hasta el día 20, así que antes de esa fecha se
 // muestra el mes anterior (que sí tiene datos) en vez del mes actual vacío. Mismo criterio que
@@ -39,9 +41,6 @@ function periodoActual(): string {
   }
   return `${anio}-${String(mes).padStart(2, "0")}`;
 }
-
-const inputClass =
-  "rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:placeholder:text-slate-500";
 
 type FiltroEstado = "todos" | "pendientes" | "tomadas";
 
@@ -337,13 +336,11 @@ export default function LecturasPage() {
       {cargando ? (
         <SkeletonLista filas={porPagina} />
       ) : verColaOffline && resultados.length === 0 ? (
-        <p className="rounded-xl border border-brand-200 bg-white px-4 py-6 text-center text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900">
-          No hay pendientes por sincronizar en este periodo.
-        </p>
+        <EmptyState mensaje="No hay pendientes por sincronizar en este periodo." />
       ) : !verColaOffline && resultados.length === 0 ? (
-        <p className="rounded-xl border border-brand-200 bg-white px-4 py-6 text-center text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900">
-          {busqueda.trim() ? `Sin resultados para "${busqueda}".` : "No hay medidores en este filtro."}
-        </p>
+        <EmptyState
+          mensaje={busqueda.trim() ? `Sin resultados para "${busqueda}".` : "No hay medidores en este filtro."}
+        />
       ) : (
         <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-brand-200 bg-white shadow-sm animate-content-in dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
           {resultados.map((f) => {

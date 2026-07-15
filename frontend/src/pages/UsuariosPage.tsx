@@ -6,6 +6,7 @@ import { useConfirm, useErrorHandler } from "../components/ConfirmModal";
 import { useAuth } from "../contexts/AuthContext";
 import { useCierreAnimado } from "../lib/useCierreAnimado";
 import BusquedaInput from "../components/BusquedaInput";
+import EmptyState from "../components/EmptyState";
 
 const inputClass =
   "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:placeholder:text-slate-500";
@@ -513,8 +514,10 @@ export default function UsuariosPage() {
               ))}
               {filtrados.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-6 text-center text-slate-600">
-                    {usuarios.length === 0 ? "Aún no hay usuarios." : "Ningún usuario coincide con la búsqueda."}
+                  <td colSpan={5} className="px-4 py-6">
+                    <EmptyState
+                      mensaje={usuarios.length === 0 ? "Aún no hay usuarios." : "Ningún usuario coincide con la búsqueda."}
+                    />
                   </td>
                 </tr>
               )}

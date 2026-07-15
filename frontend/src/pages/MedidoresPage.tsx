@@ -37,9 +37,8 @@ import { useCierreAnimado } from "../lib/useCierreAnimado";
 import BusquedaInput from "../components/BusquedaInput";
 import { useFiltroPersistente } from "../lib/useFiltroPersistente";
 import ThOrdenable, { Orden, alternarOrden } from "../components/ThOrdenable";
-
-const inputClass =
-  "rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:placeholder:text-slate-500";
+import { inputClass } from "../lib/ui";
+import EmptyState from "../components/EmptyState";
 
 const TIPO_LABELS: Record<string, string> = { volumetrico: "Volumétrico", velocidad: "Velocidad" };
 function tipoLabel(tipo: string | null): string {
@@ -580,8 +579,8 @@ function InventarioTab() {
               ))}
               {medidores.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-4 py-6 text-center text-slate-600">
-                    Sin resultados.
+                  <td colSpan={9} className="px-4 py-6">
+                    <EmptyState mensaje="Sin resultados." />
                   </td>
                 </tr>
               )}
@@ -760,9 +759,7 @@ function CatalogoTab() {
           </div>
 
           {marcas.length === 0 ? (
-            <p className="py-2 text-sm text-slate-600">
-              Aún no hay marcas. Crea la primera con el botón "Nueva marca".
-            </p>
+            <EmptyState mensaje='Aún no hay marcas. Crea la primera con el botón "Nueva marca".' className="py-2" />
           ) : (
             <table className="w-full text-sm">
               <thead>
@@ -891,8 +888,8 @@ function CatalogoTab() {
               )}
               {diametros.length === 0 && (
                 <tr>
-                  <td colSpan={2} className="py-2 text-sm text-slate-600">
-                    Aún no hay diámetros. Agrega el primero arriba.
+                  <td colSpan={2} className="py-2">
+                    <EmptyState mensaje="Aún no hay diámetros. Agrega el primero arriba." className="py-2" />
                   </td>
                 </tr>
               )}
@@ -999,8 +996,8 @@ function CatalogoTab() {
             )}
             {lotes.length === 0 && (
               <tr>
-                <td colSpan={3} className="py-2 text-sm text-slate-600">
-                  Aún no hay lotes. Agrega el primero arriba.
+                <td colSpan={3} className="py-2">
+                  <EmptyState mensaje="Aún no hay lotes. Agrega el primero arriba." className="py-2" />
                 </td>
               </tr>
             )}
@@ -1359,9 +1356,8 @@ function ActasTab() {
               ))}
               {actas.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-6 text-center text-slate-600">
-                    <FileText className="mx-auto mb-1 h-5 w-5" />
-                    Aún no hay actas de instalación.
+                  <td colSpan={5} className="px-4 py-6">
+                    <EmptyState mensaje="Aún no hay actas de instalación." icon={FileText} />
                   </td>
                 </tr>
               )}

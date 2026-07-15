@@ -25,11 +25,9 @@ import { useConfirm } from "./ConfirmModal";
 import { HistorialSeccion } from "./HistorialTimeline";
 import { useAuth } from "../contexts/AuthContext";
 import { useCierreAnimado } from "../lib/useCierreAnimado";
+import { inputClass } from "../lib/ui";
 
 const GRID_STROKE = "#475569";
-
-const inputClass =
-  "rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:border-brand-500 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:placeholder:text-slate-500";
 
 const TIPO_LABELS: Record<string, string> = { volumetrico: "Volumétrico", velocidad: "Velocidad" };
 function tipoLabel(tipo: string | null): string {
