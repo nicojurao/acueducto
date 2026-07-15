@@ -7,7 +7,7 @@ import { firmarToken, firmarTokenMedia, requireAuth } from "../middleware/auth.j
 import { guardarArchivo, borrarArchivo } from "../lib/storage.js";
 import { resumenDispositivo } from "../lib/userAgent.js";
 import { geolocalizarIp } from "../lib/geoip.js";
-import { registrarCambioContrasena } from "../lib/historial.js";
+import { registrarCambioContrasena, registrarCambios, camposUsuario } from "../lib/historial.js";
 import { ipCliente } from "../lib/ip.js";
 
 export const authRouter = Router();
@@ -127,6 +127,8 @@ authRouter.put("/perfil", requireAuth, upload.single("foto"), async (req, res) =
     foto = null;
   }
 
+  const antes = camposUsuario(existente);
+
   const usuario = await prisma.usuario.update({
     where: { id: existente.id },
     data: {
@@ -138,6 +140,7 @@ authRouter.put("/perfil", requireAuth, upload.single("foto"), async (req, res) =
     },
     include: { rol: { include: { permisos: { include: { permiso: true } } } } },
   });
+  await registrarCambios("usuario", existente.id, antes, camposUsuario(usuario), req.usuario!.id);
   if (password) await registrarCambioContrasena(existente.id, req.usuario!.id);
   res.json(perfil(usuario));
 });

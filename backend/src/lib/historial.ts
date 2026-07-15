@@ -53,6 +53,31 @@ export async function registrarCambios(
   if (registros.length > 0) await prisma.historialCambio.createMany({ data: registros });
 }
 
+// "Snapshot" legible de un Usuario (perfil propio o editado por un admin). rolNombre/activo/
+// cedula son opcionales: el autoservicio (PUT /api/auth/perfil) no los toca, así que se omiten
+// ahí; el admin (PUT /api/usuarios/:id) sí los incluye. La contraseña NUNCA pasa por acá — se
+// audita aparte con registrarCambioContrasena, sin guardar el valor ni el hash.
+export function camposUsuario(u: {
+  nombre: string;
+  celular: string | null;
+  fechaNacimiento: Date | null;
+  foto: string | null;
+  activo?: boolean;
+  cedula?: string | null;
+  rolNombre?: string;
+}): Record<string, unknown> {
+  const campos: Record<string, unknown> = {
+    Nombre: u.nombre,
+    Celular: u.celular,
+    "Fecha de nacimiento": u.fechaNacimiento,
+    "Foto de perfil": u.foto,
+  };
+  if (u.activo !== undefined) campos.Activo = u.activo;
+  if (u.cedula !== undefined) campos["Cédula"] = u.cedula;
+  if (u.rolNombre !== undefined) campos.Rol = u.rolNombre;
+  return campos;
+}
+
 // Registro dedicado para cambios de contraseña: nunca se guarda la contraseña ni su hash en el
 // historial (sería un riesgo de seguridad guardarlo, aunque sea hasheado), solo el hecho de que
 // cambió, cuándo y quién lo hizo. usuarioId es quien EJECUTÓ el cambio (puede ser el mismo

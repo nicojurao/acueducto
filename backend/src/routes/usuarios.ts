@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import multer from "multer";
 import { prisma } from "../lib/prisma.js";
 import { guardarArchivo, borrarArchivo } from "../lib/storage.js";
-import { registrarCambioContrasena } from "../lib/historial.js";
+import { registrarCambioContrasena, registrarCambios, camposUsuario } from "../lib/historial.js";
 
 export const usuariosRouter = Router();
 
@@ -114,6 +114,8 @@ usuariosRouter.put("/:id", upload.single("foto"), async (req, res) => {
     foto = null;
   }
 
+  const antes = camposUsuario({ ...existente, rolNombre: existente.rol.nombre });
+
   try {
     const usuario = await prisma.usuario.update({
       where: { id },
@@ -129,6 +131,7 @@ usuariosRouter.put("/:id", upload.single("foto"), async (req, res) => {
       },
       include: { rol: true },
     });
+    await registrarCambios("usuario", id, antes, camposUsuario({ ...usuario, rolNombre: usuario.rol.nombre }), req.usuario!.id);
     if (password) await registrarCambioContrasena(id, req.usuario!.id);
     res.json(sinPassword(usuario));
   } catch (err: any) {
