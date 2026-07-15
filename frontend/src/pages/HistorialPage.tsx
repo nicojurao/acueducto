@@ -127,9 +127,9 @@ export default function HistorialPage() {
                   </td>
                   <td className="px-4 py-2.5 text-slate-700 dark:text-slate-400">{c.campo}</td>
                   <td className="px-4 py-2.5 text-slate-700 dark:text-slate-400">
-                    {c.valorAnterior ?? <em className="text-slate-500">(vacío)</em>}
+                    {c.valorAnterior ?? <em className="text-slate-500 dark:text-slate-400">(vacío)</em>}
                     {" → "}
-                    {c.valorNuevo ?? <em className="text-slate-500">(vacío)</em>}
+                    {c.valorNuevo ?? <em className="text-slate-500 dark:text-slate-400">(vacío)</em>}
                   </td>
                   <td className="px-4 py-2.5 text-slate-700 dark:text-slate-400">{c.usuario?.nombre ?? "Usuario eliminado"}</td>
                 </tr>

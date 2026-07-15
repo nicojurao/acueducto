@@ -55,7 +55,7 @@ export default function LecturaDetalleModal({
               />
             </a>
           ) : (
-            <p className="text-sm text-slate-600">Esta lectura no tiene foto (importada antes de exigirla).</p>
+            <p className="text-sm text-slate-600 dark:text-slate-300">Esta lectura no tiene foto (importada antes de exigirla).</p>
           )}
 
           <div className="space-y-2 text-sm">
@@ -86,7 +86,7 @@ export default function LecturaDetalleModal({
                 {latitud.toFixed(6)}, {longitud.toFixed(6)}
               </a>
             ) : (
-              <div className="flex items-center gap-2 text-slate-600">
+              <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300">
                 <MapPin className="h-4 w-4 shrink-0" />
                 Sin coordenadas registradas
               </div>

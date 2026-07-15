@@ -491,7 +491,7 @@ export default function LecturaModal({
               </div>
 
               {obteniendoUbicacion && (
-                <span className="flex items-center gap-1 text-xs text-slate-600">
+                <span className="flex items-center gap-1 text-xs text-slate-600 dark:text-slate-400">
                   <MapPin className="h-3 w-3 animate-pulse" />
                   Obteniendo ubicación...
                 </span>
@@ -503,7 +503,7 @@ export default function LecturaModal({
                     setEditando(false);
                     setQuitarFoto(false);
                   }}
-                  className="text-xs font-medium text-slate-600 hover:text-slate-600 dark:hover:text-slate-300"
+                  className="text-xs font-medium text-slate-600 hover:text-slate-600 dark:text-slate-400 dark:hover:text-slate-300"
                 >
                   Cancelar corrección
                 </button>

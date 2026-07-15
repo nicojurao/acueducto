@@ -21,9 +21,9 @@ export default function ChartCard({ title, children, span }: { title: string; ch
       >
         <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">{title}</h3>
         {abierto ? (
-          <ChevronUp className="h-4 w-4 shrink-0 text-slate-600 sm:hidden" />
+          <ChevronUp className="h-4 w-4 shrink-0 text-slate-600 dark:text-slate-400 sm:hidden" />
         ) : (
-          <ChevronDown className="h-4 w-4 shrink-0 text-slate-600 sm:hidden" />
+          <ChevronDown className="h-4 w-4 shrink-0 text-slate-600 dark:text-slate-400 sm:hidden" />
         )}
       </button>
       <div className={`${abierto ? "block" : "hidden"} px-4 pb-4 sm:block sm:pt-3`}>{children}</div>

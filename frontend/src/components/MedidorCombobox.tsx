@@ -61,12 +61,12 @@ export default function MedidorCombobox({
           }}
           className={`${inputClass} w-full pr-8`}
         />
-        <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-600" />
+        <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-600 dark:text-slate-400" />
       </div>
       {abierto && (
         <div className="absolute z-10 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900">
           {resultados.length === 0 ? (
-            <div className="px-3 py-2 text-sm text-slate-600">Sin medidores en bodega</div>
+            <div className="px-3 py-2 text-sm text-slate-600 dark:text-slate-400">Sin medidores en bodega</div>
           ) : (
             resultados.map((m) => (
               <button
@@ -80,7 +80,7 @@ export default function MedidorCombobox({
                 className="flex w-full flex-col items-start px-3 py-2 text-left text-sm hover:bg-brand-50 dark:hover:bg-slate-800"
               >
                 <span className="font-medium text-slate-700 dark:text-slate-200">Serial: {m.serial}</span>
-                <span className="text-xs text-slate-600">
+                <span className="text-xs text-slate-600 dark:text-slate-400">
                   {m.marcaCat?.nombre ?? "-"} {m.modeloCat?.nombre ?? ""}
                 </span>
               </button>

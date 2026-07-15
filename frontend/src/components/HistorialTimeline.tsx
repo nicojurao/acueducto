@@ -34,9 +34,9 @@ export default function HistorialTimeline({ entidad, entidadId }: { entidad: "me
             <span className="shrink-0 text-xs text-slate-600 dark:text-slate-400">{fmtFechaHora(c.fecha)}</span>
           </div>
           <div className="mt-0.5 text-xs text-slate-700 dark:text-slate-400">
-            {c.valorAnterior ?? <em className="text-slate-500">(vacío)</em>}
+            {c.valorAnterior ?? <em className="text-slate-500 dark:text-slate-400">(vacío)</em>}
             {" → "}
-            {c.valorNuevo ?? <em className="text-slate-500">(vacío)</em>}
+            {c.valorNuevo ?? <em className="text-slate-500 dark:text-slate-400">(vacío)</em>}
           </div>
           <div className="mt-1 text-xs text-slate-600 dark:text-slate-500">{c.usuario?.nombre ?? "Usuario eliminado"}</div>
         </div>

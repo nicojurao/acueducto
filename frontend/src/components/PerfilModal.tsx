@@ -79,7 +79,7 @@ export default function PerfilModal({ onCerrar }: { onCerrar: () => void }) {
       <div className={`w-full max-w-lg rounded-xl bg-white p-5 shadow-xl dark:bg-slate-900 ${saliendo ? "animate-scale-out" : "animate-scale-in"}`}>
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-base font-semibold text-slate-800 dark:text-slate-100">Mi perfil</h3>
-          <button onClick={cerrar} className="rounded-lg p-1 text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800">
+          <button onClick={cerrar} className="rounded-lg p-1 text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -111,7 +111,7 @@ export default function PerfilModal({ onCerrar }: { onCerrar: () => void }) {
               </label>
             </div>
             {previewFoto && (
-              <button type="button" onClick={onQuitarFoto} className="text-xs text-slate-600 hover:text-red-600">
+              <button type="button" onClick={onQuitarFoto} className="text-xs text-slate-600 hover:text-red-600 dark:text-slate-400">
                 Quitar foto
               </button>
             )}
@@ -175,7 +175,7 @@ export default function PerfilModal({ onCerrar }: { onCerrar: () => void }) {
                 type="button"
                 onClick={() => setVerPassword((v) => !v)}
                 tabIndex={-1}
-                className="absolute inset-y-0 right-0 flex items-center px-2.5 text-slate-600 hover:text-slate-600 dark:hover:text-slate-200"
+                className="absolute inset-y-0 right-0 flex items-center px-2.5 text-slate-600 hover:text-slate-600 dark:text-slate-400 dark:hover:text-slate-200"
               >
                 {verPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>

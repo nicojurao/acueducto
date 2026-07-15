@@ -874,7 +874,7 @@ function CatalogoTab() {
             />
             <button
               type="submit"
-              className="flex shrink-0 items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-500"
+              className="flex shrink-0 items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-500"
             >
               <Plus className="h-4 w-4" />
               Agregar
@@ -973,7 +973,7 @@ function CatalogoTab() {
           />
           <button
             type="submit"
-            className="flex shrink-0 items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-500"
+            className="flex shrink-0 items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-500"
           >
             <Plus className="h-4 w-4" />
             Agregar

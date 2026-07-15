@@ -800,7 +800,7 @@ export default function SuscriptorDetailModal({
                   </button>
                 )}
                 {!asignando && suscriptor.estadoPredio === "inactivo" && (
-                  <span className="text-xs text-slate-600">Predio inactivo: no puede tener medidor</span>
+                  <span className="text-xs text-slate-600 dark:text-slate-400">Predio inactivo: no puede tener medidor</span>
                 )}
               </div>
 
@@ -944,7 +944,7 @@ export default function SuscriptorDetailModal({
                                 </span>
                                 <button
                                   onClick={() => quitarCotitular(m.id, c.suscriptor.id, c.suscriptor.nombre)}
-                                  className="text-slate-500 hover:text-red-600"
+                                  className="text-slate-500 hover:text-red-600 dark:text-slate-400"
                                   title="Quitar cotitular"
                                 >
                                   <Trash2 className="h-3.5 w-3.5" />

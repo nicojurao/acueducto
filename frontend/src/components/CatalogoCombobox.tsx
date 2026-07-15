@@ -58,12 +58,12 @@ export default function CatalogoCombobox({
           }}
           className={`${inputClass} w-full pr-8`}
         />
-        <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-600" />
+        <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-600 dark:text-slate-400" />
       </div>
       {abierto && (
         <div className="absolute z-10 mt-1 max-h-64 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900">
           {resultados.length === 0 ? (
-            <div className="px-3 py-2 text-sm text-slate-600">{vacio ?? "Sin resultados"}</div>
+            <div className="px-3 py-2 text-sm text-slate-600 dark:text-slate-400">{vacio ?? "Sin resultados"}</div>
           ) : (
             resultados.map((o) => (
               <button

@@ -281,7 +281,7 @@ export default function AforoModal({
 
               <ListaNumeros etiqueta="Tiempos (segundos, una corrida por fila)" valores={tiempos} onCambiar={setTiempos} />
               {tiempoProm !== null && (
-                <div className="text-xs text-slate-600">Tiempo promedio: {tiempoProm.toFixed(2)} s</div>
+                <div className="text-xs text-slate-600 dark:text-slate-300">Tiempo promedio: {tiempoProm.toFixed(2)} s</div>
               )}
 
               <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-800">
@@ -314,7 +314,7 @@ export default function AforoModal({
                   ))}
                 </div>
                 {(profAltaProm !== null || areaAltaM2 !== null) && (
-                  <div className="mt-1.5 text-xs text-slate-600">
+                  <div className="mt-1.5 text-xs text-slate-600 dark:text-slate-300">
                     {profAltaProm !== null && `Prof. promedio: ${profAltaProm.toFixed(3)} m`}
                     {areaAltaM2 !== null && ` · Área: ${areaAltaM2.toFixed(3)} m²`}
                   </div>
@@ -351,14 +351,14 @@ export default function AforoModal({
                   ))}
                 </div>
                 {(profBajaProm !== null || areaBajaM2 !== null) && (
-                  <div className="mt-1.5 text-xs text-slate-600">
+                  <div className="mt-1.5 text-xs text-slate-600 dark:text-slate-300">
                     {profBajaProm !== null && `Prof. promedio: ${profBajaProm.toFixed(3)} m`}
                     {areaBajaM2 !== null && ` · Área: ${areaBajaM2.toFixed(3)} m²`}
                   </div>
                 )}
               </div>
 
-              {areaM2 !== null && <div className="text-xs text-slate-600">Área promedio final: {areaM2.toFixed(3)} m²</div>}
+              {areaM2 !== null && <div className="text-xs text-slate-600 dark:text-slate-300">Área promedio final: {areaM2.toFixed(3)} m²</div>}
             </div>
           )}
 
