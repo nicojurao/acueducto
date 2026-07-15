@@ -47,6 +47,11 @@ export const PERMISOS = [
     nombre: "Historial de cambios",
     descripcion: "Ver el historial de cambios de medidores y suscriptores",
   },
+  {
+    clave: "auditoria",
+    nombre: "Auditoría de sesiones",
+    descripcion: "Ver los inicios de sesión (IP, ubicación, dispositivo) y los cambios hechos en cada una",
+  },
 ] as const;
 
 export type ClavePermiso = (typeof PERMISOS)[number]["clave"];

@@ -27,6 +27,7 @@ const RolesPage = lazy(() => import("./pages/RolesPage"));
 const AforosPage = lazy(() => import("./pages/AforosPage"));
 const InventarioPage = lazy(() => import("./pages/InventarioPage"));
 const HistorialPage = lazy(() => import("./pages/HistorialPage"));
+const AuditoriaPage = lazy(() => import("./pages/AuditoriaPage"));
 
 function CargandoPagina() {
   return (
@@ -151,6 +152,14 @@ function AppShell() {
               element={
                 <RutaProtegida permiso="historial">
                   <HistorialPage />
+                </RutaProtegida>
+              }
+            />
+            <Route
+              path="/auditoria"
+              element={
+                <RutaProtegida permiso="auditoria">
+                  <AuditoriaPage />
                 </RutaProtegida>
               }
             />

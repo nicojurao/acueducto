@@ -293,6 +293,19 @@ export interface HistorialCambio {
   fecha: string;
 }
 
+export interface InicioSesion {
+  id: number;
+  usuarioId: number;
+  usuario: { id: number; nombre: string; nombreUsuario: string };
+  ip: string | null;
+  userAgent: string | null;
+  dispositivo: string | null;
+  ciudad: string | null;
+  region: string | null;
+  pais: string | null;
+  fecha: string;
+}
+
 export interface ActaInstalacion {
   id: number;
   medidorId: number;
@@ -846,6 +859,14 @@ export const api = {
       if (filtros?.campo) qs.set("campo", filtros.campo);
       return request<{ data: HistorialCambio[]; total: number; page: number; limit: number }>(`/api/historial?${qs}`);
     },
+  },
+  auditoria: {
+    listPaginado: (page: number, limit: number, usuarioId?: number) => {
+      const qs = new URLSearchParams({ page: String(page), limit: String(limit) });
+      if (usuarioId) qs.set("usuarioId", String(usuarioId));
+      return request<{ data: InicioSesion[]; total: number; page: number; limit: number }>(`/api/auditoria?${qs}`);
+    },
+    cambios: (sesionId: number) => request<HistorialCambio[]>(`/api/auditoria/${sesionId}/cambios`),
   },
   puntosAforo: {
     list: () => request<PuntoAforo[]>("/api/puntos-aforo"),

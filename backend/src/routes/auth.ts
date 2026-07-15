@@ -5,6 +5,8 @@ import rateLimit from "express-rate-limit";
 import { prisma } from "../lib/prisma.js";
 import { firmarToken, firmarTokenMedia, requireAuth } from "../middleware/auth.js";
 import { guardarArchivo, borrarArchivo } from "../lib/storage.js";
+import { resumenDispositivo } from "../lib/userAgent.js";
+import { geolocalizarIp } from "../lib/geoip.js";
 
 export const authRouter = Router();
 
@@ -69,7 +71,27 @@ authRouter.post("/login", limiteLogin, async (req, res) => {
   if (!valido) return res.status(401).json({ error: "Credenciales inválidas" });
 
   const token = firmarToken({ id: usuario.id });
+
+  // Registro de auditoría: la fila se crea antes de responder (rápido, solo INSERT local), pero
+  // la geolocalización por IP pega a un servicio externo — se resuelve después, en segundo
+  // plano, para no demorar el login si ip-api.com está lento o caído (ver lib/geoip.ts).
+  const userAgent = req.headers["user-agent"];
+  const sesion = await prisma.inicioSesion.create({
+    data: {
+      usuarioId: usuario.id,
+      ip: req.ip,
+      userAgent: userAgent ?? null,
+      dispositivo: resumenDispositivo(userAgent),
+    },
+  });
+
   res.json({ token, usuario: perfil(usuario) });
+
+  geolocalizarIp(req.ip).then((geo) => {
+    if (geo.ciudad || geo.region || geo.pais) {
+      prisma.inicioSesion.update({ where: { id: sesion.id }, data: geo }).catch(() => {});
+    }
+  });
 });
 
 authRouter.get("/me", requireAuth, async (req, res) => {

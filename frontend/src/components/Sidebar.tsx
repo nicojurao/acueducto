@@ -19,6 +19,7 @@ import {
   Shield,
   Home,
   History,
+  Fingerprint,
 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
@@ -43,6 +44,7 @@ const usuariosYRoles: Link[] = [
   { to: "/usuarios", label: "Usuarios", icon: UserCog, permiso: "usuarios" },
   { to: "/roles", label: "Roles y permisos", icon: ShieldCheck, permiso: "roles" },
   { to: "/historial", label: "Historial de cambios", icon: History, permiso: "historial" },
+  { to: "/auditoria", label: "Auditoría de sesiones", icon: Fingerprint, permiso: "auditoria" },
 ];
 
 const entradas: Entrada[] = [

@@ -35,6 +35,7 @@ import {
   proveedoresInventarioRouter,
 } from "./routes/catalogosInventario.js";
 import { historialRouter } from "./routes/historial.js";
+import { auditoriaRouter } from "./routes/auditoria.js";
 import { requireAuth, requireAuthQuery, requirePermiso } from "./middleware/auth.js";
 import { limiteApi } from "./middleware/rateLimit.js";
 import { leerArchivo } from "./lib/storage.js";
@@ -134,6 +135,7 @@ app.use("/api/inventario/proveedores", requirePermiso("inventario_ver", "inventa
 app.use("/api/usuarios", requirePermiso("usuarios"), usuariosRouter);
 app.use("/api/roles", requirePermiso("roles"), rolesRouter);
 app.use("/api/historial", requirePermiso("historial"), historialRouter);
+app.use("/api/auditoria", requirePermiso("auditoria"), auditoriaRouter);
 
 // Red de seguridad final: cualquier error que llegue hasta acá (gracias a "express-async-errors")
 // se responde como 500 en vez de dejar caer el proceso completo. Debe ir después de todas las

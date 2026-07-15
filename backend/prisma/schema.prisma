@@ -247,6 +247,27 @@ model Usuario {
   itemsIngresados ItemInventario[]
   actasInstaladas ActaInstalacion[]
   cambiosRealizados HistorialCambio[]
+  sesiones        InicioSesion[]
+}
+
+// Un renglón por cada login exitoso, para auditoría. La "sesión" en sí es un JWT sin estado
+// (sin id ni logout explícito) — acá solo se registra el momento en que se emitió el token, no
+// se sabe cuándo terminó. Para agrupar "qué cambios se hicieron en esta sesión" se usa una
+// ventana de tiempo: desde este login hasta el siguiente login del mismo usuario (o hasta ahora,
+// si es el más reciente) — ver GET /api/auditoria/:id/cambios.
+model InicioSesion {
+  id          Int      @id @default(autoincrement())
+  usuarioId   Int
+  usuario     Usuario  @relation(fields: [usuarioId], references: [id])
+  ip          String?
+  userAgent   String?
+  dispositivo String?  // resumen legible del userAgent (ej. "Android · Chrome")
+  ciudad      String?  // geolocalización aproximada por IP (best-effort, puede quedar null)
+  region      String?
+  pais        String?
+  fecha       DateTime @default(now())
+
+  @@index([usuarioId, fecha])
 }
 
 // Inventario general del acueducto: herramientas, equipos e insumos de la operación (distinto
