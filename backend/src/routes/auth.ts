@@ -132,6 +132,18 @@ authRouter.get("/me", requireAuth, async (req, res) => {
   res.json(perfil(usuario, req.usuario!.jti));
 });
 
+// "Cerrar sesión" real, del lado del servidor: revoca ESTE token puntual (por su jti) para que
+// quede inválido de inmediato, en vez de solo borrar el token en el navegador (que dejaba la
+// sesión viva en el servidor, sin revocar, hasta que expirara sola). Cualquier usuario puede
+// revocar su propia sesión actual, sin necesitar el permiso "auditoria" — eso es solo para ver/
+// cerrar sesiones AJENAS desde Auditoría.
+authRouter.post("/logout", requireAuth, async (req, res) => {
+  if (req.usuario!.jti) {
+    await prisma.inicioSesion.updateMany({ where: { jti: req.usuario!.jti }, data: { revocada: true } });
+  }
+  res.json({ ok: true });
+});
+
 // Autoservicio: cualquier usuario autenticado puede editar su propio nombre, celular, fecha de
 // nacimiento, foto y contraseña — a diferencia de PUT /api/usuarios/:id (requiere el permiso
 // "usuarios"), no permite tocar nombreUsuario, cédula, rol ni el estado activo.

@@ -82,7 +82,7 @@ export default function Sidebar({ abierto, onCerrar }: { abierto: boolean; onCer
       setAvisoCierreSesion(total);
       return;
     }
-    logout();
+    await logout();
     navigate("/login");
   }
 
@@ -242,8 +242,8 @@ export default function Sidebar({ abierto, onCerrar }: { abierto: boolean; onCer
                 Seguir aquí
               </button>
               <button
-                onClick={() => {
-                  logout();
+                onClick={async () => {
+                  await logout();
                   navigate("/login");
                 }}
                 className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-500"

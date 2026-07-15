@@ -5,7 +5,7 @@ interface AuthState {
   usuario: Usuario | null;
   cargando: boolean;
   login: (identificador: string, password: string) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
   refrescarUsuario: () => Promise<void>;
 }
 
@@ -61,7 +61,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUsuario(u);
   }
 
-  function logout() {
+  // Avisa al servidor que revoque esta sesión puntual ANTES de borrar el token local — si solo
+  // se borrara acá, la sesión seguía "viva" del lado del servidor (ver Auditoría) hasta que
+  // expirara sola. Best-effort: si falla (sin conexión, etc.) igual se cierra la sesión local,
+  // no tiene sentido dejar a alguien atrapado sin poder salir de la app por un error de red.
+  async function logout() {
+    try {
+      await api.auth.logout();
+    } catch {
+      // sin conexión o token ya inválido — no bloquea el cierre de sesión local
+    }
     setToken(null);
     setUsuario(null);
     limpiarMediaToken();

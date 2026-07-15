@@ -543,6 +543,7 @@ export const api = {
         body: JSON.stringify({ identificador, password }),
       }),
     me: () => request<Usuario>("/api/auth/me"),
+    logout: () => request<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
     actualizarPerfil: (data: {
       nombre?: string;
       celular?: string | null;
