@@ -2,6 +2,7 @@ import { Router } from "express";
 import multer from "multer";
 import { prisma } from "../lib/prisma.js";
 import { guardarArchivo, borrarArchivo } from "../lib/storage.js";
+import { registrarCambioLectura } from "../lib/historial.js";
 
 export const lecturasRouter = Router();
 
@@ -171,6 +172,8 @@ lecturasRouter.post("/", uploadLectura.single("foto"), async (req, res) => {
     });
   }
 
+  await registrarCambioLectura(medidorId, fecha, null, String(valorLectura), req.usuario?.id);
+
   res.status(201).json(lectura);
 });
 
@@ -210,6 +213,16 @@ lecturasRouter.put("/:id", uploadLectura.single("foto"), async (req, res) => {
     await borrarArchivo(lecturaExistente.fotoUrl);
   }
 
+  if (String(valorLectura) !== lecturaExistente.valorLectura.toString()) {
+    await registrarCambioLectura(
+      lecturaExistente.medidorId,
+      lecturaExistente.periodo,
+      lecturaExistente.valorLectura.toString(),
+      String(valorLectura),
+      req.usuario?.id
+    );
+  }
+
   res.json(lectura);
 });
 
@@ -222,6 +235,14 @@ lecturasRouter.delete("/:id", async (req, res) => {
   await prisma.lectura.delete({ where: { id: lectura.id } });
 
   if (lectura.fotoUrl) await borrarArchivo(lectura.fotoUrl);
+
+  await registrarCambioLectura(
+    lectura.medidorId,
+    lectura.periodo,
+    lectura.valorLectura.toString(),
+    null,
+    req.usuario?.id
+  );
 
   res.status(204).end();
 });

@@ -8,6 +8,11 @@ export const PERMISOS = [
     nombre: "Suscriptores (avanzado)",
     descripcion: "Editar, importar, exportar y eliminar suscriptores",
   },
+  {
+    clave: "suscriptores_estado_facturacion",
+    nombre: "Suscriptores (estado de facturación)",
+    descripcion: "Cambiar el estado de facturación de un suscriptor, sin poder editar el resto de sus datos",
+  },
   { clave: "medidores_ver", nombre: "Medidores", descripcion: "Ver el inventario y catálogo de medidores" },
   {
     clave: "medidores_avanzado",
@@ -15,7 +20,12 @@ export const PERMISOS = [
     descripcion: "Crear, editar, eliminar e importar/exportar medidores",
   },
   { clave: "lecturas", nombre: "Lecturas", descripcion: "Captura y edición de lecturas mensuales" },
-  { clave: "actas", nombre: "Actas de instalación", descripcion: "Crear, editar y generar PDF de actas" },
+  { clave: "actas_ver", nombre: "Actas de instalación", descripcion: "Ver el historial de actas de instalación" },
+  {
+    clave: "actas_avanzado",
+    nombre: "Actas de instalación (avanzado)",
+    descripcion: "Crear, editar, generar PDF y borrar actas de instalación",
+  },
   {
     clave: "aforos_ver",
     nombre: "Aforos",

@@ -144,16 +144,19 @@ authRouter.post("/logout", requireAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
-// Autoservicio: cualquier usuario autenticado puede editar su propio nombre, celular, fecha de
-// nacimiento, foto y contraseña — a diferencia de PUT /api/usuarios/:id (requiere el permiso
-// "usuarios"), no permite tocar nombreUsuario, cédula, rol ni el estado activo.
+// Autoservicio: cualquier usuario autenticado puede editar su propio nombre, nombre de usuario,
+// cédula, celular, fecha de nacimiento, foto y contraseña — a diferencia de PUT /api/usuarios/:id
+// (requiere el permiso "usuarios"), no permite tocar su rol ni el estado activo.
 authRouter.put("/perfil", requireAuth, upload.single("foto"), async (req, res) => {
   const existente = await prisma.usuario.findUnique({ where: { id: req.usuario!.id } });
   if (!existente) return res.status(404).json({ error: "No encontrado" });
 
-  const { nombre, celular, fechaNacimiento, password, quitarFoto } = req.body;
+  const { nombre, nombreUsuario, cedula, celular, fechaNacimiento, password, quitarFoto } = req.body;
   if (password && String(password).length < 8) {
     return res.status(400).json({ error: "La contraseña debe tener al menos 8 caracteres" });
+  }
+  if (nombreUsuario !== undefined && !String(nombreUsuario).trim()) {
+    return res.status(400).json({ error: "El nombre de usuario no puede quedar vacío" });
   }
 
   let foto: string | null | undefined = undefined;
@@ -167,20 +170,30 @@ authRouter.put("/perfil", requireAuth, upload.single("foto"), async (req, res) =
 
   const antes = camposUsuario(existente);
 
-  const usuario = await prisma.usuario.update({
-    where: { id: existente.id },
-    data: {
-      nombre: nombre !== undefined ? String(nombre).trim() : undefined,
-      celular: celular === undefined ? undefined : celular || null,
-      fechaNacimiento: fechaNacimiento === undefined ? undefined : fechaNacimiento ? new Date(fechaNacimiento) : null,
-      passwordHash: password ? await bcrypt.hash(password, 10) : undefined,
-      foto,
-    },
-    include: { rol: { include: { permisos: { include: { permiso: true } } } } },
-  });
-  await registrarCambios("usuario", existente.id, antes, camposUsuario(usuario), req.usuario!.id);
-  if (password) await registrarCambioContrasena(existente.id, req.usuario!.id);
-  res.json(perfil(usuario, req.usuario!.jti));
+  try {
+    const usuario = await prisma.usuario.update({
+      where: { id: existente.id },
+      data: {
+        nombre: nombre !== undefined ? String(nombre).trim() : undefined,
+        nombreUsuario: nombreUsuario !== undefined ? String(nombreUsuario).trim() : undefined,
+        cedula: cedula === undefined ? undefined : cedula || null,
+        celular: celular === undefined ? undefined : celular || null,
+        fechaNacimiento: fechaNacimiento === undefined ? undefined : fechaNacimiento ? new Date(fechaNacimiento) : null,
+        passwordHash: password ? await bcrypt.hash(password, 10) : undefined,
+        foto,
+      },
+      include: { rol: { include: { permisos: { include: { permiso: true } } } } },
+    });
+    await registrarCambios("usuario", existente.id, antes, camposUsuario(usuario), req.usuario!.id);
+    if (password) await registrarCambioContrasena(existente.id, req.usuario!.id);
+    res.json(perfil(usuario, req.usuario!.jti));
+  } catch (err: any) {
+    if (err?.code === "P2002") {
+      const campo = err.meta?.target?.[0] === "cedula" ? "La cédula" : "El nombre de usuario";
+      return res.status(400).json({ error: `${campo} ya está en uso` });
+    }
+    throw err;
+  }
 });
 
 // Token de corta duración (20 min) solo para ver fotos vía /uploads/*. El frontend lo pide al

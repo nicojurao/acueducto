@@ -3,8 +3,24 @@ import PDFDocument from "pdfkit";
 import { prisma } from "../lib/prisma.js";
 import { crearInformeExcel, enviarExcel } from "../lib/excelBranding.js";
 import { encabezadoPdf, tituloSeccionPdf, tarjetaDatosPdf, COLOR_MARCA } from "../lib/pdfBranding.js";
+import { requirePermiso } from "../middleware/auth.js";
 
 export const reportesRouter = Router();
+
+// El resto de reportes (por ruta) exige el permiso "reportes" a secas. El consumo de UN
+// suscriptor puntual (gráfica + PDF) se usa desde la ficha del suscriptor, no desde la pantalla
+// de Reportes — cualquiera que pueda ver suscriptores necesita poder verlo también, o la ficha
+// del suscriptor queda con el historial de consumo vacío para roles que tienen "suscriptores_ver"
+// pero no "reportes".
+const permisoReportes = requirePermiso("reportes");
+const permisoConsumoSuscriptor = requirePermiso("reportes", "suscriptores_ver", "suscriptores_avanzado");
+// Excel de lecturas, resumen mensual y desgloses por barrio/estrato viven TODOS dentro de la
+// misma pantalla que el resto del Dashboard (/medicion, sidebar "Dashboard"), cuya ruta en el
+// frontend solo exige el permiso "dashboard" — si estos endpoints solo aceptaran "reportes", un
+// rol con "dashboard" pero sin "reportes" (ej. Asistente Coordinador Operativo) entraría a la
+// página pero el Promise.all que carga todo junto fallaría por estas llamadas, dejando el
+// dashboard entero en blanco.
+const permisoReportesODashboard = requirePermiso("reportes", "dashboard");
 
 function primerDiaMesPeriodo(periodo: string): Date {
   const [y, m] = periodo.split("-").map(Number);
@@ -34,7 +50,7 @@ function periodosEnRango(desde: string, hasta: string): string[] {
 // ya estaba instalado ese mes pero no se le tomó lectura quedan resaltadas en rojo (mirando la
 // fecha de instalación: no tiene sentido marcarle falta de lectura a un medidor que en ese
 // periodo todavía no existía).
-reportesRouter.get("/lecturas-excel", async (req, res) => {
+reportesRouter.get("/lecturas-excel", permisoReportesODashboard, async (req, res) => {
   const { periodo, desde, hasta, estadoLectura, alcance } = req.query;
   const rangoDesde = desde ? String(desde) : periodo ? String(periodo) : null;
   const rangoHasta = hasta ? String(hasta) : periodo ? String(periodo) : null;
@@ -133,7 +149,7 @@ reportesRouter.get("/lecturas-excel", async (req, res) => {
 });
 
 // Resumen mensual: # usuarios con lectura y consumo total, por mes
-reportesRouter.get("/resumen-mensual", async (req, res) => {
+reportesRouter.get("/resumen-mensual", permisoReportesODashboard, async (req, res) => {
   const { desde, hasta } = req.query;
   const where: any = {};
   if (desde) where.gte = new Date(String(desde));
@@ -301,7 +317,7 @@ async function historicoSuscriptor(suscriptorId: number) {
   return completo;
 }
 
-reportesRouter.get("/consumo-suscriptor/:id", async (req, res) => {
+reportesRouter.get("/consumo-suscriptor/:id", permisoConsumoSuscriptor, async (req, res) => {
   res.json(await historicoSuscriptor(Number(req.params.id)));
 });
 
@@ -355,7 +371,7 @@ const ESTADO_FACTURACION_LABELS_PDF: Record<string, string> = {
 
 // Informe de un suscriptor: datos básicos + tabla de lecturas y consumos, mismo histórico que
 // alimenta el gráfico de barras de su ficha (con los meses "sin lectura" incluidos).
-reportesRouter.get("/consumo-suscriptor/:id/pdf", async (req, res) => {
+reportesRouter.get("/consumo-suscriptor/:id/pdf", permisoConsumoSuscriptor, async (req, res) => {
   const suscriptorId = Number(req.params.id);
   const suscriptor = await prisma.suscriptor.findUnique({
     where: { id: suscriptorId },
@@ -453,7 +469,7 @@ async function consumoAgrupadoPorPeriodo(
 }
 
 // Consumo total por ruta en un periodo dado
-reportesRouter.get("/por-ruta", async (req, res) => {
+reportesRouter.get("/por-ruta", permisoReportes, async (req, res) => {
   const { periodo } = req.query;
   if (!periodo) return res.status(400).json({ error: "periodo es requerido (YYYY-MM)" });
   const grupos = await consumoAgrupadoPorPeriodo(periodo, (s) => s.ruta ?? "Sin ruta");
@@ -462,7 +478,7 @@ reportesRouter.get("/por-ruta", async (req, res) => {
 
 // Consumo total por barrio en un periodo dado. Acepta `estratos` (coma-separado) para
 // limitar el cálculo a ciertos estratos, ej. excluir Comercial/Oficial del promedio residencial.
-reportesRouter.get("/por-barrio", async (req, res) => {
+reportesRouter.get("/por-barrio", permisoReportesODashboard, async (req, res) => {
   const { periodo, estratos } = req.query;
   if (!periodo) return res.status(400).json({ error: "periodo es requerido (YYYY-MM)" });
   const listaEstratos = estratos ? String(estratos).split(",").filter(Boolean) : undefined;
@@ -471,7 +487,7 @@ reportesRouter.get("/por-barrio", async (req, res) => {
 });
 
 // Consumo total por estrato (1, 2, 3, 4, Comercial, Oficial) en un periodo dado
-reportesRouter.get("/por-estrato", async (req, res) => {
+reportesRouter.get("/por-estrato", permisoReportesODashboard, async (req, res) => {
   const { periodo } = req.query;
   if (!periodo) return res.status(400).json({ error: "periodo es requerido (YYYY-MM)" });
   const grupos = await consumoAgrupadoPorPeriodo(periodo, (s) => s.estratoCat?.codigo ?? "Sin estrato");

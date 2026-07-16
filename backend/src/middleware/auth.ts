@@ -117,3 +117,31 @@ export function requirePermiso(...claves: string[]) {
     next();
   };
 }
+
+// Para catálogos de solo lectura (marca/modelo/diámetro/lote de medidores): cualquiera que
+// pueda VER medidores necesita poder leer estos catálogos para que la pantalla cargue (filtros,
+// nombre de marca/modelo en cada fila) — sin esto, un rol con "medidores_ver" pero sin
+// "catalogos" ve la lista de medidores vacía, porque el frontend pide medidores y catálogos en
+// paralelo con Promise.all y basta que uno de los catálogos devuelva 403 para que la promesa
+// combinada se rechace y no se pinte nada. Crear/editar/borrar catálogos sigue exigiendo
+// "catalogos" a secas.
+export function requirePermisoCatalogos(req: Request, res: Response, next: NextFunction) {
+  const lecturaClaves = ["catalogos", "medidores_ver", "medidores_avanzado"];
+  const claves = req.method === "GET" ? lecturaClaves : ["catalogos"];
+  if (!req.usuario || !claves.some((c) => req.usuario!.permisos.includes(c))) {
+    return res.status(403).json({ error: "No autorizado" });
+  }
+  next();
+}
+
+// Patrón genérico "ver/avanzado": los GET aceptan cualquiera de los dos permisos, el resto de
+// métodos (crear/editar/borrar) exige el de avanzado exclusivamente.
+export function requirePermisoVerAvanzado(claveVer: string, claveAvanzado: string) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const claves = req.method === "GET" ? [claveVer, claveAvanzado] : [claveAvanzado];
+    if (!req.usuario || !claves.some((c) => req.usuario!.permisos.includes(c))) {
+      return res.status(403).json({ error: "No autorizado" });
+    }
+    next();
+  };
+}

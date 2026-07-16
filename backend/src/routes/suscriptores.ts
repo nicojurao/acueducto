@@ -10,8 +10,13 @@ export const suscriptoresRouter = Router();
 const upload = multer({ storage: multer.memoryStorage() });
 // Ver/editar básico: lo tiene cualquiera de los dos permisos de suscriptores.
 const puedeVer = requirePermiso("suscriptores_ver", "suscriptores_avanzado");
-// Importar/exportar/eliminar: solo el permiso avanzado.
+// Importar/exportar/eliminar/editar datos generales: solo el permiso avanzado.
 const soloAvanzado = requirePermiso("suscriptores_avanzado");
+// Cambiar SOLO el estado de facturación (ej. rol Asistente Coordinador Operativo: no puede
+// editar los datos del suscriptor pero sí necesita poder mover su estado de facturación en el
+// día a día operativo) — separado del PUT general para no tener que darle "suscriptores_avanzado"
+// completo solo por este campo.
+const puedeEditarEstadoFacturacion = requirePermiso("suscriptores_avanzado", "suscriptores_estado_facturacion");
 
 suscriptoresRouter.use(puedeVer);
 
@@ -204,6 +209,49 @@ suscriptoresRouter.get("/:id", async (req, res) => {
     },
   });
   if (!suscriptor) return res.status(404).json({ error: "No encontrado" });
+  res.json(suscriptor);
+});
+
+// Reglas de coherencia compartidas entre el PUT general y el PUT acotado de estado de
+// facturación: "sin_medidor" implica que no tiene medidor activo, y los estados que requieren
+// medición ("instalado_prueba"/"facturando") implican que sí lo tiene.
+async function validarCoherenciaEstado(
+  suscriptorId: number,
+  estadoFacturacion: string | undefined,
+  estadoPredio: string | undefined
+): Promise<string | null> {
+  if (estadoPredio === undefined && estadoFacturacion === undefined) return null;
+  const tieneMedidorActivo = (await prisma.medidor.count({ where: { suscriptorId, activo: true } })) > 0;
+
+  if (estadoPredio === "inactivo" && tieneMedidorActivo) {
+    return "No se puede marcar el predio como inactivo: primero hay que quitarle el medidor asignado.";
+  }
+  if (estadoFacturacion === "sin_medidor" && tieneMedidorActivo) {
+    return 'No se puede poner "Sin medidor": este suscriptor tiene un medidor asignado. Quítaselo primero.';
+  }
+  if (estadoFacturacion && ["instalado_prueba", "facturando"].includes(estadoFacturacion) && !tieneMedidorActivo) {
+    return "No se puede poner ese estado: este suscriptor todavía no tiene un medidor asignado.";
+  }
+  return null;
+}
+
+suscriptoresRouter.put("/:id/estado-facturacion", puedeEditarEstadoFacturacion, async (req, res) => {
+  const id = Number(req.params.id);
+  const { estadoFacturacion } = req.body;
+  if (!estadoFacturacion) return res.status(400).json({ error: "estadoFacturacion es requerido" });
+
+  const errorCoherencia = await validarCoherenciaEstado(id, estadoFacturacion, undefined);
+  if (errorCoherencia) return res.status(400).json({ error: errorCoherencia });
+
+  const antes = await prisma.suscriptor.findUnique({ where: { id }, include: { barrioCat: true, estratoCat: true } });
+  if (!antes) return res.status(404).json({ error: "No encontrado" });
+
+  const suscriptor = await prisma.suscriptor.update({
+    where: { id },
+    data: { estadoFacturacion },
+    include: { barrioCat: true, estratoCat: true },
+  });
+  await registrarCambios("suscriptor", suscriptor.id, camposSuscriptor(antes), camposSuscriptor(suscriptor), req.usuario?.id);
   res.json(suscriptor);
 });
 

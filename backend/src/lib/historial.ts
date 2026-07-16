@@ -88,6 +88,30 @@ export async function registrarCambioContrasena(entidadId: number, usuarioId?: n
   });
 }
 
+// Registra crear/editar/borrar una lectura. Usa entidad "medidor" (no un "lectura" nuevo) para
+// reutilizar la resolución de nombres que ya existe en routes/historial.ts y routes/auditoria.ts
+// — cada periodo es su propio campo ("Lectura 2026-06"), así que crear y luego borrar la misma
+// lectura no se pisan entre sí ni se leen como que "no pasó nada" (valorAnterior→valorNuevo).
+export async function registrarCambioLectura(
+  medidorId: number,
+  periodo: Date,
+  valorAnterior: string | null,
+  valorNuevo: string | null,
+  usuarioId?: number
+): Promise<void> {
+  const etiquetaPeriodo = periodo.toISOString().slice(0, 7);
+  await prisma.historialCambio.create({
+    data: {
+      entidad: "medidor",
+      entidadId: medidorId,
+      campo: `Lectura ${etiquetaPeriodo}`,
+      valorAnterior,
+      valorNuevo,
+      usuarioId: usuarioId ?? null,
+    },
+  });
+}
+
 // "Snapshot" legible de un Medidor para comparar antes/después. Recibe el registro con las
 // relaciones de catálogo incluidas (marcaCat, modeloCat, diametroCat, lote).
 export function camposMedidor(m: {

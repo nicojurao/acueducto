@@ -12,13 +12,23 @@ import { crearInformeExcel, enviarExcel } from "../lib/excelBranding.js";
 // El banner institucional (logo + título) solo va en la primera página, vía encabezadoPdf().
 type ColumnaPdf = { titulo: string; clave: string; ancho: number; align?: "left" | "right" };
 
+const ALTO_FILA_MIN = 18;
+
+// Alto necesario para que el texto más largo de la fila (ej. un nombre de ítem con varias
+// líneas) no se encime con la fila siguiente — sin esto, cualquier texto que envuelva a más
+// de una línea quedaba dibujado a la misma altura que las demás columnas.
+function altoNecesarioFila(doc: PDFKit.PDFDocument, columnas: ColumnaPdf[], fila: Record<string, string>): number {
+  doc.font("Helvetica").fontSize(8);
+  const alturas = columnas.map((col) => doc.heightOfString(fila[col.clave] ?? "", { width: col.ancho - 8 }));
+  return Math.max(ALTO_FILA_MIN, Math.max(...alturas) + 10);
+}
+
 function tablaInventarioPdf(doc: PDFKit.PDFDocument, columnas: ColumnaPdf[], filas: Record<string, string>[]) {
   const x = doc.page.margins.left;
   const anchoTotal = columnas.reduce((a, c) => a + c.ancho, 0);
-  const altoFila = 18;
 
   function dibujarEncabezado(y: number) {
-    doc.rect(x, y, anchoTotal, altoFila).fill(COLOR_MARCA);
+    doc.rect(x, y, anchoTotal, ALTO_FILA_MIN).fill(COLOR_MARCA);
     let cx = x;
     doc.font("Helvetica-Bold").fontSize(8).fillColor("#fff");
     for (const col of columnas) {
@@ -26,12 +36,13 @@ function tablaInventarioPdf(doc: PDFKit.PDFDocument, columnas: ColumnaPdf[], fil
       cx += col.ancho;
     }
     doc.font("Helvetica").fillColor("#0f172a");
-    return y + altoFila;
+    return y + ALTO_FILA_MIN;
   }
 
   let y = dibujarEncabezado(doc.y);
 
   filas.forEach((fila, i) => {
+    const altoFila = altoNecesarioFila(doc, columnas, fila);
     if (y + altoFila > doc.page.height - doc.page.margins.bottom) {
       doc.addPage();
       y = dibujarEncabezado(doc.page.margins.top);
@@ -287,7 +298,7 @@ itemsInventarioRouter.get("/pdf", async (req, res) => {
     doc,
     [
       { titulo: "NOMBRE", clave: "nombre", ancho: 140 },
-      { titulo: "CÓDIGO", clave: "codigo", ancho: 65 },
+      { titulo: "F. COMPRA", clave: "fechaCompra", ancho: 65 },
       { titulo: "CATEGORÍA", clave: "categoria", ancho: 85 },
       { titulo: "CANT.", clave: "cantidad", ancho: 55, align: "right" },
       { titulo: "DISP.", clave: "disponible", ancho: 55, align: "right" },
@@ -298,7 +309,7 @@ itemsInventarioRouter.get("/pdf", async (req, res) => {
     ],
     items.map((item) => ({
       nombre: item.nombre,
-      codigo: item.codigo ?? "-",
+      fechaCompra: item.fechaCompra ? item.fechaCompra.toLocaleDateString("es-CO") : "-",
       categoria: item.categoriaCat?.nombre ?? "-",
       cantidad: `${item.cantidad} ${UNIDAD_ABREVIADAS[item.unidadMedida] ?? item.unidadMedida}`,
       disponible: `${item.cantidad - (prestadosPorItem.get(item.id) ?? 0)} ${UNIDAD_ABREVIADAS[item.unidadMedida] ?? item.unidadMedida}`,
@@ -343,6 +354,10 @@ itemsInventarioRouter.post("/", soloAvanzado, upload.single("foto"), async (req,
     });
     res.status(201).json({ ...item, disponible: item.cantidad });
   } catch (err: any) {
+    // Si la foto ya se subió a MinIO pero el registro no se pudo crear (ej. código duplicado),
+    // no dejar el archivo huérfano — sin este cleanup, cualquier intento fallido de crear un
+    // ítem con foto deja basura acumulándose en el bucket para siempre.
+    if (fotoUrl) await borrarArchivo(fotoUrl);
     if (err?.code === "P2002") return res.status(400).json({ error: "Ya existe un ítem con ese código" });
     throw err;
   }
@@ -387,6 +402,9 @@ itemsInventarioRouter.put("/:id", soloAvanzado, upload.single("foto"), async (re
     if (fotoUrl !== undefined && existente.fotoUrl) await borrarArchivo(existente.fotoUrl);
     res.json({ ...item, disponible: await disponibilidad(item.id, item.cantidad) });
   } catch (err: any) {
+    // Mismo cleanup que en el POST: si se subió una foto nueva pero el UPDATE falló, no dejarla
+    // huérfana (la foto vieja del ítem sigue intacta, no se toca).
+    if (req.file && fotoUrl) await borrarArchivo(fotoUrl);
     if (err?.code === "P2002") return res.status(400).json({ error: "Ya existe un ítem con ese código" });
     throw err;
   }

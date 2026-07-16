@@ -1,14 +1,7 @@
 import { Router } from "express";
 import multer from "multer";
-import PDFDocument from "pdfkit";
 import { prisma } from "../lib/prisma.js";
-import { guardarArchivo, borrarArchivo, leerBuffer } from "../lib/storage.js";
-import {
-  encabezadoPdf,
-  tituloSeccionPdf as tituloSeccion,
-  saltoDePaginaSiHaceFaltaPdf as saltoDePaginaSiHaceFalta,
-  tarjetaDatosPdf as tarjetaDatos,
-} from "../lib/pdfBranding.js";
+import { guardarArchivo, borrarArchivo } from "../lib/storage.js";
 
 export const actasRouter = Router();
 
@@ -204,6 +197,33 @@ actasRouter.delete("/:id", async (req, res) => {
   res.status(204).end();
 });
 
+// Borrado DEFINITIVO de un acta (a diferencia de DELETE /:id de arriba, que "quita" el medidor
+// pero conserva el acta como historial con fechaRetiro). Esto es para corregir un error real de
+// asignación — ej. se le puso el medidor equivocado a un suscriptor por accidente — donde no
+// tiene sentido dejar ese registro dando vueltas en el historial. Como este DELETE cae bajo
+// requirePermisoVerAvanzado("actas_ver", "actas_avanzado") en index.ts, solo lo puede hacer
+// quien tenga "actas_avanzado" (hoy: admin y Coordinador Operativo) — quien solo tenga
+// "actas_ver" puede ver el historial pero no borrarlo.
+actasRouter.delete("/:id/definitivo", async (req, res) => {
+  const acta = await prisma.actaInstalacion.findUnique({ where: { id: Number(req.params.id) } });
+  if (!acta) return res.status(404).json({ error: "No encontrada" });
+
+  await Promise.all(acta.fotos.map((foto) => borrarArchivo(foto)));
+  if (acta.actaFirmadaUrl) await borrarArchivo(acta.actaFirmadaUrl);
+
+  // Si esta acta todavía representa la asignación activa (nunca se "quitó" y el medidor sigue
+  // apuntando a este mismo suscriptor), hay que revertir ese estado igual que haría un "quitar"
+  // normal — si no, el medidor queda con suscriptorId puesto pero sin ningún acta que lo respalde.
+  const medidor = await prisma.medidor.findUnique({ where: { id: acta.medidorId } });
+  if (!acta.fechaRetiro && medidor?.suscriptorId === acta.suscriptorId) {
+    await prisma.medidor.update({ where: { id: acta.medidorId }, data: { suscriptorId: null, estado: "en_bodega" } });
+    await prisma.suscriptor.update({ where: { id: acta.suscriptorId }, data: { estadoFacturacion: "sin_medidor" } });
+  }
+
+  await prisma.actaInstalacion.delete({ where: { id: acta.id } });
+  res.status(204).end();
+});
+
 // El PDF que genera GET /:id/pdf es una plantilla para imprimir y firmar a mano; esto guarda el
 // escaneo YA FIRMADO (documento legal), aparte de las "fotos" de evidencia de la instalación.
 actasRouter.post("/:id/firmada", uploadDocumento.single("archivo"), async (req, res) => {
@@ -227,65 +247,3 @@ actasRouter.delete("/:id/firmada", async (req, res) => {
   res.json(actualizada);
 });
 
-actasRouter.get("/:id/pdf", async (req, res) => {
-  const acta = await prisma.actaInstalacion.findUnique({
-    where: { id: Number(req.params.id) },
-    include: { suscriptor: true, medidor: { include: { marcaCat: true, modeloCat: true, diametroCat: true } } },
-  });
-  if (!acta) return res.status(404).json({ error: "No encontrada" });
-
-  res.setHeader("Content-Type", "application/pdf");
-  res.setHeader("Content-Disposition", `inline; filename="acta-${acta.id}.pdf"`);
-
-  const doc = new PDFDocument({ margin: 40, size: "A4" });
-  doc.pipe(res);
-
-  const TIPO_LABEL: Record<string, string> = { volumetrico: "Volumétrico", velocidad: "Velocidad" };
-
-  encabezadoPdf(doc, "Acta de instalación de medidor", `Gestión Comercial · Registro #${acta.id}`);
-
-  tarjetaDatos(doc, [
-    ["Fecha de instalación", acta.fechaInstalacion.toLocaleDateString("es-CO")],
-    ["Instalado por", acta.instaladoPor],
-  ]);
-
-  tituloSeccion(doc, "Suscriptor");
-  tarjetaDatos(doc, [
-    ["NUID", acta.suscriptor.codigo],
-    ["Nombre", acta.suscriptor.nombre],
-    ["Dirección", acta.suscriptor.direccion ?? "—"],
-    ["Ruta", acta.suscriptor.ruta ?? "—"],
-  ]);
-
-  tituloSeccion(doc, "Medidor");
-  tarjetaDatos(doc, [
-    ["Serial", acta.serial],
-    ["Marca", acta.medidor.marcaCat?.nombre ?? "—"],
-    ["Modelo", acta.medidor.modeloCat?.nombre ?? "—"],
-    ["Tipo", acta.medidor.tipo ? TIPO_LABEL[acta.medidor.tipo] ?? acta.medidor.tipo : "—"],
-    ["Diámetro", acta.medidor.diametroCat?.valor ?? "—"],
-  ]);
-
-  if (acta.observaciones) {
-    tituloSeccion(doc, "Observaciones");
-    saltoDePaginaSiHaceFalta(doc, 40);
-    doc.fontSize(10).fillColor("#0f172a").font("Helvetica").text(acta.observaciones, { width: doc.page.width - 80 });
-    doc.moveDown(0.8);
-  }
-
-  if (acta.fotos.length > 0) {
-    tituloSeccion(doc, "Registro fotográfico");
-    for (const fotoPath of acta.fotos) {
-      try {
-        const buffer = await leerBuffer(fotoPath);
-        saltoDePaginaSiHaceFalta(doc, 260);
-        doc.image(buffer, { fit: [450, 300], align: "center" });
-        doc.moveDown(1);
-      } catch {
-        // ignora archivos que no existan o no sean imágenes válidas
-      }
-    }
-  }
-
-  doc.end();
-});

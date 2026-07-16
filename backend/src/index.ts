@@ -36,7 +36,7 @@ import {
 } from "./routes/catalogosInventario.js";
 import { historialRouter } from "./routes/historial.js";
 import { auditoriaRouter } from "./routes/auditoria.js";
-import { requireAuth, requireAuthQuery, requirePermiso } from "./middleware/auth.js";
+import { requireAuth, requireAuthQuery, requirePermiso, requirePermisoCatalogos, requirePermisoVerAvanzado } from "./middleware/auth.js";
 import { limiteApi } from "./middleware/rateLimit.js";
 import { leerArchivo } from "./lib/storage.js";
 
@@ -115,13 +115,13 @@ app.use("/api/barrios", requirePermiso("suscriptores_ver", "suscriptores_avanzad
 app.use("/api/estratos", requirePermiso("suscriptores_ver", "suscriptores_avanzado"), estratosRouter);
 app.use("/api/medidores", requirePermiso("medidores_ver", "medidores_avanzado"), medidoresRouter);
 app.use("/api/lecturas", requirePermiso("lecturas"), lecturasRouter);
-app.use("/api/reportes", requirePermiso("reportes"), reportesRouter);
+app.use("/api/reportes", reportesRouter);
 app.use("/api/dashboard", requirePermiso("dashboard"), dashboardRouter);
-app.use("/api/marcas", requirePermiso("catalogos"), marcasRouter);
-app.use("/api/modelos", requirePermiso("catalogos"), modelosRouter);
-app.use("/api/diametros", requirePermiso("catalogos"), diametrosRouter);
-app.use("/api/lotes", requirePermiso("catalogos"), lotesRouter);
-app.use("/api/actas", requirePermiso("actas"), actasRouter);
+app.use("/api/marcas", requirePermisoCatalogos, marcasRouter);
+app.use("/api/modelos", requirePermisoCatalogos, modelosRouter);
+app.use("/api/diametros", requirePermisoCatalogos, diametrosRouter);
+app.use("/api/lotes", requirePermisoCatalogos, lotesRouter);
+app.use("/api/actas", requirePermisoVerAvanzado("actas_ver", "actas_avanzado"), actasRouter);
 app.use("/api/puntos-aforo", requirePermiso("aforos_ver", "aforos_avanzado"), puntosAforoRouter);
 app.use("/api/aforos/kpis", requirePermiso("aforos_ver", "aforos_avanzado"), aforosKpisRouter);
 app.use("/api/aforos", requirePermiso("aforos_ver", "aforos_avanzado"), aforosRouter);
