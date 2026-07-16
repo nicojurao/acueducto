@@ -22,7 +22,6 @@ import { useEsMovil } from "../lib/useEsMovil";
 import { SkeletonLista } from "../components/Skeleton";
 import BusquedaInput from "../components/BusquedaInput";
 import EmptyState from "../components/EmptyState";
-import { useFiltroPersistente } from "../lib/useFiltroPersistente";
 import { inputClass } from "../lib/ui";
 
 // Las lecturas del mes no empiezan a capturarse hasta el día 20, así que antes de esa fecha se
@@ -76,7 +75,14 @@ export default function LecturasPage() {
   const [busqueda, setBusqueda] = useState("");
   const [busquedaDebounced, setBusquedaDebounced] = useState("");
   const [verColaOffline, setVerColaOffline] = useState(false);
-  const [filtroEstado, setFiltroEstado] = useFiltroPersistente<FiltroEstado>("lecturas.estado", "todos");
+  const [filtroEstado, setFiltroEstado] = useState<FiltroEstado>("todos");
+  // "Lecturas pendientes" en el Dashboard manda ?pendientes=1 para llegar con el filtro ya
+  // aplicado — sin esto, se ignoraba el query param y quedaba lo que el usuario tuviera
+  // guardado de antes (normalmente "todos"), mostrando de todo en vez de solo lo pendiente.
+  useEffect(() => {
+    if (searchParams.get("pendientes") === "1") setFiltroEstado("pendientes");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [pagina, setPagina] = useState(1);
   const [seleccionada, setSeleccionada] = useState<LecturaPendiente | null>(null);
   const [importAbierto, setImportAbierto] = useState(false);
@@ -112,11 +118,19 @@ export default function LecturasPage() {
   // La paginación/filtro se resuelven en el servidor, salvo el caso de "llegué desde el
   // Dashboard con un medidor puntual" (medidorResaltado): ahí se trae todo el periodo sin
   // paginar, porque ese medidor puede estar en cualquier página y hay que ubicarlo igual.
+  //
+  // peticionIdRef: si cambian varios filtros seguido (ej. llegar desde el Dashboard con
+  // ?pendientes=1 dispara un fetch sin filtro y, apenas después, otro ya filtrado), las
+  // respuestas pueden llegar desordenadas — se descarta el resultado si ya no es la petición
+  // más reciente, para no pisar la vista con datos viejos.
+  const peticionIdRef = useRef(0);
   async function cargar() {
+    const idPeticion = ++peticionIdRef.current;
     setCargando(true);
     try {
       if (medidorResaltado) {
         const data = await api.lecturas.listByPeriodo(periodo);
+        if (idPeticion !== peticionIdRef.current) return data;
         setFilas(data);
         setTotal(data.length);
         return data;
@@ -125,6 +139,7 @@ export default function LecturasPage() {
         estado: filtroEstado === "todos" ? undefined : filtroEstado,
         q: busquedaDebounced || undefined,
       });
+      if (idPeticion !== peticionIdRef.current) return resultado.data;
       setFilas(resultado.data);
       setTotal(resultado.total);
       return resultado.data;
@@ -133,7 +148,7 @@ export default function LecturasPage() {
       // en vez de quedar pegado en "Cargando...".
       return filas;
     } finally {
-      setCargando(false);
+      if (idPeticion === peticionIdRef.current) setCargando(false);
     }
   }
 

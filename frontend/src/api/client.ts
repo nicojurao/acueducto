@@ -546,6 +546,8 @@ export const api = {
     logout: () => request<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
     actualizarPerfil: (data: {
       nombre?: string;
+      nombreUsuario?: string;
+      cedula?: string | null;
       celular?: string | null;
       fechaNacimiento?: string | null;
       password?: string;
@@ -554,6 +556,8 @@ export const api = {
     }) => {
       const fd = new FormData();
       if (data.nombre !== undefined) fd.set("nombre", data.nombre);
+      if (data.nombreUsuario !== undefined) fd.set("nombreUsuario", data.nombreUsuario);
+      if (data.cedula !== undefined) fd.set("cedula", data.cedula ?? "");
       if (data.celular !== undefined) fd.set("celular", data.celular ?? "");
       if (data.fechaNacimiento !== undefined) fd.set("fechaNacimiento", data.fechaNacimiento ?? "");
       if (data.password) fd.set("password", data.password);
@@ -657,6 +661,11 @@ export const api = {
     get: (id: number) => request<Suscriptor>(`/api/suscriptores/${id}`),
     update: (id: number, data: Partial<Suscriptor>) =>
       request<Suscriptor>(`/api/suscriptores/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+    actualizarEstadoFacturacion: (id: number, estadoFacturacion: Suscriptor["estadoFacturacion"]) =>
+      request<Suscriptor>(`/api/suscriptores/${id}/estado-facturacion`, {
+        method: "PUT",
+        body: JSON.stringify({ estadoFacturacion }),
+      }),
     remove: (id: number) => request<void>(`/api/suscriptores/${id}`, { method: "DELETE" }),
     import: (file: File) => {
       const formData = new FormData();
@@ -852,7 +861,7 @@ export const api = {
       return requestMultipart<ActaInstalacion>(`/api/actas/${id}`, formData, "PUT");
     },
     remove: (id: number) => request<void>(`/api/actas/${id}`, { method: "DELETE" }),
-    verPdf: (id: number) => descargarArchivo(`/api/actas/${id}/pdf`, `acta-${id}.pdf`, true),
+    borrarDefinitivo: (id: number) => request<void>(`/api/actas/${id}/definitivo`, { method: "DELETE" }),
     subirFirmada: (id: number, archivo: File) => {
       const formData = new FormData();
       formData.append("archivo", archivo);

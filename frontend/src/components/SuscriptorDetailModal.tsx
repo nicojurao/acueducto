@@ -116,6 +116,18 @@ export default function SuscriptorDetailModal({
   const [instaladores, setInstaladores] = useState<{ id: number; nombre: string }[]>([]);
   const { usuario } = useAuth();
   const puedeEditar = usuario?.permisos?.includes("suscriptores_avanzado") ?? false;
+  // El estado de facturación se puede cambiar con un permiso propio, más acotado que
+  // "suscriptores_avanzado" (ej. rol Asistente Coordinador Operativo).
+  const puedeEditarEstado = puedeEditar || (usuario?.permisos?.includes("suscriptores_estado_facturacion") ?? false);
+  // Asignar/reemplazar/editar/quitar un medidor de un suscriptor NO es "editar datos del
+  // suscriptor" — es crear/editar/borrar un acta (ver actas.ts), así que se gatea con
+  // "actas_avanzado" en vez de "suscriptores_avanzado". Sin esto, un rol como Asistente
+  // Coordinador Operativo (medidores_avanzado + actas_avanzado, pero sin suscriptores_avanzado)
+  // veía el botón "+ Asignar medidor" oculto aunque sí tuviera permiso de sobra para usarlo.
+  const puedeAsignarMedidor = puedeEditar || (usuario?.permisos?.includes("actas_avanzado") ?? false);
+  // Cotitulares (POST/DELETE /api/medidores/:id/cotitulares) exigen "medidores_avanzado" en el
+  // backend, no "suscriptores_avanzado" ni "actas_avanzado".
+  const puedeGestionarCotitulares = puedeEditar || (usuario?.permisos?.includes("medidores_avanzado") ?? false);
 
   const [medidorCotitularAbierto, setMedidorCotitularAbierto] = useState<number | null>(null);
   const [nuevoCotitularNuid, setNuevoCotitularNuid] = useState("");
@@ -195,26 +207,43 @@ export default function SuscriptorDetailModal({
     }
   }
 
+  // Cada llamada se resuelve por separado (no Promise.all): un rol de solo lectura como
+  // Fontanero tiene "suscriptores_ver" pero no necesariamente "reportes" ni "actas" — si
+  // cualquiera de esas dos fallaba con 403, Promise.all rechazaba TODO el bloque entero y el
+  // modal se quedaba cargando para siempre, sin mostrar ni la info básica del suscriptor (que sí
+  // tenía permiso de ver). Así, la ficha carga igual con lo que sí se pueda traer.
   function cargarDetalle() {
     setCargando(true);
-    Promise.all([
-      api.suscriptores.get(suscriptorId),
-      api.reportes.consumoSuscriptor(suscriptorId),
-      api.actas.listBySuscriptor(suscriptorId),
-    ]).then(([s, h, actas]) => {
-      setSuscriptor(s);
-      setHistorico(h);
-      const mapa: Record<number, ActaInstalacion> = {};
-      for (const a of actas) mapa[a.medidorId] = a;
-      setActaPorMedidor(mapa);
-      setActasRetiradas(actas.filter((a) => a.fechaRetiro));
-      setCargando(false);
-    });
+    api.suscriptores
+      .get(suscriptorId)
+      .then((s) => {
+        setSuscriptor(s);
+        setCargando(false);
+      })
+      .catch(() => setCargando(false));
+
+    api.reportes
+      .consumoSuscriptor(suscriptorId)
+      .then(setHistorico)
+      .catch(() => setHistorico([]));
+
+    api.actas
+      .listBySuscriptor(suscriptorId)
+      .then((actas) => {
+        const mapa: Record<number, ActaInstalacion> = {};
+        for (const a of actas) mapa[a.medidorId] = a;
+        setActaPorMedidor(mapa);
+        setActasRetiradas(actas.filter((a) => a.fechaRetiro));
+      })
+      .catch(() => {
+        setActaPorMedidor({});
+        setActasRetiradas([]);
+      });
   }
 
   useEffect(cargarDetalle, [suscriptorId]);
   useEffect(() => {
-    api.actas.instaladores().then(setInstaladores);
+    api.actas.instaladores().then(setInstaladores).catch(() => {});
   }, []);
 
   function abrirAsignacion() {
@@ -381,6 +410,20 @@ export default function SuscriptorDetailModal({
     });
   }
 
+  // A diferencia de "quitar" (arriba), esto borra el acta de verdad — para corregir un error de
+  // asignación sin dejar rastro en el historial. Restringido a quien tenga el permiso "actas"
+  // (hoy: admin y Coordinador Operativo).
+  function borrarActaDefinitivo(acta: ActaInstalacion) {
+    pedirConfirmacion(
+      `¿Borrar DEFINITIVAMENTE el acta del medidor "${acta.serial}"? Esto no se puede deshacer y elimina el registro del historial, no solo lo marca como retirado.`,
+      async () => {
+        await api.actas.borrarDefinitivo(acta.id);
+        cargarDetalle();
+      },
+      { textoConfirmar: "Borrar definitivamente", variante: "peligro" }
+    );
+  }
+
   function onSubmitAsignacion(e: React.FormEvent) {
     e.preventDefault();
     pedirConfirmacion("¿Deseas guardar los cambios?", registrarAsignacion, { textoConfirmar: "Guardar", variante: "normal" });
@@ -461,7 +504,7 @@ export default function SuscriptorDetailModal({
     setGuardandoEstado(true);
     setErrorEstado(null);
     try {
-      await api.suscriptores.update(suscriptorId, { estadoFacturacion: nuevo as Suscriptor["estadoFacturacion"] });
+      await api.suscriptores.actualizarEstadoFacturacion(suscriptorId, nuevo as Suscriptor["estadoFacturacion"]);
       await cargarDetalle();
     } catch (err) {
       setErrorEstado(err instanceof Error ? err.message.replace(/^Error \d+: /, "") : "Error inesperado");
@@ -516,7 +559,7 @@ export default function SuscriptorDetailModal({
             <div className="flex flex-wrap gap-4">
               <div>
                 <div className="text-xs uppercase text-slate-700 dark:text-slate-400">Estado de facturación</div>
-                {puedeEditar ? (
+                {puedeEditarEstado ? (
                   <select
                     value={suscriptor.estadoFacturacion}
                     disabled={guardandoEstado}
@@ -816,7 +859,7 @@ export default function SuscriptorDetailModal({
                   <Gauge className="h-4 w-4 text-brand-500" />
                   Medidores
                 </h3>
-                {puedeEditar && !asignando && suscriptor.estadoPredio !== "inactivo" && (
+                {puedeAsignarMedidor && !asignando && suscriptor.estadoPredio !== "inactivo" && (
                   <button
                     onClick={abrirAsignacion}
                     className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400"
@@ -826,12 +869,12 @@ export default function SuscriptorDetailModal({
                       : "+ Asignar medidor"}
                   </button>
                 )}
-                {puedeEditar && !asignando && suscriptor.estadoPredio === "inactivo" && (
+                {puedeAsignarMedidor && !asignando && suscriptor.estadoPredio === "inactivo" && (
                   <span className="text-xs text-slate-600 dark:text-slate-400">Predio inactivo: no puede tener medidor</span>
                 )}
               </div>
 
-              {asignando && puedeEditar && (
+              {asignando && puedeAsignarMedidor && (
                 <AsignarMedidorModal
                   editandoMedidorId={editandoMedidorId}
                   editandoEsRetirado={editandoEsRetirado}
@@ -930,17 +973,7 @@ export default function SuscriptorDetailModal({
                       </div>
                     </div>
                     <div className="mt-2 flex flex-wrap items-center gap-3">
-                      {actaPorMedidor[m.id] && (
-                        <button
-                          type="button"
-                          onClick={() => api.actas.verPdf(actaPorMedidor[m.id].id)}
-                          className="inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:underline dark:text-brand-400"
-                        >
-                          <Download className="h-3.5 w-3.5" />
-                          Descargar acta
-                        </button>
-                      )}
-                      {puedeEditar && (
+                      {puedeAsignarMedidor && (
                         <button
                           onClick={() => abrirEdicion(m)}
                           className="inline-flex items-center gap-1 text-xs font-medium text-slate-700 hover:text-brand-600 dark:text-slate-400"
@@ -949,13 +982,23 @@ export default function SuscriptorDetailModal({
                           Editar
                         </button>
                       )}
-                      {puedeEditar && actaPorMedidor[m.id] && (
+                      {puedeAsignarMedidor && actaPorMedidor[m.id] && (
                         <button
                           onClick={() => eliminarAsignacion(m)}
                           className="inline-flex items-center gap-1 text-xs font-medium text-slate-700 hover:text-red-600 dark:text-slate-400"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                           Quitar
+                        </button>
+                      )}
+                      {usuario?.permisos?.includes("actas_avanzado") && actaPorMedidor[m.id] && (
+                        <button
+                          onClick={() => borrarActaDefinitivo(actaPorMedidor[m.id])}
+                          className="inline-flex items-center gap-1 text-xs font-medium text-slate-700 hover:text-red-600 dark:text-slate-400"
+                          title="Corrige un error de asignación: borra el acta sin dejarla en el historial"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Borrar definitivamente
                         </button>
                       )}
                     </div>
@@ -971,7 +1014,7 @@ export default function SuscriptorDetailModal({
                                 <span>
                                   {c.suscriptor.nombre} (NUID {c.suscriptor.codigo})
                                 </span>
-                                {puedeEditar && (
+                                {puedeGestionarCotitulares && (
                                   <button
                                     onClick={() => quitarCotitular(m.id, c.suscriptor.id, c.suscriptor.nombre)}
                                     className="text-slate-500 hover:text-red-600 dark:text-slate-400"
@@ -984,7 +1027,7 @@ export default function SuscriptorDetailModal({
                             ))}
                           </ul>
                         )}
-                        {puedeEditar && (medidorCotitularAbierto === m.id ? (
+                        {puedeGestionarCotitulares && (medidorCotitularAbierto === m.id ? (
                           <form onSubmit={(e) => agregarCotitular(m.id, e)} className="flex items-center gap-2">
                             <input
                               autoFocus
@@ -1047,16 +1090,28 @@ export default function SuscriptorDetailModal({
                           el {fmtFecha(a.fechaRetiro)}
                         </div>
                         <div className="text-xs text-slate-600 dark:text-slate-400">Instalado por: {a.instaladoPor}</div>
-                        {a.medidor && puedeEditar && (
-                          <button
-                            type="button"
-                            onClick={() => abrirEdicionRetirado(a)}
-                            className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-slate-700 hover:text-brand-600 dark:text-slate-400"
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                            Editar
-                          </button>
-                        )}
+                        <div className="mt-1.5 flex items-center gap-3">
+                          {a.medidor && puedeAsignarMedidor && (
+                            <button
+                              type="button"
+                              onClick={() => abrirEdicionRetirado(a)}
+                              className="inline-flex items-center gap-1 text-xs font-medium text-slate-700 hover:text-brand-600 dark:text-slate-400"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                              Editar
+                            </button>
+                          )}
+                          {usuario?.permisos?.includes("actas_avanzado") && (
+                            <button
+                              type="button"
+                              onClick={() => borrarActaDefinitivo(a)}
+                              className="inline-flex items-center gap-1 text-xs font-medium text-slate-700 hover:text-red-600 dark:text-slate-400"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              Borrar definitivamente
+                            </button>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>

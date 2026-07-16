@@ -2,9 +2,12 @@ import { useEffect, useState } from "react";
 import { History, ChevronLeft, ChevronRight } from "lucide-react";
 import { api, HistorialCambio, Usuario } from "../api/client";
 import { useEsMovil } from "../lib/useEsMovil";
+import { useFilasAutoajustadas } from "../lib/useFilasAutoajustadas";
 import { inputClass } from "../lib/ui";
 import EmptyState from "../components/EmptyState";
 import { SkeletonTabla } from "../components/Skeleton";
+
+const TAMANOS_PAGINA = [5, 10, 25, 50, 100];
 
 function fmtFechaHora(fecha: string): string {
   return new Date(fecha).toLocaleString("es-CO", {
@@ -18,7 +21,12 @@ function fmtFechaHora(fecha: string): string {
 
 export default function HistorialPage() {
   const esMovil = useEsMovil();
-  const porPagina = esMovil ? 5 : 10;
+  const { contenedorRef, filas: filasAuto } = useFilasAutoajustadas(44, { minimo: esMovil ? 4 : 6 });
+  const [porPagina, setPorPagina] = useState(() => (esMovil ? 5 : 10));
+  const [porPaginaManual, setPorPaginaManual] = useState(false);
+  useEffect(() => {
+    if (!porPaginaManual) setPorPagina(filasAuto);
+  }, [filasAuto, porPaginaManual]);
   const [cambios, setCambios] = useState<HistorialCambio[]>([]);
   const [total, setTotal] = useState(0);
   const [pagina, setPagina] = useState(1);
@@ -98,10 +106,31 @@ export default function HistorialPage() {
           onChange={(e) => setCampoFiltro(e.target.value)}
           className={`${inputClass} w-full max-w-xs`}
         />
+        <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+          Mostrar
+          <select
+            value={porPagina}
+            onChange={(e) => {
+              setPorPagina(Number(e.target.value));
+              setPorPaginaManual(true);
+            }}
+            className={inputClass}
+          >
+            {[...new Set([porPagina, ...TAMANOS_PAGINA])]
+              .sort((a, b) => a - b)
+              .map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+          </select>
+        </label>
       </div>
 
+      <div ref={contenedorRef} />
+
       {cargando ? (
-        <SkeletonTabla />
+        <SkeletonTabla columnas={5} filas={porPagina} />
       ) : cambios.length === 0 ? (
         <EmptyState mensaje="No hay cambios registrados con estos filtros." />
       ) : (

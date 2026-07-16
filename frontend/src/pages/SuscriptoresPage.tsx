@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   Search,
@@ -32,7 +32,7 @@ import { useConfirm, useErrorHandler } from "../components/ConfirmModal";
 import { useEsMovil } from "../lib/useEsMovil";
 import { SkeletonTabla } from "../components/Skeleton";
 import BusquedaInput from "../components/BusquedaInput";
-import { useFiltroPersistente } from "../lib/useFiltroPersistente";
+import { useFilasAutoajustadas } from "../lib/useFilasAutoajustadas";
 import ThOrdenable, { Orden, alternarOrden } from "../components/ThOrdenable";
 import { useAuth } from "../contexts/AuthContext";
 import { inputClass } from "../lib/ui";
@@ -48,6 +48,13 @@ type TabId = (typeof TABS)[number]["id"];
 
 export default function SuscriptoresPage() {
   const [tab, setTab] = useState<TabId>("listado");
+  const { usuario } = useAuth();
+  // "Barrios y estratos" es un catálogo administrativo, no un dato de consulta — solo se
+  // muestra a quien puede editar suscriptores, igual que el resto de acciones de escritura de
+  // esta pantalla (no tiene permiso propio, se apoya en "suscriptores_avanzado").
+  const tabsVisibles = TABS.filter(
+    (t) => t.id !== "barrios" || usuario?.permisos?.includes("suscriptores_avanzado")
+  );
 
   return (
     <div>
@@ -57,7 +64,7 @@ export default function SuscriptoresPage() {
       </h1>
 
       <div className="mb-4 flex gap-2 border-b border-slate-200 dark:border-slate-800 sm:mb-6">
-        {TABS.map((t) => (
+        {tabsVisibles.map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
@@ -73,7 +80,7 @@ export default function SuscriptoresPage() {
       </div>
 
       {tab === "listado" && <ListadoTab />}
-      {tab === "barrios" && <BarriosEstratosTab />}
+      {tab === "barrios" && usuario?.permisos?.includes("suscriptores_avanzado") && <BarriosEstratosTab />}
     </div>
   );
 }
@@ -86,20 +93,25 @@ function ListadoTab() {
   const [suscriptores, setSuscriptores] = useState<Suscriptor[]>([]);
   const [total, setTotal] = useState(0);
   const [pagina, setPagina] = useState(1);
+  const { contenedorRef, filas: filasAuto } = useFilasAutoajustadas(esMovil ? 132 : 44, { minimo: esMovil ? 3 : 6 });
   const [porPagina, setPorPagina] = useState(() => (esMovil ? 5 : 10));
-  const [filtro, setFiltro] = useFiltroPersistente("suscriptores.q", "");
+  const [porPaginaManual, setPorPaginaManual] = useState(false);
+  useEffect(() => {
+    if (!porPaginaManual) setPorPagina(filasAuto);
+  }, [filasAuto, porPaginaManual]);
+  const [filtro, setFiltro] = useState("");
   const [filtroDebounced, setFiltroDebounced] = useState(filtro);
   // El query param (?estado=..., al llegar desde el Dashboard) le gana al filtro recordado.
-  const [estadoFiltro, setEstadoFiltro] = useFiltroPersistente("suscriptores.estado", "");
-  const [barrioFiltro, setBarrioFiltro] = useFiltroPersistente("suscriptores.barrio", "");
-  const [estratoFiltro, setEstratoFiltro] = useFiltroPersistente("suscriptores.estrato", "");
-  const [estadoPredioFiltro, setEstadoPredioFiltro] = useFiltroPersistente("suscriptores.predio", "");
-  const [conCotitularFiltro, setConCotitularFiltro] = useFiltroPersistente("suscriptores.conCotitular", "");
+  const [estadoFiltro, setEstadoFiltro] = useState("");
+  const [barrioFiltro, setBarrioFiltro] = useState("");
+  const [estratoFiltro, setEstratoFiltro] = useState("");
+  const [estadoPredioFiltro, setEstadoPredioFiltro] = useState("");
+  const [conCotitularFiltro, setConCotitularFiltro] = useState("");
   useEffect(() => {
     const e = searchParams.get("estado");
     if (e) setEstadoFiltro(e);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [searchParams]);
   const [barrios, setBarrios] = useState<{ id: number; nombre: string }[]>([]);
   const [estratos, setEstratos] = useState<Estrato[]>([]);
   const [filtrosAbiertos, setFiltrosAbiertos] = useState(false);
@@ -145,7 +157,15 @@ function ListadoTab() {
     setPagina(1);
   }, [filtroDebounced, estadoFiltro, barrioFiltro, estratoFiltro, estadoPredioFiltro, conCotitularFiltro, porPagina]);
 
+  // Cuando cambian varios filtros seguido (ej. llegar desde el Dashboard con ?estado=X dispara
+  // un fetch sin filtro y, apenas después, otro ya filtrado), las respuestas pueden llegar
+  // DESORDENADAS: la más lenta (normalmente la que trae más resultados, sin filtrar) puede
+  // resolver después que la más rápida y pisar la vista con datos viejos. peticionIdRef guarda
+  // cuál es la petición más reciente; si una respuesta llega y ya no es la última pedida, se
+  // descarta en silencio en vez de aplicarse.
+  const peticionIdRef = useRef(0);
   async function cargar() {
+    const idPeticion = ++peticionIdRef.current;
     setCargando(true);
     const resultado = await api.suscriptores.listPaginado(pagina, porPagina, {
       q: filtroDebounced,
@@ -157,6 +177,7 @@ function ListadoTab() {
       sort: orden.campo,
       dir: orden.dir,
     });
+    if (idPeticion !== peticionIdRef.current) return; // llegó una petición más nueva primero
     setSuscriptores(resultado.data);
     setTotal(resultado.total);
     setSeleccionados(new Set());
@@ -289,14 +310,22 @@ function ListadoTab() {
             Mostrar
             <select
               value={porPagina}
-              onChange={(e) => setPorPagina(Number(e.target.value))}
+              onChange={(e) => {
+                setPorPagina(Number(e.target.value));
+                setPorPaginaManual(true);
+              }}
               className={inputClass}
             >
-              {TAMANOS_PAGINA.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
+              {/* El valor calculado automáticamente al cargar (para llenar la pantalla justo)
+                  no suele coincidir con los tamaños fijos — se agrega como opción propia para
+                  que el selector lo muestre correctamente en vez de quedar en blanco. */}
+              {[...new Set([porPagina, ...TAMANOS_PAGINA])]
+                .sort((a, b) => a - b)
+                .map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
             </select>
           </label>
           {hayFiltrosActivos && (
@@ -311,6 +340,7 @@ function ListadoTab() {
         </div>
       </div>
 
+      <div ref={contenedorRef} />
       {cargando ? (
         <SkeletonTabla columnas={7} filas={porPagina} />
       ) : (

@@ -23,6 +23,8 @@ function iniciales(nombre: string) {
 export default function PerfilModal({ onCerrar }: { onCerrar: () => void }) {
   const { usuario, refrescarUsuario } = useAuth();
   const [nombre, setNombre] = useState(usuario?.nombre ?? "");
+  const [nombreUsuario, setNombreUsuario] = useState(usuario?.nombreUsuario ?? "");
+  const [cedula, setCedula] = useState(usuario?.cedula ?? "");
   const [celular, setCelular] = useState(usuario?.celular ?? "");
   const [fechaNacimiento, setFechaNacimiento] = useState(usuario?.fechaNacimiento?.slice(0, 10) ?? "");
   const [password, setPassword] = useState("");
@@ -52,7 +54,7 @@ export default function PerfilModal({ onCerrar }: { onCerrar: () => void }) {
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!nombre.trim()) return;
+    if (!nombre.trim() || !nombreUsuario.trim()) return;
     pedirConfirmacion("¿Deseas guardar los cambios?", guardar, { textoConfirmar: "Guardar", variante: "normal" });
   }
 
@@ -61,6 +63,8 @@ export default function PerfilModal({ onCerrar }: { onCerrar: () => void }) {
     await run(async () => {
       await api.auth.actualizarPerfil({
         nombre: nombre.trim(),
+        nombreUsuario: nombreUsuario.trim(),
+        cedula: cedula.trim() || null,
         celular: celular.trim() || null,
         fechaNacimiento: fechaNacimiento || null,
         password: password || undefined,
@@ -129,12 +133,32 @@ export default function PerfilModal({ onCerrar }: { onCerrar: () => void }) {
           </label>
 
           <label className={labelClass}>
-            Usuario / rol
+            Nombre de usuario (para iniciar sesión)
             <input
-              value={`${usuario.nombreUsuario} · ${usuario.rol.nombre}`}
+              autoComplete="off"
+              value={nombreUsuario}
+              onChange={(e) => setNombreUsuario(e.target.value)}
+              className={inputClass}
+              required
+            />
+          </label>
+
+          <label className={labelClass}>
+            Rol
+            <input
+              value={usuario.rol.nombre}
               disabled
               className={`${inputClass} cursor-not-allowed opacity-60`}
-              title="Solo un administrador puede cambiar tu nombre de usuario o rol"
+              title="Solo un administrador puede cambiar tu rol"
+            />
+          </label>
+
+          <label className={labelClass}>
+            Cédula
+            <input
+              value={cedula}
+              onChange={(e) => setCedula(e.target.value)}
+              className={inputClass}
             />
           </label>
 

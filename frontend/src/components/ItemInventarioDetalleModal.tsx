@@ -1,4 +1,4 @@
-import { X, Pencil, Image as ImageIcon } from "lucide-react";
+import { X, Pencil, Image as ImageIcon, Download, ExternalLink } from "lucide-react";
 import { ItemInventario, urlFoto } from "../api/client";
 import { UNIDAD_ABREVIADA, UNIDADES } from "./ItemInventarioModal";
 import { useCierreAnimado } from "../lib/useCierreAnimado";
@@ -54,11 +54,32 @@ export default function ItemInventarioDetalleModal({
         </div>
 
         {item.fotoUrl ? (
-          <img
-            src={urlFoto(item.fotoUrl)}
-            alt={item.nombre}
-            className="mb-4 h-56 w-full rounded-lg object-cover"
-          />
+          <div className="relative mb-4">
+            <img
+              src={urlFoto(item.fotoUrl)}
+              alt={item.nombre}
+              className="h-56 w-full rounded-lg bg-slate-100 object-contain dark:bg-slate-800"
+            />
+            <div className="absolute right-2 top-2 flex gap-1">
+              <a
+                href={urlFoto(item.fotoUrl)}
+                target="_blank"
+                rel="noreferrer"
+                title="Abrir en pestaña nueva"
+                className="rounded-lg bg-black/50 p-1.5 text-white hover:bg-black/70"
+              >
+                <ExternalLink className="h-4 w-4" />
+              </a>
+              <a
+                href={urlFoto(item.fotoUrl)}
+                download
+                title="Descargar foto"
+                className="rounded-lg bg-black/50 p-1.5 text-white hover:bg-black/70"
+              >
+                <Download className="h-4 w-4" />
+              </a>
+            </div>
+          </div>
         ) : (
           <div className="mb-4 flex h-40 w-full items-center justify-center rounded-lg bg-slate-100 text-slate-400 dark:bg-slate-800">
             <ImageIcon className="h-10 w-10" />

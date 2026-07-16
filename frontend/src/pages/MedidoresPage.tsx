@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   Search,
@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import {
   api,
+  urlFoto,
   Medidor,
   MarcaMedidor,
   ModeloMedidor,
@@ -36,7 +37,7 @@ import { useEsMovil } from "../lib/useEsMovil";
 import { SkeletonTabla, SkeletonLista } from "../components/Skeleton";
 import { useCierreAnimado } from "../lib/useCierreAnimado";
 import BusquedaInput from "../components/BusquedaInput";
-import { useFiltroPersistente } from "../lib/useFiltroPersistente";
+import { useFilasAutoajustadas } from "../lib/useFilasAutoajustadas";
 import ThOrdenable, { Orden, alternarOrden } from "../components/ThOrdenable";
 import { inputClass } from "../lib/ui";
 import EmptyState from "../components/EmptyState";
@@ -100,15 +101,15 @@ function InventarioTab() {
   const [lotes, setLotes] = useState<Lote[]>([]);
   const [detalleMedidor, setDetalleMedidor] = useState<Medidor | null>(null);
   const [detalleSuscriptorId, setDetalleSuscriptorId] = useState<number | null>(null);
-  const [filtro, setFiltro] = useFiltroPersistente("medidores.q", "");
+  const [filtro, setFiltro] = useState("");
   const [filtroDebounced, setFiltroDebounced] = useState(filtro);
   // El query param (?estado=..., al llegar desde el Dashboard) le gana al filtro recordado.
-  const [filtroEstado, setFiltroEstado] = useFiltroPersistente("medidores.estado", "");
-  const [filtroMarca, setFiltroMarca] = useFiltroPersistente("medidores.marca", "");
-  const [filtroCondicion, setFiltroCondicion] = useFiltroPersistente("medidores.condicion", "");
-  const [filtroModelo, setFiltroModelo] = useFiltroPersistente("medidores.modelo", "");
-  const [filtroDiametro, setFiltroDiametro] = useFiltroPersistente("medidores.diametro", "");
-  const [filtroTipo, setFiltroTipo] = useFiltroPersistente("medidores.tipo", "");
+  const [filtroEstado, setFiltroEstado] = useState("");
+  const [filtroMarca, setFiltroMarca] = useState("");
+  const [filtroCondicion, setFiltroCondicion] = useState("");
+  const [filtroModelo, setFiltroModelo] = useState("");
+  const [filtroDiametro, setFiltroDiametro] = useState("");
+  const [filtroTipo, setFiltroTipo] = useState("");
   useEffect(() => {
     const e = searchParams.get("estado");
     if (e) setFiltroEstado(e);
@@ -117,7 +118,12 @@ function InventarioTab() {
   const [diametros, setDiametros] = useState<DiametroMedidor[]>([]);
   const [filtrosAbiertos, setFiltrosAbiertos] = useState(false);
   const [pagina, setPagina] = useState(1);
+  const { contenedorRef, filas: filasAuto } = useFilasAutoajustadas(esMovil ? 132 : 44, { minimo: esMovil ? 3 : 6 });
   const [porPagina, setPorPagina] = useState(() => (esMovil ? 5 : 10));
+  const [porPaginaManual, setPorPaginaManual] = useState(false);
+  useEffect(() => {
+    if (!porPaginaManual) setPorPagina(filasAuto);
+  }, [filasAuto, porPaginaManual]);
   const [orden, setOrden] = useState<Orden>({ campo: "serial", dir: "asc" });
   const [cargando, setCargando] = useState(true);
   const { error, run } = useErrorHandler();
@@ -154,7 +160,13 @@ function InventarioTab() {
     return () => clearTimeout(t);
   }, [filtro]);
 
+  // Ver el mismo comentario en SuscriptoresPage.tsx: si cambian varios filtros seguido (ej.
+  // llegar desde el Dashboard con ?estado=X), pueden dispararse dos fetches casi juntos y
+  // resolver desordenados — este guard descarta la respuesta si ya no es la petición más
+  // reciente en vez de dejar que pise la vista con datos viejos.
+  const peticionIdRef = useRef(0);
   async function cargar() {
+    const idPeticion = ++peticionIdRef.current;
     setCargando(true);
     const [resultado, ma, mo, lo, di] = await Promise.all([
       api.medidores.listPaginado(pagina, porPagina, {
@@ -173,6 +185,7 @@ function InventarioTab() {
       api.lotes.list(),
       api.diametros.list(),
     ]);
+    if (idPeticion !== peticionIdRef.current) return;
     setMedidores(resultado.data);
     setTotal(resultado.total);
     setMarcas(ma);
@@ -480,12 +493,21 @@ function InventarioTab() {
           </select>
           <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
             Mostrar
-            <select value={porPagina} onChange={(e) => setPorPagina(Number(e.target.value))} className={inputClass}>
-              {[5, 10, 25, 50, 100].map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
+            <select
+              value={porPagina}
+              onChange={(e) => {
+                setPorPagina(Number(e.target.value));
+                setPorPaginaManual(true);
+              }}
+              className={inputClass}
+            >
+              {[...new Set([porPagina, 5, 10, 25, 50, 100])]
+                .sort((a, b) => a - b)
+                .map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
             </select>
           </label>
           {hayFiltrosActivos && (
@@ -500,6 +522,7 @@ function InventarioTab() {
         </div>
       </div>
 
+      <div ref={contenedorRef} />
       {cargando ? (
         <SkeletonTabla columnas={8} filas={porPagina} />
       ) : (
@@ -1381,7 +1404,7 @@ function ActasTab() {
                 <th className="px-4 py-3 font-medium">Suscriptor</th>
                 <th className="px-4 py-3 font-medium">Serial</th>
                 <th className="px-4 py-3 font-medium">Instalado por</th>
-                <th className="px-4 py-3 font-medium">Acta</th>
+                <th className="px-4 py-3 font-medium">Acta firmada</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -1394,14 +1417,19 @@ function ActasTab() {
                   <td className="px-4 py-2.5">{a.serial}</td>
                   <td className="px-4 py-2.5">{a.instaladoPor}</td>
                   <td className="px-4 py-2.5">
-                    <button
-                      type="button"
-                      onClick={() => api.actas.verPdf(a.id)}
-                      className="inline-flex items-center gap-1 text-brand-600 hover:underline"
-                    >
-                      <Download className="h-3.5 w-3.5" />
-                      Descargar PDF
-                    </button>
+                    {a.actaFirmadaUrl ? (
+                      <a
+                        href={urlFoto(a.actaFirmadaUrl)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-brand-600 hover:underline"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        Ver PDF firmado
+                      </a>
+                    ) : (
+                      <span className="text-slate-500 dark:text-slate-400">Sin subir</span>
+                    )}
                   </td>
                 </tr>
               ))}

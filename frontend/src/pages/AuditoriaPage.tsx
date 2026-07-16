@@ -2,7 +2,10 @@ import { Fragment, useEffect, useState } from "react";
 import { ShieldCheck, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, MapPin, Monitor, AlertTriangle, XCircle, Download, LogOut, Trash2 } from "lucide-react";
 import { api, InicioSesion, HistorialCambio, IntentoLoginFallido, Usuario } from "../api/client";
 import { useEsMovil } from "../lib/useEsMovil";
+import { useFilasAutoajustadas } from "../lib/useFilasAutoajustadas";
 import { inputClass } from "../lib/ui";
+
+const TAMANOS_PAGINA = [5, 10, 25, 50, 100];
 import EmptyState from "../components/EmptyState";
 import { SkeletonTabla } from "../components/Skeleton";
 import { useAuth } from "../contexts/AuthContext";
@@ -105,7 +108,12 @@ function Paginacion({
 
 function SesionesTab() {
   const esMovil = useEsMovil();
-  const porPagina = esMovil ? 5 : 10;
+  const { contenedorRef, filas: filasAuto } = useFilasAutoajustadas(44, { minimo: esMovil ? 4 : 6 });
+  const [porPagina, setPorPagina] = useState(() => (esMovil ? 5 : 10));
+  const [porPaginaManual, setPorPaginaManual] = useState(false);
+  useEffect(() => {
+    if (!porPaginaManual) setPorPagina(filasAuto);
+  }, [filasAuto, porPaginaManual]);
   const { usuario } = useAuth();
   const { pedirConfirmacion, modal: modalConfirmacion } = useConfirm();
   const [sesiones, setSesiones] = useState<InicioSesion[]>([]);
@@ -198,10 +206,30 @@ function SesionesTab() {
           <Trash2 className="h-4 w-4" />
           Borrar cerradas
         </button>
+        <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+          Mostrar
+          <select
+            value={porPagina}
+            onChange={(e) => {
+              setPorPagina(Number(e.target.value));
+              setPorPaginaManual(true);
+            }}
+            className={inputClass}
+          >
+            {[...new Set([porPagina, ...TAMANOS_PAGINA])]
+              .sort((a, b) => a - b)
+              .map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+          </select>
+        </label>
       </div>
 
+      <div ref={contenedorRef} />
       {cargando ? (
-        <SkeletonTabla columnas={9} />
+        <SkeletonTabla columnas={9} filas={porPagina} />
       ) : sesiones.length === 0 ? (
         <EmptyState mensaje="No hay inicios de sesión registrados con estos filtros." />
       ) : (
@@ -327,7 +355,12 @@ function SesionesTab() {
 
 function FallidosTab() {
   const esMovil = useEsMovil();
-  const porPagina = esMovil ? 5 : 10;
+  const { contenedorRef, filas: filasAuto } = useFilasAutoajustadas(44, { minimo: esMovil ? 4 : 6 });
+  const [porPagina, setPorPagina] = useState(() => (esMovil ? 5 : 10));
+  const [porPaginaManual, setPorPaginaManual] = useState(false);
+  useEffect(() => {
+    if (!porPaginaManual) setPorPagina(filasAuto);
+  }, [filasAuto, porPaginaManual]);
   const [intentos, setIntentos] = useState<IntentoLoginFallido[]>([]);
   const [total, setTotal] = useState(0);
   const [pagina, setPagina] = useState(1);
@@ -369,10 +402,30 @@ function FallidosTab() {
           onChange={(e) => setIdentificadorFiltro(e.target.value)}
           className={`${inputClass} w-full max-w-xs`}
         />
+        <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+          Mostrar
+          <select
+            value={porPagina}
+            onChange={(e) => {
+              setPorPagina(Number(e.target.value));
+              setPorPaginaManual(true);
+            }}
+            className={inputClass}
+          >
+            {[...new Set([porPagina, ...TAMANOS_PAGINA])]
+              .sort((a, b) => a - b)
+              .map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+          </select>
+        </label>
       </div>
 
+      <div ref={contenedorRef} />
       {cargando ? (
-        <SkeletonTabla columnas={4} />
+        <SkeletonTabla columnas={4} filas={porPagina} />
       ) : intentos.length === 0 ? (
         <EmptyState mensaje="No hay intentos fallidos registrados con estos filtros." icon={XCircle} />
       ) : (
