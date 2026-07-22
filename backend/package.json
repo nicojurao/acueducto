@@ -11,10 +11,12 @@
     "import": "tsx scripts/import-excel.ts",
     "split-nombres": "tsx scripts/split-nombres.ts",
     "create-admin": "tsx scripts/create-admin.ts",
-    "migrate-uploads-to-minio": "tsx scripts/migrate-uploads-to-minio.ts"
+    "migrate-uploads-to-minio": "tsx scripts/migrate-uploads-to-minio.ts",
+    "comprimir-fotos-inventario": "tsx scripts/comprimir-fotos-inventario.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",
+    "archiver": "^7.0.1",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "exceljs": "^4.4.0",
@@ -27,9 +29,11 @@
     "multer": "^2.0.0",
     "pdfkit": "^0.15.0",
     "pino": "^10.3.1",
-    "pino-http": "^11.0.0"
+    "pino-http": "^11.0.0",
+    "sharp": "^0.33.5"
   },
   "devDependencies": {
+    "@types/archiver": "^6.0.2",
     "@types/bcryptjs": "^2.4.6",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",

@@ -1,7 +1,53 @@
 import { Router } from "express";
 import { prisma } from "../lib/prisma.js";
+import { ESTADOS_FACTURACION as ESTADOS_FACTURACION_CLAVES } from "../lib/snapshotPeriodo.js";
 
 export const dashboardRouter = Router();
+
+// "Suscriptores activos", "Medidores activos" y el desglose por estado de facturación dependen
+// del estado ACTUAL del suscriptor/medidor (no de un campo fechado como Lectura.periodo), así
+// que para un periodo YA CERRADO se usa la foto que se tomó el día 19 de ese mes (ver
+// lib/snapshotPeriodo.ts) en vez de recalcular con el estado de hoy — si no, el dashboard de un
+// mes viejo iría cambiando cada vez que alguien edita un suscriptor actual. Para el periodo
+// vigente (el que todavía no cerró) o para un periodo viejo que por algún motivo no tiene foto
+// (ej. de antes de que existiera este mecanismo), se calcula en vivo con el estado de hoy —
+// "historico: false" le avisa al frontend que ese número es una aproximación, no un dato exacto
+// de ese mes.
+async function obtenerEstadoSuscriptores(periodo: string) {
+  const snapshot = await prisma.snapshotPeriodo.findUnique({ where: { periodo } });
+  if (snapshot) {
+    return {
+      historico: true,
+      suscriptoresActivos: snapshot.suscriptoresActivos,
+      medidoresActivos: snapshot.medidoresActivos,
+      sinMedidor: snapshot.sinMedidor,
+      instaladoPrueba: snapshot.instaladoPrueba,
+      facturando: snapshot.facturando,
+      inactivo: snapshot.inactivo,
+    };
+  }
+
+  const [suscriptoresActivos, medidoresActivos, grupos] = await Promise.all([
+    prisma.suscriptor.count({ where: { estadoPredio: "activo" } }),
+    prisma.medidor.count({ where: { activo: true } }),
+    prisma.suscriptor.groupBy({
+      by: ["estadoFacturacion"],
+      where: { estadoPredio: "activo" },
+      _count: { _all: true },
+    }),
+  ]);
+  const cantidades = new Map(grupos.map((g) => [g.estadoFacturacion, g._count._all]));
+
+  return {
+    historico: false,
+    suscriptoresActivos,
+    medidoresActivos,
+    sinMedidor: cantidades.get("sin_medidor") ?? 0,
+    instaladoPrueba: cantidades.get("instalado_prueba") ?? 0,
+    facturando: cantidades.get("facturando") ?? 0,
+    inactivo: cantidades.get("inactivo") ?? 0,
+  };
+}
 
 // Las lecturas del mes no empiezan a capturarse hasta el día 20 (mismo criterio que
 // mesFacturableActual() en reportes.ts y el periodo por defecto de ReportesPage.tsx). Antes de
@@ -39,8 +85,11 @@ async function sumaConsumoPeriodo(fecha: Date): Promise<{ consumo: number; usuar
   };
 }
 
-function variacionPct(actual: number, anterior: number): number | null {
-  if (!anterior) return null;
+// hayDatosAnterior distingue "no hay lecturas ese mes" (null, no se puede comparar) de
+// "hay lecturas pero el consumo total dio exactamente 0" (antes se confundían, porque
+// `anterior === 0` también es falsy y devolvía null aunque sí hubiera datos reales).
+function variacionPct(actual: number, anterior: number, hayDatosAnterior: boolean): number | null {
+  if (!hayDatosAnterior || !anterior) return null;
   return ((actual - anterior) / Math.abs(anterior)) * 100;
 }
 
@@ -52,28 +101,44 @@ dashboardRouter.get("/kpis", async (req, res) => {
   // un predio activo sin medidor asignado todavía sigue siendo un suscriptor activo. Antes esto
   // contaba "suscriptores con medidor activo", que en la práctica daba el mismo número que
   // "medidores activos" (redundante, y no era lo que decía la etiqueta).
-  const [suscriptoresActivos, medidoresActivos, facturadosPorMedicion, actual, anterior, anioAnterior] = await Promise.all([
-    prisma.suscriptor.count({ where: { estadoPredio: "activo" } }),
-    prisma.medidor.count({ where: { activo: true } }),
-    prisma.suscriptor.count({ where: { estadoFacturacion: "facturando" } }),
+  //
+  // "pendientes" tiene que usar EXACTAMENTE el mismo criterio que la pantalla de Captura de
+  // Lecturas (ver GET /api/lecturas): solo medidores con suscriptor asignado y ya instalados
+  // para este periodo. Antes contaba TODOS los medidores activos (incluía medidores sin
+  // suscriptor y medidores instalados después del periodo que se está viendo), lo que inflaba
+  // el número acá por encima de lo que realmente aparece como pendiente en esa pantalla.
+  // La captura de lecturas arranca el día 20 de cada mes: un medidor instalado el 21 o después
+  // ya no alcanza a tener lectura ese mes y pasa derecho al periodo siguiente.
+  const corteInstalacion = new Date(Date.UTC(fecha.getUTCFullYear(), fecha.getUTCMonth(), 21));
+  const wherePendientes = {
+    activo: true,
+    suscriptorId: { not: null },
+    OR: [{ fechaInstalacion: null }, { fechaInstalacion: { lt: corteInstalacion } }],
+    lecturas: { none: { periodo: fecha } },
+  };
+
+  const [estado, actual, anterior, anioAnterior, lecturasPendientes] = await Promise.all([
+    obtenerEstadoSuscriptores(periodo),
     sumaConsumoPeriodo(fecha),
     sumaConsumoPeriodo(mesAnterior(fecha)),
     sumaConsumoPeriodo(mismoMesAnioAnterior(fecha)),
+    prisma.medidor.count({ where: wherePendientes }),
   ]);
-
-  const lecturasPendientes = medidoresActivos - actual.usuarios;
   const promedioPorUsuario = actual.usuarios > 0 ? actual.consumo / actual.usuarios : 0;
+  const promedioMesAnterior = anterior.usuarios > 0 ? anterior.consumo / anterior.usuarios : 0;
 
   res.json({
     periodo,
-    suscriptoresActivos,
-    medidoresActivos,
-    facturadosPorMedicion,
+    suscriptoresActivos: estado.suscriptoresActivos,
+    medidoresActivos: estado.medidoresActivos,
+    facturadosPorMedicion: estado.facturando,
+    historico: estado.historico,
     consumoMesActual: actual.consumo,
     promedioPorUsuario,
+    promedioMesAnterior,
     lecturasPendientes: Math.max(lecturasPendientes, 0),
-    variacionMesAnterior: variacionPct(actual.consumo, anterior.consumo),
-    variacionAnioAnterior: variacionPct(actual.consumo, anioAnterior.consumo),
+    variacionMesAnterior: variacionPct(actual.consumo, anterior.consumo, anterior.usuarios > 0),
+    variacionAnioAnterior: variacionPct(actual.consumo, anioAnterior.consumo, anioAnterior.usuarios > 0),
   });
 });
 
@@ -142,10 +207,20 @@ dashboardRouter.get("/atipicos", async (req, res) => {
 dashboardRouter.get("/top-consumidores", async (req, res) => {
   const periodo = String(req.query.periodo ?? periodoActualStr());
   const limit = Number(req.query.limit ?? 10);
+  const { barrio, estrato } = req.query;
   const fecha = primerDiaMes(periodo);
 
   const lecturas = await prisma.lectura.findMany({
-    where: { periodo: fecha, medidor: { suscriptorId: { not: null } } },
+    where: {
+      periodo: fecha,
+      medidor: {
+        suscriptorId: { not: null },
+        suscriptor: {
+          barrioId: barrio ? Number(barrio) : undefined,
+          estratoId: estrato ? Number(estrato) : undefined,
+        },
+      },
+    },
     include: { medidor: { include: { suscriptor: true } } },
     orderBy: { consumo: "desc" },
     take: limit,
@@ -203,19 +278,22 @@ dashboardRouter.get("/tendencia-multianio", async (_req, res) => {
   res.json({ anios, serie });
 });
 
-const ESTADOS_FACTURACION = ["sin_medidor", "instalado_prueba", "facturando", "inactivo"];
-
 // Distribución de suscriptores por estado de facturación (sin_medidor, instalado_prueba,
-// facturando, inactivo) — para el gráfico de cobertura de medición en el dashboard.
-// Siempre incluye los 4 estados, incluso con cantidad 0, para que no desaparezcan de la UI.
-// Solo cuenta predios activos: uno inactivo (lote baldío, demolido) no debería contar como
-// "sin medidor" y arrastrar la cobertura hacia abajo.
-dashboardRouter.get("/estados-facturacion", async (_req, res) => {
-  const grupos = await prisma.suscriptor.groupBy({
-    by: ["estadoFacturacion"],
-    where: { estadoPredio: "activo" },
-    _count: { _all: true },
+// facturando, inactivo) — para el gráfico de cobertura de medición en el dashboard. Siempre
+// incluye los 4 estados, incluso con cantidad 0, para que no desaparezcan de la UI. Usa la foto
+// del periodo (ver obtenerEstadoSuscriptores) para que un mes ya cerrado no cambie con el estado
+// de hoy; sin ?periodo, se asume el periodo facturable vigente (en vivo).
+dashboardRouter.get("/estados-facturacion", async (req, res) => {
+  const periodo = String(req.query.periodo ?? periodoActualStr());
+  const estado = await obtenerEstadoSuscriptores(periodo);
+  const cantidades: Record<string, number> = {
+    sin_medidor: estado.sinMedidor,
+    instalado_prueba: estado.instaladoPrueba,
+    facturando: estado.facturando,
+    inactivo: estado.inactivo,
+  };
+  res.json({
+    historico: estado.historico,
+    estados: ESTADOS_FACTURACION_CLAVES.map((clave) => ({ estado: clave, cantidad: cantidades[clave] ?? 0 })),
   });
-  const cantidades = new Map(grupos.map((g) => [g.estadoFacturacion, g._count._all]));
-  res.json(ESTADOS_FACTURACION.map((estado) => ({ estado, cantidad: cantidades.get(estado) ?? 0 })));
 });

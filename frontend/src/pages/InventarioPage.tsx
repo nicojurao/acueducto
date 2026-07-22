@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { fmtFecha } from "../lib/fecha";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import {
   Warehouse,
@@ -18,6 +19,9 @@ import {
   Package,
   DollarSign,
   Download,
+  AlertTriangle,
+  X,
+  ArrowLeftRight,
 } from "lucide-react";
 import {
   api,
@@ -63,10 +67,22 @@ function DashboardTab() {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         <KpiCard label="Total de ítems" value={String(kpis.totalItems)} icon={Package} />
         <KpiCard label="Valor total del inventario" value={fmtMoneda(kpis.valorTotalInventario)} icon={DollarSign} />
         <KpiCard label="Préstamos activos" value={String(kpis.prestamosActivos)} icon={Undo2} />
+        <KpiCard
+          label="Préstamos vencidos"
+          value={String(kpis.prestamosVencidos)}
+          icon={AlertTriangle}
+          variant={kpis.prestamosVencidos > 0 ? "alert" : "default"}
+        />
+        <KpiCard
+          label="Ítems con stock bajo"
+          value={String(kpis.itemsStockBajo)}
+          icon={AlertTriangle}
+          variant={kpis.itemsStockBajo > 0 ? "alert" : "default"}
+        />
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -125,11 +141,13 @@ function ItemsTab({
   ubicaciones,
   proveedores,
   recargarCatalogos,
+  filtroInicial,
 }: {
   categorias: CategoriaInventario[];
   ubicaciones: UbicacionInventario[];
   proveedores: ProveedorInventario[];
   recargarCatalogos: () => void;
+  filtroInicial?: { tipo: "categoria" | "ubicacion" | "proveedor"; id: number; nombre: string } | null;
 }) {
   const { usuario } = useAuth();
   const puedeEditar = usuario?.permisos?.includes("inventario_avanzado") ?? false;
@@ -141,7 +159,10 @@ function ItemsTab({
   const [cargando, setCargando] = useState(true);
   const [busqueda, setBusqueda] = useState("");
   const [busquedaDebounced, setBusquedaDebounced] = useState(busqueda);
-  const [categoriaFiltro, setCategoriaFiltro] = useState("");
+  const [categoriaFiltro, setCategoriaFiltro] = useState(filtroInicial?.tipo === "categoria" ? String(filtroInicial.id) : "");
+  const [ubicacionFiltro, setUbicacionFiltro] = useState(filtroInicial?.tipo === "ubicacion" ? String(filtroInicial.id) : "");
+  const [proveedorFiltro, setProveedorFiltro] = useState(filtroInicial?.tipo === "proveedor" ? String(filtroInicial.id) : "");
+  const [stockBajoFiltro, setStockBajoFiltro] = useState(false);
   const [orden, setOrden] = useState<Orden>({ campo: "nombre", dir: "asc" });
   const [modalAbierto, setModalAbierto] = useState<"nuevo" | ItemInventario | null>(null);
   const [detalle, setDetalle] = useState<ItemInventario | null>(null);
@@ -173,6 +194,9 @@ function ItemsTab({
       const resultado = await api.inventario.listPaginado(pagina, porPagina, {
         q: busquedaDebounced || undefined,
         categoria: categoriaFiltro ? Number(categoriaFiltro) : undefined,
+        ubicacion: ubicacionFiltro ? Number(ubicacionFiltro) : undefined,
+        proveedor: proveedorFiltro ? Number(proveedorFiltro) : undefined,
+        stockBajo: stockBajoFiltro || undefined,
         sort: orden.campo,
         dir: orden.dir,
       });
@@ -187,9 +211,12 @@ function ItemsTab({
   useEffect(() => {
     cargar();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pagina, porPagina, busquedaDebounced, categoriaFiltro, orden]);
+  }, [pagina, porPagina, busquedaDebounced, categoriaFiltro, ubicacionFiltro, proveedorFiltro, stockBajoFiltro, orden]);
 
-  useEffect(() => setPagina(1), [busquedaDebounced, categoriaFiltro, porPagina]);
+  useEffect(
+    () => setPagina(1),
+    [busquedaDebounced, categoriaFiltro, ubicacionFiltro, proveedorFiltro, stockBajoFiltro, porPagina]
+  );
 
   function eliminar(item: ItemInventario) {
     pedirConfirmacion(`¿Eliminar "${item.nombre}" del inventario?`, async () => {
@@ -204,7 +231,12 @@ function ItemsTab({
   }
 
   function filtrosActuales() {
-    return { q: busquedaDebounced || undefined, categoria: categoriaFiltro ? Number(categoriaFiltro) : undefined };
+    return {
+      q: busquedaDebounced || undefined,
+      categoria: categoriaFiltro ? Number(categoriaFiltro) : undefined,
+      ubicacion: ubicacionFiltro ? Number(ubicacionFiltro) : undefined,
+      proveedor: proveedorFiltro ? Number(proveedorFiltro) : undefined,
+    };
   }
   function exportarExcel() {
     run(() => api.inventario.exportarExcel(filtrosActuales()));
@@ -239,6 +271,47 @@ function ItemsTab({
             </option>
           ))}
         </select>
+        <select value={ubicacionFiltro} onChange={(e) => setUbicacionFiltro(e.target.value)} className={inputClass}>
+          <option value="">Todas las ubicaciones</option>
+          {ubicaciones.map((u) => (
+            <option key={u.id} value={u.id}>
+              {u.nombre}
+            </option>
+          ))}
+        </select>
+        <select value={proveedorFiltro} onChange={(e) => setProveedorFiltro(e.target.value)} className={inputClass}>
+          <option value="">Todos los proveedores</option>
+          {proveedores.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.nombre}
+            </option>
+          ))}
+        </select>
+        <button
+          onClick={() => setStockBajoFiltro((v) => !v)}
+          className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium ${
+            stockBajoFiltro
+              ? "bg-red-600 text-white"
+              : "border border-red-200 text-red-700 hover:bg-red-50 dark:border-red-500/30 dark:text-red-400 dark:hover:bg-red-500/10"
+          }`}
+        >
+          <AlertTriangle className="h-3.5 w-3.5" />
+          Stock bajo
+        </button>
+        {(categoriaFiltro || ubicacionFiltro || proveedorFiltro || stockBajoFiltro) && (
+          <button
+            onClick={() => {
+              setCategoriaFiltro("");
+              setUbicacionFiltro("");
+              setProveedorFiltro("");
+              setStockBajoFiltro(false);
+            }}
+            className="flex items-center gap-1.5 rounded-full bg-brand-100 px-3 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-200 dark:bg-brand-500/20 dark:text-brand-300 dark:hover:bg-brand-500/30"
+          >
+            Quitar filtro
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
         <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
           Mostrar
           <select value={porPagina} onChange={(e) => setPorPagina(Number(e.target.value))} className={inputClass}>
@@ -343,6 +416,12 @@ function ItemsTab({
                   <td className="px-4 py-2.5 text-slate-700 dark:text-slate-400">{item.categoriaCat?.nombre ?? "-"}</td>
                   <td className="px-4 py-2.5 text-slate-700 dark:text-slate-400">
                     {item.disponible} / {item.cantidad} {UNIDAD_ABREVIADA[item.unidadMedida] ?? item.unidadMedida}
+                    {item.stockBajo && (
+                      <span className="ml-1.5 inline-flex items-center gap-1 rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-red-700 dark:bg-red-500/20 dark:text-red-400">
+                        <AlertTriangle className="h-3 w-3" />
+                        Bajo
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-2.5">
                     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${ESTADO_COLORS[item.estado]}`}>
@@ -392,6 +471,12 @@ function ItemsTab({
                     <span className={`mt-1 inline-block rounded-full px-2 py-0.5 text-xs font-medium ${ESTADO_COLORS[item.estado]}`}>
                       {ESTADO_LABELS[item.estado] ?? item.estado}
                     </span>
+                    {item.stockBajo && (
+                      <span className="mt-1 ml-1.5 inline-flex items-center gap-1 rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-red-700 dark:bg-red-500/20 dark:text-red-400">
+                        <AlertTriangle className="h-3 w-3" />
+                        Bajo
+                      </span>
+                    )}
                   </div>
                 </button>
                 {puedeEditar && (
@@ -489,6 +574,7 @@ function PrestamosTab() {
   const [usuarioId, setUsuarioId] = useState("");
   const [cantidad, setCantidad] = useState("1");
   const [observaciones, setObservaciones] = useState("");
+  const [fechaEsperadaDevolucion, setFechaEsperadaDevolucion] = useState("");
   const { pedirConfirmacion, modal } = useConfirm();
   const { error, run } = useErrorHandler();
   const { error: errorModal, run: runModal, limpiar: limpiarModal } = useErrorHandler();
@@ -515,6 +601,7 @@ function PrestamosTab() {
     setUsuarioId("");
     setCantidad("1");
     setObservaciones("");
+    setFechaEsperadaDevolucion("");
     limpiarModal();
     setAsignando(true);
   }
@@ -527,6 +614,7 @@ function PrestamosTab() {
     setUsuarioId(String(p.usuarioId));
     setCantidad(String(p.cantidad));
     setObservaciones(p.observaciones ?? "");
+    setFechaEsperadaDevolucion(p.fechaEsperadaDevolucion ? p.fechaEsperadaDevolucion.slice(0, 10) : "");
     limpiarModal();
     setAsignando(true);
   }
@@ -539,6 +627,7 @@ function PrestamosTab() {
           usuarioId: Number(usuarioId),
           cantidad: Number(cantidad) || 1,
           observaciones: observaciones.trim() || undefined,
+          fechaEsperadaDevolucion: fechaEsperadaDevolucion || null,
         });
       } else {
         await api.inventario.prestamos.crear({
@@ -546,6 +635,7 @@ function PrestamosTab() {
           usuarioId: Number(usuarioId),
           cantidad: Number(cantidad) || 1,
           observaciones: observaciones.trim() || undefined,
+          fechaEsperadaDevolucion: fechaEsperadaDevolucion || undefined,
         });
       }
       cerrarAsignar();
@@ -637,14 +727,24 @@ function PrestamosTab() {
         <EmptyState mensaje={`No hay préstamos ${soloActivos ? "activos" : "registrados"}.`} />
       ) : (
         <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-brand-200 bg-white shadow-sm animate-content-in dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
-          {prestamos.map((p) => (
-            <div key={p.id} className="flex items-center gap-3 px-3 py-2.5 sm:px-4">
+          {prestamos.map((p) => {
+            const vencido = !p.fechaDevolucion && !!p.fechaEsperadaDevolucion && new Date(p.fechaEsperadaDevolucion) < new Date();
+            return (
+            <div key={p.id} className={`flex items-center gap-3 px-3 py-2.5 sm:px-4 ${vencido ? "bg-red-50 dark:bg-red-500/10" : ""}`}>
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">
                   {p.item?.nombre} {p.cantidad > 1 ? `(x${p.cantidad})` : ""} · {p.usuario?.nombre}
+                  {vencido && (
+                    <span className="ml-2 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-700 dark:bg-red-500/20 dark:text-red-400">
+                      Vencido
+                    </span>
+                  )}
                 </div>
                 <div className="text-xs text-slate-700 dark:text-slate-400">
                   Entregado {new Date(p.fechaEntrega).toLocaleDateString()}
+                  {p.fechaEsperadaDevolucion && !p.fechaDevolucion
+                    ? ` · Debía devolverse ${fmtFecha(p.fechaEsperadaDevolucion, { year: "numeric", month: "numeric", day: "numeric" })}`
+                    : ""}
                   {p.fechaDevolucion
                     ? ` · Devuelto ${new Date(p.fechaDevolucion).toLocaleDateString()}`
                     : " · Sin devolver"}
@@ -674,7 +774,8 @@ function PrestamosTab() {
                 </div>
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -731,6 +832,15 @@ function PrestamosTab() {
                 />
               </label>
               <label className="block text-sm">
+                <span className="mb-1 block text-slate-600 dark:text-slate-300">Fecha esperada de devolución (opcional)</span>
+                <input
+                  type="date"
+                  value={fechaEsperadaDevolucion}
+                  onChange={(e) => setFechaEsperadaDevolucion(e.target.value)}
+                  className={`${inputClass} w-full`}
+                />
+              </label>
+              <label className="block text-sm">
                 <span className="mb-1 block text-slate-600 dark:text-slate-300">Observaciones</span>
                 <input value={observaciones} onChange={(e) => setObservaciones(e.target.value)} className={`${inputClass} w-full`} />
               </label>
@@ -758,11 +868,11 @@ function PrestamosTab() {
   );
 }
 
-function MovimientosTab() {
+function MovimientosTab({ ubicaciones }: { ubicaciones: UbicacionInventario[] }) {
   const { usuario } = useAuth();
   const puedeEditar = usuario?.permisos?.includes("inventario_avanzado") ?? false;
   const [movimientos, setMovimientos] = useState<MovimientoInventario[]>([]);
-  const [tipoFiltro, setTipoFiltro] = useState<"" | "entrada" | "salida">("");
+  const [tipoFiltro, setTipoFiltro] = useState<"" | "entrada" | "salida" | "transferencia">("");
   const [cargando, setCargando] = useState(true);
   const [items, setItems] = useState<ItemInventario[]>([]);
   const [registrando, setRegistrando] = useState<"entrada" | "salida" | null>(null);
@@ -771,9 +881,15 @@ function MovimientosTab() {
   const [cantidad, setCantidad] = useState("1");
   const [motivo, setMotivo] = useState("");
   const [observaciones, setObservaciones] = useState("");
+  const [transfiriendo, setTransfiriendo] = useState(false);
+  const { saliendo: saliendoTransferir, cerrar: cerrarTransferir } = useCierreAnimado(() => setTransfiriendo(false));
+  const [transferItemId, setTransferItemId] = useState("");
+  const [transferUbicacionId, setTransferUbicacionId] = useState("");
+  const [transferObservaciones, setTransferObservaciones] = useState("");
   const { pedirConfirmacion, modal } = useConfirm();
   const { error, run } = useErrorHandler();
   const { error: errorModal, run: runModal, limpiar: limpiarModal } = useErrorHandler();
+  const { error: errorTransferir, run: runTransferir, limpiar: limpiarTransferir } = useErrorHandler();
 
   async function cargar() {
     setCargando(true);
@@ -815,8 +931,34 @@ function MovimientosTab() {
   }
 
   function eliminar(m: MovimientoInventario) {
-    pedirConfirmacion(`¿Eliminar este movimiento de "${m.item?.nombre}"? Se revertirá el ajuste de cantidad.`, async () => {
+    const mensaje =
+      m.tipo === "transferencia"
+        ? `¿Eliminar este registro de transferencia de "${m.item?.nombre}"? No cambia la ubicación actual del ítem, solo borra el rastro.`
+        : `¿Eliminar este movimiento de "${m.item?.nombre}"? Se revertirá el ajuste de cantidad.`;
+    pedirConfirmacion(mensaje, async () => {
       await run(() => api.inventario.movimientos.remove(m.id));
+      cargar();
+    });
+  }
+
+  function abrirTransferir() {
+    api.inventario.list().then(setItems);
+    setTransferItemId("");
+    setTransferUbicacionId("");
+    setTransferObservaciones("");
+    limpiarTransferir();
+    setTransfiriendo(true);
+  }
+
+  async function transferir() {
+    if (!transferItemId) return;
+    await runTransferir(async () => {
+      await api.inventario.movimientos.transferir({
+        itemId: Number(transferItemId),
+        ubicacionId: transferUbicacionId ? Number(transferUbicacionId) : null,
+        observaciones: transferObservaciones.trim() || undefined,
+      });
+      cerrarTransferir();
       cargar();
     });
   }
@@ -842,7 +984,8 @@ function MovimientosTab() {
               ["", "Todos"],
               ["entrada", "Entradas"],
               ["salida", "Salidas"],
-            ] as ["" | "entrada" | "salida", string][]
+              ["transferencia", "Transferencias"],
+            ] as ["" | "entrada" | "salida" | "transferencia", string][]
           ).map(([valor, etiqueta]) => (
             <button
               key={etiqueta}
@@ -887,6 +1030,13 @@ function MovimientosTab() {
               <ArrowUpCircle className="h-4 w-4" />
               Registrar salida
             </button>
+            <button
+              onClick={abrirTransferir}
+              className="flex items-center gap-1.5 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-500"
+            >
+              <ArrowLeftRight className="h-4 w-4" />
+              Transferir
+            </button>
           </>
         )}
       </div>
@@ -901,13 +1051,15 @@ function MovimientosTab() {
             <div key={m.id} className="flex items-center gap-3 px-3 py-2.5 sm:px-4">
               {m.tipo === "entrada" ? (
                 <ArrowDownCircle className="h-5 w-5 shrink-0 text-emerald-500" />
-              ) : (
+              ) : m.tipo === "salida" ? (
                 <ArrowUpCircle className="h-5 w-5 shrink-0 text-amber-500" />
+              ) : (
+                <ArrowLeftRight className="h-5 w-5 shrink-0 text-brand-500" />
               )}
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">
-                  {m.item?.nombre} · {m.tipo === "entrada" ? "+" : "-"}
-                  {m.cantidad}
+                  {m.item?.nombre}
+                  {m.tipo !== "transferencia" && ` · ${m.tipo === "entrada" ? "+" : "-"}${m.cantidad}`}
                 </div>
                 <div className="text-xs text-slate-700 dark:text-slate-400">
                   {new Date(m.createdAt).toLocaleString()}
@@ -991,6 +1143,70 @@ function MovimientosTab() {
           </div>
         </div>
       )}
+
+      {transfiriendo && (
+        <div className={`fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-4 ${saliendoTransferir ? "animate-fade-out" : "animate-fade-in"}`}>
+          <div className={`w-full max-w-sm rounded-xl bg-white p-5 shadow-xl dark:bg-slate-900 ${saliendoTransferir ? "animate-scale-out" : "animate-scale-in"}`}>
+            <h2 className="mb-4 text-lg font-bold">Transferir ítem de ubicación</h2>
+            {errorTransferir && (
+              <p className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-500/10 dark:text-red-400">
+                {errorTransferir}
+              </p>
+            )}
+            <div className="space-y-3">
+              <label className="block text-sm">
+                <span className="mb-1 block text-slate-600 dark:text-slate-300">Ítem</span>
+                <select value={transferItemId} onChange={(e) => setTransferItemId(e.target.value)} className={`${inputClass} w-full`}>
+                  <option value="">Selecciona un ítem</option>
+                  {items.map((i) => (
+                    <option key={i.id} value={i.id}>
+                      {i.nombre} (hoy: {i.ubicacionCat?.nombre ?? "sin ubicación"})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1 block text-slate-600 dark:text-slate-300">Nueva ubicación</span>
+                <select
+                  value={transferUbicacionId}
+                  onChange={(e) => setTransferUbicacionId(e.target.value)}
+                  className={`${inputClass} w-full`}
+                >
+                  <option value="">Sin ubicación</option>
+                  {ubicaciones.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.nombre}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1 block text-slate-600 dark:text-slate-300">Observaciones</span>
+                <input
+                  value={transferObservaciones}
+                  onChange={(e) => setTransferObservaciones(e.target.value)}
+                  className={`${inputClass} w-full`}
+                />
+              </label>
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                onClick={cerrarTransferir}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={transferir}
+                disabled={!transferItemId}
+                className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-500 disabled:opacity-60"
+              >
+                Transferir
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {modal}
     </div>
   );
@@ -1006,6 +1222,7 @@ function CatalogoSimpleTab({
   eliminar: eliminarCatalogo,
   puedeEditar,
   recargarCatalogos,
+  onVerItems,
 }: {
   titulo: string;
   placeholder: string;
@@ -1015,6 +1232,7 @@ function CatalogoSimpleTab({
   eliminar: (id: number) => Promise<unknown>;
   puedeEditar: boolean;
   recargarCatalogos: () => void;
+  onVerItems: (id: number, nombre: string) => void;
 }) {
   const [filas, setFilas] = useState<{ id: number; nombre: string; items: number }[]>([]);
   const [cargando, setCargando] = useState(true);
@@ -1112,12 +1330,16 @@ function CatalogoSimpleTab({
                   className={`${inputClass} flex-1`}
                 />
               ) : (
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">{f.nombre}</div>
+                <button
+                  onClick={() => onVerItems(f.id, f.nombre)}
+                  className="min-w-0 flex-1 text-left"
+                  title={`Ver ítems de "${f.nombre}"`}
+                >
+                  <div className="truncate text-sm font-medium text-slate-800 hover:underline dark:text-slate-100">{f.nombre}</div>
                   <div className="text-xs text-slate-700 dark:text-slate-400">
                     {f.items} ítem{f.items === 1 ? "" : "s"}
                   </div>
-                </div>
+                </button>
               )}
               {puedeEditar && (
                 <>
@@ -1153,7 +1375,13 @@ function CatalogoSimpleTab({
   );
 }
 
-function ProveedoresTab({ recargarCatalogos }: { recargarCatalogos: () => void }) {
+function ProveedoresTab({
+  recargarCatalogos,
+  onVerItems,
+}: {
+  recargarCatalogos: () => void;
+  onVerItems: (id: number, nombre: string) => void;
+}) {
   const { usuario } = useAuth();
   const puedeEditar = usuario?.permisos?.includes("inventario_avanzado") ?? false;
   const [filas, setFilas] = useState<ProveedorInventario[]>([]);
@@ -1236,12 +1464,14 @@ function ProveedoresTab({ recargarCatalogos }: { recargarCatalogos: () => void }
         <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-brand-200 bg-white shadow-sm animate-content-in dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
           {filas.map((p) => (
             <div key={p.id} className="flex items-center gap-3 px-3 py-2.5 sm:px-4">
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-medium text-slate-800 dark:text-slate-100">{p.nombre}</div>
+              <button onClick={() => onVerItems(p.id, p.nombre)} className="min-w-0 flex-1 text-left" title={`Ver ítems de "${p.nombre}"`}>
+                <div className="truncate text-sm font-medium text-slate-800 hover:underline dark:text-slate-100">{p.nombre}</div>
                 <div className="text-xs text-slate-700 dark:text-slate-400">
-                  {[p.contacto, p.telefono].filter(Boolean).join(" · ") || `${p.items} ítem${p.items === 1 ? "" : "s"}`}
+                  {[p.contacto, p.telefono].filter(Boolean).join(" · ")}
+                  {(p.contacto || p.telefono) && " · "}
+                  {p.items} ítem{p.items === 1 ? "" : "s"}
                 </div>
-              </div>
+              </button>
               {puedeEditar && (
                 <>
                   <button
@@ -1340,6 +1570,19 @@ export default function InventarioPage() {
   const [categorias, setCategorias] = useState<CategoriaInventario[]>([]);
   const [ubicaciones, setUbicaciones] = useState<UbicacionInventario[]>([]);
   const [proveedores, setProveedores] = useState<ProveedorInventario[]>([]);
+  const [filtroInicial, setFiltroInicial] = useState<{
+    tipo: "categoria" | "ubicacion" | "proveedor";
+    id: number;
+    nombre: string;
+  } | null>(null);
+
+  // Clic en una categoría/ubicación/proveedor (desde su propia pestaña) lleva a "Ítems" ya
+  // filtrado por ese catálogo — la key en <ItemsTab> fuerza que se remonte con el filtro nuevo
+  // en vez de arrastrar el que tenía seleccionado antes.
+  function verItems(tipo: "categoria" | "ubicacion" | "proveedor", id: number, nombre: string) {
+    setFiltroInicial({ tipo, id, nombre });
+    setTab("items");
+  }
 
   function recargarCatalogos() {
     api.inventario.categorias.list().then(setCategorias);
@@ -1394,14 +1637,16 @@ export default function InventarioPage() {
       {tab === "dashboard" && <DashboardTab />}
       {tab === "items" && (
         <ItemsTab
+          key={filtroInicial ? `${filtroInicial.tipo}-${filtroInicial.id}` : "items"}
           categorias={categorias}
           ubicaciones={ubicaciones}
           proveedores={proveedores}
           recargarCatalogos={recargarCatalogos}
+          filtroInicial={filtroInicial}
         />
       )}
       {tab === "prestamos" && <PrestamosTab />}
-      {tab === "movimientos" && <MovimientosTab />}
+      {tab === "movimientos" && <MovimientosTab ubicaciones={ubicaciones} />}
       {tab === "categorias" && (
         <CatalogoSimpleTab
           titulo="Categorías"
@@ -1412,6 +1657,7 @@ export default function InventarioPage() {
           eliminar={api.inventario.categorias.remove}
           puedeEditar={puedeEditar}
           recargarCatalogos={recargarCatalogos}
+          onVerItems={(id, nombre) => verItems("categoria", id, nombre)}
         />
       )}
       {tab === "ubicaciones" && (
@@ -1424,9 +1670,12 @@ export default function InventarioPage() {
           eliminar={api.inventario.ubicaciones.remove}
           puedeEditar={puedeEditar}
           recargarCatalogos={recargarCatalogos}
+          onVerItems={(id, nombre) => verItems("ubicacion", id, nombre)}
         />
       )}
-      {tab === "proveedores" && <ProveedoresTab recargarCatalogos={recargarCatalogos} />}
+      {tab === "proveedores" && (
+        <ProveedoresTab recargarCatalogos={recargarCatalogos} onVerItems={(id, nombre) => verItems("proveedor", id, nombre)} />
+      )}
     </div>
   );
 }

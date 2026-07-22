@@ -110,6 +110,10 @@ function ListadoTab() {
   useEffect(() => {
     const e = searchParams.get("estado");
     if (e) setEstadoFiltro(e);
+    const b = searchParams.get("barrio");
+    if (b) setBarrioFiltro(b);
+    const es = searchParams.get("estrato");
+    if (es) setEstratoFiltro(es);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
   const [barrios, setBarrios] = useState<{ id: number; nombre: string }[]>([]);

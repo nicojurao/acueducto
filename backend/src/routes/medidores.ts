@@ -930,6 +930,29 @@ medidoresRouter.put("/:id", soloAvanzado, async (req, res) => {
 
   await registrarCambios("medidor", medidor.id, camposMedidor(antes), camposMedidor(medidor), req.usuario?.id);
 
+  // La condición física del medidor se refleja en el estado de facturación de su suscriptor
+  // ("inactivo" = "Medidor inactivo / dañado"), para que ambos campos no se desincronicen.
+  if (condicion !== undefined && condicion !== antes.condicion && medidor.suscriptorId) {
+    const suscriptorAntes = await prisma.suscriptor.findUnique({ where: { id: medidor.suscriptorId } });
+    if (suscriptorAntes) {
+      const nuevoEstado =
+        condicion === "danado" ? "inactivo" : suscriptorAntes.estadoFacturacion === "inactivo" ? "facturando" : undefined;
+      if (nuevoEstado && nuevoEstado !== suscriptorAntes.estadoFacturacion) {
+        const suscriptorDespues = await prisma.suscriptor.update({
+          where: { id: suscriptorAntes.id },
+          data: { estadoFacturacion: nuevoEstado },
+        });
+        await registrarCambios(
+          "suscriptor",
+          suscriptorAntes.id,
+          { estadoFacturacion: suscriptorAntes.estadoFacturacion },
+          { estadoFacturacion: suscriptorDespues.estadoFacturacion },
+          req.usuario?.id
+        );
+      }
+    }
+  }
+
   res.json(medidor);
 });
 

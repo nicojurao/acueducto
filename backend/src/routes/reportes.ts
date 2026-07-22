@@ -51,7 +51,7 @@ function periodosEnRango(desde: string, hasta: string): string[] {
 // fecha de instalación: no tiene sentido marcarle falta de lectura a un medidor que en ese
 // periodo todavía no existía).
 reportesRouter.get("/lecturas-excel", permisoReportesODashboard, async (req, res) => {
-  const { periodo, desde, hasta, estadoLectura, alcance } = req.query;
+  const { periodo, desde, hasta, estadoLectura, alcance, formato } = req.query;
   const rangoDesde = desde ? String(desde) : periodo ? String(periodo) : null;
   const rangoHasta = hasta ? String(hasta) : periodo ? String(periodo) : null;
   if (!rangoDesde || !rangoHasta) {
@@ -61,8 +61,12 @@ reportesRouter.get("/lecturas-excel", permisoReportesODashboard, async (req, res
 
   // estadoLectura: "todas" (default) | "tomadas" | "no_tomadas"
   // alcance: "con_medidor" (default, cualquier suscriptor con medidor asignado) | "facturando"
+  // formato: "lista" (default, una fila por suscriptor+periodo) | "horizontal" (una fila por
+  // suscriptor, con un par de columnas LECTURA/CONSUMO por cada periodo del rango — mismo layout
+  // "ancho" del Excel institucional del que se cargó el histórico).
   const filtroEstadoLectura = estadoLectura ? String(estadoLectura) : "todas";
   const filtroAlcance = alcance ? String(alcance) : "con_medidor";
+  const filtroFormato = formato === "horizontal" ? "horizontal" : "lista";
 
   const medidores = await prisma.medidor.findMany({
     where: {
@@ -73,10 +77,21 @@ reportesRouter.get("/lecturas-excel", permisoReportesODashboard, async (req, res
     include: {
       suscriptor: { include: { barrioCat: true } },
       lecturas: { where: { periodo: { in: periodos.map(primerDiaMesPeriodo) } } },
+      cotitulares: { include: { suscriptor: { include: { barrioCat: true } } } },
     },
   });
 
-  const filas: (Record<string, unknown> & { _resaltar?: boolean })[] = [];
+  // Un medidor con cotitulares (acometida multiusuario) reparte lectura y consumo entre todos
+  // (titular + cotitulares) en partes enteras iguales; si no da exacto, el titular se queda con
+  // el resto (puede terminar con un poco más o un poco menos que los demás, nunca ellos).
+  function integrantesDelMedidor(m: (typeof medidores)[number]) {
+    return [
+      { suscriptor: m.suscriptor!, esCotitular: false },
+      ...m.cotitulares.map((c) => ({ suscriptor: c.suscriptor, esCotitular: true })),
+    ];
+  }
+
+  const filas: (Record<string, unknown> & { _resaltar?: boolean; _cotitular?: boolean })[] = [];
   for (const periodoActual of periodos) {
     const fechaPeriodo = primerDiaMesPeriodo(periodoActual);
     const inicioMesPeriodo = new Date(Date.UTC(fechaPeriodo.getUTCFullYear(), fechaPeriodo.getUTCMonth(), 1));
@@ -93,26 +108,45 @@ reportesRouter.get("/lecturas-excel", permisoReportesODashboard, async (req, res
         const tieneLectura = m.lecturas.some((l) => l.periodo.getTime() === fechaPeriodo.getTime());
         return filtroEstadoLectura === "tomadas" ? tieneLectura : !tieneLectura;
       })
-      .map((m) => {
-        const s = m.suscriptor;
+      .flatMap((m) => {
         const lectura = m.lecturas.find((l) => l.periodo.getTime() === fechaPeriodo.getTime());
-        return {
+        const integrantes = integrantesDelMedidor(m);
+        const nIntegrantes = integrantes.length;
+        // Reparte un total entero: cada cotitular recibe la parte entera (floor), el titular se
+        // queda con lo que sobra — puede terminar con un poco más o menos que los demás, nunca
+        // ellos. Se aplica igual a lectura anterior, lectura actual y consumo.
+        function repartir(total: number, esCotitular: boolean): number {
+          if (nIntegrantes <= 1) return total;
+          const share = Math.floor(total / nIntegrantes);
+          return esCotitular ? share : total - share * (nIntegrantes - 1);
+        }
+        const consumoTotal = lectura ? Number(lectura.consumo) : 0;
+        const lecturaActualTotal = lectura ? Number(lectura.valorLectura) : 0;
+        const lecturaAnteriorTotal = lectura ? lecturaActualTotal - consumoTotal : 0;
+
+        return integrantes.map(({ suscriptor: s, esCotitular }) => ({
           nuid: s?.codigo ?? "",
           suscriptor: s?.nombre ?? "",
           barrio: s?.barrioCat?.nombre ?? "",
           ruta: s?.ruta ?? "",
           periodo: periodoActual,
-          lecturaAnterior: lectura ? Number(lectura.valorLectura) - Number(lectura.consumo) : "",
-          lecturaActual: lectura ? Number(lectura.valorLectura) : "",
-          consumo: lectura ? Number(lectura.consumo) : "",
+          lecturaAnterior: lectura ? repartir(lecturaAnteriorTotal, esCotitular) : "",
+          lecturaActual: lectura ? repartir(lecturaActualTotal, esCotitular) : "",
+          consumo: lectura ? repartir(consumoTotal, esCotitular) : "",
           observacion: lectura ? "" : "SIN LECTURA",
           _resaltar: !lectura,
-          _ruta: s?.ruta ?? "",
-          _suscriptor: s?.nombre ?? "",
-        };
+          _cotitular: esCotitular,
+          _ruta: m.suscriptor?.ruta ?? "",
+          _suscriptor: m.suscriptor?.nombre ?? "",
+          _orden: esCotitular ? 1 : 0,
+        }));
       });
 
-    delPeriodo.sort((a, b) => a._ruta.localeCompare(b._ruta) || a._suscriptor.localeCompare(b._suscriptor));
+    // Se ordena por ruta/suscriptor del TITULAR (no del cotitular), con _orden como segundo
+    // criterio, para que cada grupo de cotitulares quede pegado justo debajo de su titular.
+    delPeriodo.sort(
+      (a, b) => a._ruta.localeCompare(b._ruta) || a._suscriptor.localeCompare(b._suscriptor) || a._orden - b._orden
+    );
     filas.push(...delPeriodo);
   }
 
@@ -126,26 +160,115 @@ reportesRouter.get("/lecturas-excel", permisoReportesODashboard, async (req, res
       : `Del ${periodos[0]} al ${periodos[periodos.length - 1]} · ${filas.length} filas, ${totalSinLectura} sin lectura`) +
     ` · Alcance: ${etiquetaAlcance} · Lecturas: ${etiquetaEstado}`;
 
-  const buffer = await crearInformeExcel(
-    "Lecturas",
-    "Informe de lecturas",
-    subtitulo,
-    [
-      { titulo: "NUID", clave: "nuid", ancho: 14 },
-      { titulo: "SUSCRIPTOR", clave: "suscriptor", ancho: 28 },
-      { titulo: "BARRIO", clave: "barrio", ancho: 18 },
-      { titulo: "RUTA", clave: "ruta", ancho: 14 },
-      { titulo: "PERIODO", clave: "periodo", ancho: 12 },
-      { titulo: "LECTURA ANTERIOR", clave: "lecturaAnterior", ancho: 16 },
-      { titulo: "LECTURA ACTUAL", clave: "lecturaActual", ancho: 16 },
-      { titulo: "CONSUMO", clave: "consumo", ancho: 12 },
-      { titulo: "OBSERVACIÓN", clave: "observacion", ancho: 16 },
-    ],
-    filas
-  );
   const nombreArchivo =
     periodos.length === 1 ? `informe_lecturas_${periodos[0]}.xlsx` : `informe_lecturas_${periodos[0]}_a_${periodos[periodos.length - 1]}.xlsx`;
+
+  if (filtroFormato === "lista") {
+    const buffer = await crearInformeExcel(
+      "Lecturas",
+      "Informe de lecturas",
+      subtitulo,
+      [
+        { titulo: "NUID", clave: "nuid", ancho: 14 },
+        { titulo: "SUSCRIPTOR", clave: "suscriptor", ancho: 28 },
+        { titulo: "BARRIO", clave: "barrio", ancho: 18 },
+        { titulo: "RUTA", clave: "ruta", ancho: 14 },
+        { titulo: "PERIODO", clave: "periodo", ancho: 12 },
+        { titulo: "LECTURA ANTERIOR", clave: "lecturaAnterior", ancho: 16 },
+        { titulo: "LECTURA ACTUAL", clave: "lecturaActual", ancho: 16 },
+        { titulo: "CONSUMO", clave: "consumo", ancho: 12 },
+        { titulo: "OBSERVACIÓN", clave: "observacion", ancho: 16 },
+      ],
+      filas
+    );
+    return enviarExcel(res, buffer, nombreArchivo);
+  }
+
+  // Horizontal: una fila por suscriptor, con un par LECTURA/CONSUMO por cada periodo del rango.
+  // Mismo criterio de agrupación que en "lista": cada cotitular queda pegado debajo de su titular.
+  const filasPorSuscriptor = new Map<
+    string,
+    Record<string, unknown> & { _resaltar?: boolean; _cotitular?: boolean; _ruta: string; _suscriptor: string; _orden: number }
+  >();
+  for (const fila of filas) {
+    const clave = String(fila.nuid);
+    let base = filasPorSuscriptor.get(clave);
+    if (!base) {
+      base = {
+        nuid: fila.nuid,
+        suscriptor: fila.suscriptor,
+        barrio: fila.barrio,
+        ruta: fila.ruta,
+        _cotitular: fila._cotitular,
+        _ruta: fila._ruta as string,
+        _suscriptor: fila._suscriptor as string,
+        _orden: fila._orden as number,
+      };
+      filasPorSuscriptor.set(clave, base);
+    }
+    base[`lectura_${fila.periodo}`] = fila.lecturaActual;
+    base[`consumo_${fila.periodo}`] = fila.consumo;
+    if (fila._resaltar) base._resaltar = true;
+  }
+  const filasHorizontal = Array.from(filasPorSuscriptor.values()).sort(
+    (a, b) => a._ruta.localeCompare(b._ruta) || a._suscriptor.localeCompare(b._suscriptor) || a._orden - b._orden
+  );
+
+  // Azul claro institucional en las columnas de LECTURA, para distinguirlas de un vistazo de las
+  // de CONSUMO — mismo criterio de color que usa el Excel del que se cargó el histórico. El ancho
+  // de cada columna se calcula solo del título (sin "ancho" acá), así se ajusta solo.
+  const columnasHorizontal = [
+    { titulo: "NUID", clave: "nuid" },
+    { titulo: "SUSCRIPTOR", clave: "suscriptor" },
+    { titulo: "BARRIO", clave: "barrio" },
+    { titulo: "RUTA", clave: "ruta" },
+    ...periodos.flatMap((p) => [
+      { titulo: `LECTURA ${p}`, clave: `lectura_${p}`, colorFondo: "FFDCEEFB" },
+      { titulo: `CONSUMO ${p}`, clave: `consumo_${p}` },
+    ]),
+  ];
+
+  const buffer = await crearInformeExcel("Lecturas", "Informe de lecturas", subtitulo, columnasHorizontal, filasHorizontal);
   enviarExcel(res, buffer, nombreArchivo);
+});
+
+// Consumo geolocalizado de un periodo, para el mapa de calor de la pantalla "Mapa de predios":
+// un punto (lat/lng) por suscriptor con coordenadas, con su consumo de ese periodo (0 si no
+// tiene lectura ese mes). Si el suscriptor es cotitular de un medidor compartido, se reparte el
+// consumo total en partes iguales (mismo criterio que el resto de los reportes: el titular
+// absorbe el resto de la división).
+reportesRouter.get("/mapa-consumo", requirePermiso("reportes", "dashboard", "mapa"), async (req, res) => {
+  const { periodo } = req.query;
+  if (!periodo) return res.status(400).json({ error: "periodo (YYYY-MM) es requerido" });
+  const fechaPeriodo = primerDiaMesPeriodo(String(periodo));
+
+  const medidores = await prisma.medidor.findMany({
+    where: { activo: true, suscriptorId: { not: null } },
+    include: {
+      suscriptor: true,
+      cotitulares: { include: { suscriptor: true } },
+      lecturas: { where: { periodo: fechaPeriodo } },
+    },
+  });
+
+  const puntos: { id: number; latitud: number; longitud: number; consumo: number }[] = [];
+  for (const m of medidores) {
+    const lectura = m.lecturas[0];
+    const consumoTotal = lectura ? Number(lectura.consumo) : 0;
+    const integrantes = [
+      { suscriptor: m.suscriptor!, esCotitular: false },
+      ...m.cotitulares.map((c) => ({ suscriptor: c.suscriptor, esCotitular: true })),
+    ];
+    const nIntegrantes = integrantes.length;
+    for (const { suscriptor: s, esCotitular } of integrantes) {
+      if (s.latitud == null || s.longitud == null) continue;
+      const share = nIntegrantes > 1 ? Math.floor(consumoTotal / nIntegrantes) : consumoTotal;
+      const consumo = esCotitular ? share : consumoTotal - share * (nIntegrantes - 1);
+      puntos.push({ id: s.id, latitud: s.latitud, longitud: s.longitud, consumo });
+    }
+  }
+
+  res.json(puntos);
 });
 
 // Resumen mensual: # usuarios con lectura y consumo total, por mes
@@ -202,23 +325,39 @@ async function historicoSuscriptor(suscriptorId: number) {
     where: { suscriptorId },
     include: {
       lecturas: { orderBy: { periodo: "asc" }, include: { capturadoPor: { select: { nombre: true } } } },
+      cotitulares: true,
     },
   });
 
-  const historico = medidoresPropios.flatMap((m) =>
-    m.lecturas.map((l) => ({
-      periodo: l.periodo.toISOString().slice(0, 7),
-      valorLectura: Number(l.valorLectura),
-      consumo: Number(l.consumo),
-      medidorId: m.id,
-      lecturaId: l.id,
-      fotoUrl: l.fotoUrl,
-      latitud: l.latitud,
-      longitud: l.longitud,
-      fechaRegistro: l.fechaRegistro.toISOString(),
-      capturadoPor: l.capturadoPor?.nombre ?? null,
-    }))
-  );
+  // Si el medidor propio tiene cotitulares, al titular le toca el total menos lo que ya se le dio
+  // en partes enteras a cada cotitular (mismo criterio que el informe de lecturas: el titular
+  // absorbe el resto de la división, no cada cotitular).
+  const historico = medidoresPropios.flatMap((m) => {
+    const nIntegrantes = 1 + m.cotitulares.length;
+    return m.lecturas.map((l) => {
+      const valorLecturaTotal = Number(l.valorLectura);
+      const consumoTotal = Number(l.consumo);
+      const shareValorLectura = nIntegrantes > 1 ? Math.floor(valorLecturaTotal / nIntegrantes) : valorLecturaTotal;
+      const shareConsumo = nIntegrantes > 1 ? Math.floor(consumoTotal / nIntegrantes) : consumoTotal;
+      return {
+        periodo: l.periodo.toISOString().slice(0, 7),
+        valorLectura: valorLecturaTotal - shareValorLectura * (nIntegrantes - 1),
+        consumo: consumoTotal - shareConsumo * (nIntegrantes - 1),
+        medidorId: m.id,
+        lecturaId: l.id,
+        fotoUrl: l.fotoUrl,
+        latitud: l.latitud,
+        longitud: l.longitud,
+        fechaRegistro: l.fechaRegistro.toISOString(),
+        capturadoPor: l.capturadoPor?.nombre ?? null,
+        observaciones: l.observaciones,
+        // Valor real del medidor, sin repartir entre cotitulares — para quien necesite el dato
+        // físico tal cual se capturó (auditoría, detectar fugas), no solo la parte facturable.
+        consumoTotalMedidor: nIntegrantes > 1 ? consumoTotal : null,
+        nIntegrantes: nIntegrantes > 1 ? nIntegrantes : null,
+      };
+    });
+  });
 
   const medidorIds = medidoresPropios.map((m) => m.id);
   // Medidor a usar para los meses sin lectura (huecos): el activo actual, si hay uno.
@@ -236,12 +375,14 @@ async function historicoSuscriptor(suscriptorId: number) {
   if (cotitularDe) {
     medidorIds.push(cotitularDe.medidor.id);
     medidorActivoId = medidorActivoId ?? cotitularDe.medidor.id;
-    const factor = 1 / (1 + cotitularDe.medidor.cotitulares.length);
+    // Entero, no decimal: mismo criterio del informe de lecturas — cada cotitular recibe la
+    // parte entera (floor); lo que sobra se lo queda el titular, no se ve reflejado acá.
+    const nIntegrantes = 1 + cotitularDe.medidor.cotitulares.length;
     for (const l of cotitularDe.medidor.lecturas) {
       historico.push({
         periodo: l.periodo.toISOString().slice(0, 7),
-        valorLectura: Math.round(Number(l.valorLectura) * factor * 100) / 100,
-        consumo: Math.round(Number(l.consumo) * factor * 100) / 100,
+        valorLectura: Math.floor(Number(l.valorLectura) / nIntegrantes),
+        consumo: Math.floor(Number(l.consumo) / nIntegrantes),
         medidorId: cotitularDe.medidor.id,
         lecturaId: l.id,
         fotoUrl: l.fotoUrl,
@@ -249,6 +390,9 @@ async function historicoSuscriptor(suscriptorId: number) {
         longitud: l.longitud,
         fechaRegistro: l.fechaRegistro.toISOString(),
         capturadoPor: l.capturadoPor?.nombre ?? null,
+        observaciones: l.observaciones,
+        consumoTotalMedidor: Number(l.consumo),
+        nIntegrantes,
       });
     }
   }
@@ -482,14 +626,26 @@ reportesRouter.get("/por-barrio", permisoReportesODashboard, async (req, res) =>
   const { periodo, estratos } = req.query;
   if (!periodo) return res.status(400).json({ error: "periodo es requerido (YYYY-MM)" });
   const listaEstratos = estratos ? String(estratos).split(",").filter(Boolean) : undefined;
-  const grupos = await consumoAgrupadoPorPeriodo(periodo, (s) => s.barrioCat?.nombre ?? "Sin barrio", listaEstratos);
-  res.json(Array.from(grupos.entries()).map(([barrio, v]) => ({ barrio, ...v })));
+  const [grupos, barriosCatalogo] = await Promise.all([
+    consumoAgrupadoPorPeriodo(periodo, (s) => s.barrioCat?.nombre ?? "Sin barrio", listaEstratos),
+    prisma.barrio.findMany(),
+  ]);
+  const idPorNombre = new Map(barriosCatalogo.map((b) => [b.nombre, b.id]));
+  res.json(
+    Array.from(grupos.entries()).map(([barrio, v]) => ({ barrio, barrioId: idPorNombre.get(barrio) ?? null, ...v }))
+  );
 });
 
 // Consumo total por estrato (1, 2, 3, 4, Comercial, Oficial) en un periodo dado
 reportesRouter.get("/por-estrato", permisoReportesODashboard, async (req, res) => {
   const { periodo } = req.query;
   if (!periodo) return res.status(400).json({ error: "periodo es requerido (YYYY-MM)" });
-  const grupos = await consumoAgrupadoPorPeriodo(periodo, (s) => s.estratoCat?.codigo ?? "Sin estrato");
-  res.json(Array.from(grupos.entries()).map(([estrato, v]) => ({ estrato, ...v })));
+  const [grupos, estratosCatalogo] = await Promise.all([
+    consumoAgrupadoPorPeriodo(periodo, (s) => s.estratoCat?.codigo ?? "Sin estrato"),
+    prisma.estrato.findMany(),
+  ]);
+  const idPorCodigo = new Map(estratosCatalogo.map((e) => [e.codigo, e.id]));
+  res.json(
+    Array.from(grupos.entries()).map(([estrato, v]) => ({ estrato, estratoId: idPorCodigo.get(estrato) ?? null, ...v }))
+  );
 });

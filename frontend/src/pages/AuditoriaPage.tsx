@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { ShieldCheck, ChevronLeft, ChevronRight, ChevronDown, ChevronUp, MapPin, Monitor, AlertTriangle, XCircle, Download, LogOut, Trash2 } from "lucide-react";
 import { api, InicioSesion, HistorialCambio, IntentoLoginFallido, Usuario } from "../api/client";
 import { useEsMovil } from "../lib/useEsMovil";
@@ -129,7 +129,14 @@ function SesionesTab() {
     api.usuarios.list().then(setUsuarios);
   }, []);
 
+  // porPagina cambia solo una vez que useFilasAutoajustadas termina de medir el layout (después
+  // del primer render), así que este efecto dispara DOS pedidos casi seguidos al montar (uno
+  // con el porPagina inicial, otro con el ya ajustado). Sin descartar la respuesta más vieja si
+  // llega después, esa pisa a la buena y la tabla se queda en blanco hasta que algo (redimensionar,
+  // cambiar de pestaña) fuerza un nuevo pedido que sí gana la carrera.
+  const peticionIdRef = useRef(0);
   function cargar() {
+    const idPeticion = ++peticionIdRef.current;
     setCargando(true);
     api.auditoria
       .listPaginado(pagina, porPagina, {
@@ -137,10 +144,13 @@ function SesionesTab() {
         estado: estadoFiltro || undefined,
       })
       .then((r) => {
+        if (idPeticion !== peticionIdRef.current) return;
         setSesiones(r.data);
         setTotal(r.total);
       })
-      .finally(() => setCargando(false));
+      .finally(() => {
+        if (idPeticion === peticionIdRef.current) setCargando(false);
+      });
   }
 
   useEffect(cargar, [pagina, porPagina, usuarioFiltro, estadoFiltro]);
@@ -373,15 +383,22 @@ function FallidosTab() {
     return () => clearTimeout(t);
   }, [identificadorFiltro]);
 
+  // Ver el mismo comentario en SesionesTab: sin esto, la respuesta del porPagina inicial puede
+  // llegar después de la del porPagina ya ajustado y dejar la tabla en blanco.
+  const peticionIdRef = useRef(0);
   useEffect(() => {
+    const idPeticion = ++peticionIdRef.current;
     setCargando(true);
     api.auditoria
       .fallidosPaginado(pagina, porPagina, debounced || undefined)
       .then((r) => {
+        if (idPeticion !== peticionIdRef.current) return;
         setIntentos(r.data);
         setTotal(r.total);
       })
-      .finally(() => setCargando(false));
+      .finally(() => {
+        if (idPeticion === peticionIdRef.current) setCargando(false);
+      });
   }, [pagina, porPagina, debounced]);
 
   useEffect(() => setPagina(1), [debounced]);

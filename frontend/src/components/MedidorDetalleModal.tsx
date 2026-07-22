@@ -1,11 +1,31 @@
 import { useState } from "react";
-import { X } from "lucide-react";
+import { Pencil, X } from "lucide-react";
 import { api, DiametroMedidor, Lote, MarcaMedidor, Medidor, ModeloMedidor, urlFoto } from "../api/client";
 import { useConfirm, useErrorHandler } from "./ConfirmModal";
 import { HistorialSeccion } from "./HistorialTimeline";
 import { useAuth } from "../contexts/AuthContext";
 import { useCierreAnimado } from "../lib/useCierreAnimado";
 import { inputClass } from "../lib/ui";
+
+const TIPO_LABELS: Record<string, string> = { volumetrico: "Volumétrico", velocidad: "Velocidad" };
+function tipoLabel(tipo: string | null): string {
+  if (!tipo) return "-";
+  return TIPO_LABELS[tipo] ?? tipo;
+}
+
+function fmtFecha(fecha: string | null): string {
+  if (!fecha) return "-";
+  return new Date(fecha).toLocaleDateString("es-CO", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+function Campo({ etiqueta, valor }: { etiqueta: string; valor: React.ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-xs text-slate-700 dark:text-slate-400">{etiqueta}</div>
+      <div className="break-words text-sm font-medium text-slate-800 dark:text-slate-100">{valor}</div>
+    </div>
+  );
+}
 
 export default function MedidorDetalleModal({
   medidor,
@@ -14,6 +34,7 @@ export default function MedidorDetalleModal({
   lotes,
   onClose,
   onCambio,
+  onVerSuscriptor,
 }: {
   medidor: Medidor;
   marcas: MarcaMedidor[];
@@ -21,7 +42,10 @@ export default function MedidorDetalleModal({
   lotes: Lote[];
   onClose: () => void;
   onCambio: () => void;
+  onVerSuscriptor?: () => void;
 }) {
+  const [modo, setModo] = useState<"ver" | "editar">("ver");
+
   const [serial, setSerial] = useState(medidor.serial ?? "");
   const [marcaId, setMarcaId] = useState(medidor.marcaCat ? String(medidor.marcaCat.id) : "");
   const [modeloId, setModeloId] = useState(medidor.modeloCat ? String(medidor.modeloCat.id) : "");
@@ -86,9 +110,20 @@ export default function MedidorDetalleModal({
       <div className={`max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-xl dark:bg-slate-900 ${saliendo ? "animate-scale-out" : "animate-scale-in"}`}>
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-bold">Medidor {medidor.serial ?? `#${medidor.id}`}</h2>
-          <button onClick={cerrar} className="rounded-lg p-1 hover:bg-slate-100 dark:hover:bg-slate-800">
-            <X className="h-5 w-5" />
-          </button>
+          <div className="flex items-center gap-1">
+            {modo === "ver" && (
+              <button
+                onClick={() => setModo("editar")}
+                className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium text-brand-600 hover:bg-brand-50 dark:text-brand-400 dark:hover:bg-brand-900/20"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+                Editar
+              </button>
+            )}
+            <button onClick={cerrar} className="rounded-lg p-1 hover:bg-slate-100 dark:hover:bg-slate-800">
+              <X className="h-5 w-5" />
+            </button>
+          </div>
         </div>
 
         {error && (
@@ -96,178 +131,240 @@ export default function MedidorDetalleModal({
             {error}
           </p>
         )}
-        <div className="space-y-3">
-          <label className="block text-sm">
-            <span className="mb-1 block text-slate-600 dark:text-slate-300">Serial</span>
-            <input value={serial} onChange={(e) => setSerial(e.target.value)} className={`${inputClass} w-full`} />
-          </label>
 
-          <div className="grid grid-cols-2 gap-3">
-            <label className="block text-sm">
-              <span className="mb-1 block text-slate-600 dark:text-slate-300">Marca</span>
-              <select
-                value={marcaId}
-                onChange={(e) => {
-                  setMarcaId(e.target.value);
-                  setModeloId("");
-                  setDiametroId("");
-                }}
-                className={`${inputClass} w-full`}
-              >
-                <option value="">Marca...</option>
-                {marcas.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.nombre}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="mb-1 block text-slate-600 dark:text-slate-300">Modelo</span>
-              <select
-                value={modeloId}
-                onChange={(e) => {
-                  setModeloId(e.target.value);
-                  setDiametroId("");
-                }}
-                disabled={!marcaId}
-                className={`${inputClass} w-full`}
-              >
-                <option value="">Modelo...</option>
-                {modelosDeMarca.map((mo) => (
-                  <option key={mo.id} value={mo.id}>
-                    {mo.nombre}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
+        {modo === "ver" ? (
+          <div className="space-y-4">
+            <div
+              className={`rounded-lg px-3 py-2 text-xs font-medium ${
+                medidor.estado === "instalado"
+                  ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400"
+                  : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+              }`}
+            >
+              {medidor.estado === "instalado" ? "Instalado" : "En bodega"}
+              {medidor.condicion === "danado" && " · Dañado"}
+            </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <label className="block text-sm">
-              <span className="mb-1 block text-slate-600 dark:text-slate-300">Diámetro</span>
-              <select
-                value={diametroId}
-                onChange={(e) => setDiametroId(e.target.value)}
-                disabled={!modeloId}
-                className={`${inputClass} w-full`}
-              >
-                <option value="">Diámetro...</option>
-                {diametrosDelModelo.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.valor}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="mb-1 block text-slate-600 dark:text-slate-300">Lote</span>
-              <select value={loteId} onChange={(e) => setLoteId(e.target.value)} className={`${inputClass} w-full`}>
-                <option value="">Lote...</option>
-                {lotes.map((l) => (
-                  <option key={l.id} value={l.id}>
-                    {l.serialInicial}-{l.serialFinal}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <label className="block text-sm">
-              <span className="mb-1 block text-slate-600 dark:text-slate-300">Fecha fabricación</span>
-              <input
-                type="date"
-                value={fechaFabricacion}
-                onChange={(e) => setFechaFabricacion(e.target.value)}
-                className={`${inputClass} w-full`}
-              />
-            </label>
-            <label className="block text-sm">
-              <span className="mb-1 block text-slate-600 dark:text-slate-300">Fecha certificación</span>
-              <input
-                type="date"
-                value={fechaCertificacion}
-                onChange={(e) => setFechaCertificacion(e.target.value)}
-                className={`${inputClass} w-full`}
-              />
-            </label>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <label className="block text-sm">
-              <span className="mb-1 block text-slate-600 dark:text-slate-300">N° certificado</span>
-              <input
-                value={certificado}
-                onChange={(e) => setCertificado(e.target.value)}
-                className={`${inputClass} w-full`}
-              />
-            </label>
-            <label className="block text-sm">
-              <span className="mb-1 block text-slate-600 dark:text-slate-300">Condición</span>
-              <select
-                value={condicion}
-                onChange={(e) => setCondicion(e.target.value as "bueno" | "danado")}
-                className={`${inputClass} w-full`}
-              >
-                <option value="bueno">Bueno</option>
-                <option value="danado">Dañado</option>
-              </select>
-            </label>
-          </div>
-
-          <div>
-            <span className="mb-1 block text-sm text-slate-600 dark:text-slate-300">Acta de calibración (escaneada)</span>
-            {actaCalibracionUrl && !actaCalibracionArchivo && (
-              <div className="mb-1 flex items-center gap-2">
-                <a
-                  href={urlFoto(actaCalibracionUrl)}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400"
-                >
-                  Ver acta actual
-                </a>
-                <button
-                  type="button"
-                  disabled={subiendo}
-                  onClick={quitarActaCalibracion}
-                  className="text-xs font-medium text-red-500 hover:underline"
-                >
-                  Quitar
-                </button>
+            {medidor.suscriptor && (
+              <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-800">
+                <Campo etiqueta="Suscriptor" valor={medidor.suscriptor.nombre} />
+                <div className="mt-2">
+                  <Campo etiqueta="NUID" valor={medidor.suscriptor.codigo} />
+                </div>
+                {onVerSuscriptor && (
+                  <button
+                    onClick={onVerSuscriptor}
+                    className="mt-2 text-xs font-medium text-brand-600 hover:underline dark:text-brand-400"
+                  >
+                    Ver ficha del suscriptor →
+                  </button>
+                )}
               </div>
             )}
-            <input
-              type="file"
-              accept="image/*,application/pdf"
-              onChange={(e) => setActaCalibracionArchivo(e.target.files?.[0] ?? null)}
-              className={`${inputClass} w-full`}
-            />
-          </div>
-        </div>
 
-        {usuario?.permisos?.includes("historial") && (
-          <div className="mt-4 border-t border-slate-200 pt-4 dark:border-slate-800">
-            <HistorialSeccion entidad="medidor" entidadId={medidor.id} />
+            <div className="grid grid-cols-2 gap-3">
+              <Campo etiqueta="Serial" valor={medidor.serial ?? "-"} />
+              <Campo etiqueta="Marca" valor={medidor.marcaCat?.nombre ?? "-"} />
+              <Campo etiqueta="Modelo" valor={medidor.modeloCat?.nombre ?? "-"} />
+              <Campo etiqueta="Tipo" valor={tipoLabel(medidor.tipo)} />
+              <Campo etiqueta="Variante" valor={medidor.modeloCat?.varianteCat?.etiqueta ?? "-"} />
+              <Campo etiqueta="Clase de precisión" valor={medidor.modeloCat?.clasePrecision ?? "-"} />
+              <Campo etiqueta="Diámetro" valor={medidor.diametroCat?.valor ?? "-"} />
+              <Campo etiqueta="Lote" valor={medidor.lote ? `${medidor.lote.serialInicial}-${medidor.lote.serialFinal}` : "-"} />
+              <Campo etiqueta="Fecha fabricación" valor={fmtFecha(medidor.fechaFabricacion)} />
+              <Campo etiqueta="Fecha calibración" valor={fmtFecha(medidor.fechaCertificacion)} />
+              <Campo etiqueta="N° certificado" valor={medidor.certificado ?? "-"} />
+              <Campo etiqueta="Lectura inicial" valor={medidor.lecturaInicial ?? "0"} />
+              {medidor.estado === "instalado" && <Campo etiqueta="Fecha instalación" valor={fmtFecha(medidor.fechaInstalacion)} />}
+            </div>
+
+            {actaCalibracionUrl && (
+              <a
+                href={urlFoto(actaCalibracionUrl)}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-block text-xs font-medium text-brand-600 hover:underline dark:text-brand-400"
+              >
+                Ver acta de calibración
+              </a>
+            )}
+
+            {usuario?.permisos?.includes("historial") && (
+              <div className="border-t border-slate-200 pt-4 dark:border-slate-800">
+                <HistorialSeccion entidad="medidor" entidadId={medidor.id} />
+              </div>
+            )}
           </div>
+        ) : (
+          <>
+            <div className="space-y-3">
+              <label className="block text-sm">
+                <span className="mb-1 block text-slate-600 dark:text-slate-300">Serial</span>
+                <input value={serial} onChange={(e) => setSerial(e.target.value)} className={`${inputClass} w-full`} />
+              </label>
+
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block text-sm">
+                  <span className="mb-1 block text-slate-600 dark:text-slate-300">Marca</span>
+                  <select
+                    value={marcaId}
+                    onChange={(e) => {
+                      setMarcaId(e.target.value);
+                      setModeloId("");
+                      setDiametroId("");
+                    }}
+                    className={`${inputClass} w-full`}
+                  >
+                    <option value="">Marca...</option>
+                    {marcas.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.nombre}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block text-sm">
+                  <span className="mb-1 block text-slate-600 dark:text-slate-300">Modelo</span>
+                  <select
+                    value={modeloId}
+                    onChange={(e) => {
+                      setModeloId(e.target.value);
+                      setDiametroId("");
+                    }}
+                    disabled={!marcaId}
+                    className={`${inputClass} w-full`}
+                  >
+                    <option value="">Modelo...</option>
+                    {modelosDeMarca.map((mo) => (
+                      <option key={mo.id} value={mo.id}>
+                        {mo.nombre}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block text-sm">
+                  <span className="mb-1 block text-slate-600 dark:text-slate-300">Diámetro</span>
+                  <select
+                    value={diametroId}
+                    onChange={(e) => setDiametroId(e.target.value)}
+                    disabled={!modeloId}
+                    className={`${inputClass} w-full`}
+                  >
+                    <option value="">Diámetro...</option>
+                    {diametrosDelModelo.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.valor}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block text-sm">
+                  <span className="mb-1 block text-slate-600 dark:text-slate-300">Lote</span>
+                  <select value={loteId} onChange={(e) => setLoteId(e.target.value)} className={`${inputClass} w-full`}>
+                    <option value="">Lote...</option>
+                    {lotes.map((l) => (
+                      <option key={l.id} value={l.id}>
+                        {l.serialInicial}-{l.serialFinal}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block text-sm">
+                  <span className="mb-1 block text-slate-600 dark:text-slate-300">Fecha fabricación</span>
+                  <input
+                    type="date"
+                    value={fechaFabricacion}
+                    onChange={(e) => setFechaFabricacion(e.target.value)}
+                    className={`${inputClass} w-full`}
+                  />
+                </label>
+                <label className="block text-sm">
+                  <span className="mb-1 block text-slate-600 dark:text-slate-300">Fecha certificación</span>
+                  <input
+                    type="date"
+                    value={fechaCertificacion}
+                    onChange={(e) => setFechaCertificacion(e.target.value)}
+                    className={`${inputClass} w-full`}
+                  />
+                </label>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block text-sm">
+                  <span className="mb-1 block text-slate-600 dark:text-slate-300">N° certificado</span>
+                  <input
+                    value={certificado}
+                    onChange={(e) => setCertificado(e.target.value)}
+                    className={`${inputClass} w-full`}
+                  />
+                </label>
+                <label className="block text-sm">
+                  <span className="mb-1 block text-slate-600 dark:text-slate-300">Condición</span>
+                  <select
+                    value={condicion}
+                    onChange={(e) => setCondicion(e.target.value as "bueno" | "danado")}
+                    className={`${inputClass} w-full`}
+                  >
+                    <option value="bueno">Bueno</option>
+                    <option value="danado">Dañado</option>
+                  </select>
+                </label>
+              </div>
+
+              <div>
+                <span className="mb-1 block text-sm text-slate-600 dark:text-slate-300">Acta de calibración (escaneada)</span>
+                {actaCalibracionUrl && !actaCalibracionArchivo && (
+                  <div className="mb-1 flex items-center gap-2">
+                    <a
+                      href={urlFoto(actaCalibracionUrl)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400"
+                    >
+                      Ver acta actual
+                    </a>
+                    <button
+                      type="button"
+                      disabled={subiendo}
+                      onClick={quitarActaCalibracion}
+                      className="text-xs font-medium text-red-500 hover:underline"
+                    >
+                      Quitar
+                    </button>
+                  </div>
+                )}
+                <input
+                  type="file"
+                  accept="image/*,application/pdf"
+                  onChange={(e) => setActaCalibracionArchivo(e.target.files?.[0] ?? null)}
+                  className={`${inputClass} w-full`}
+                />
+              </div>
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                onClick={() => setModo("ver")}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => pedirConfirmacion("¿Deseas guardar los cambios?", guardar, { textoConfirmar: "Guardar", variante: "normal" })}
+                disabled={guardando}
+                className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-500 disabled:opacity-60"
+              >
+                {guardando ? "Guardando..." : "Guardar"}
+              </button>
+            </div>
+          </>
         )}
-
-        <div className="mt-5 flex justify-end gap-2">
-          <button
-            onClick={cerrar}
-            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-          >
-            Cancelar
-          </button>
-          <button
-            onClick={() => pedirConfirmacion("¿Deseas guardar los cambios?", guardar, { textoConfirmar: "Guardar", variante: "normal" })}
-            disabled={guardando}
-            className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-500 disabled:opacity-60"
-          >
-            {guardando ? "Guardando..." : "Guardar"}
-          </button>
-        </div>
       </div>
     </div>
   );

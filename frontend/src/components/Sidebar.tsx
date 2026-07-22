@@ -12,14 +12,10 @@ import {
   Moon,
   X,
   LogOut,
-  UserCog,
-  ShieldCheck,
   ChevronDown,
   Droplets,
-  Shield,
   Home,
-  History,
-  Fingerprint,
+  ShieldAlert,
 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
@@ -40,19 +36,12 @@ const medicion: Link[] = [
   { to: "/lecturas", label: "Captura de Lecturas", icon: ClipboardList, permiso: "lecturas" },
 ];
 
-const usuariosYRoles: Link[] = [
-  { to: "/usuarios", label: "Usuarios", icon: UserCog, permiso: "usuarios" },
-  { to: "/roles", label: "Roles y permisos", icon: ShieldCheck, permiso: "roles" },
-  { to: "/historial", label: "Historial de cambios", icon: History, permiso: "historial" },
-  { to: "/auditoria", label: "Auditoría de sesiones", icon: Fingerprint, permiso: "auditoria" },
-];
-
 const entradas: Entrada[] = [
   { to: "/", label: "Inicio", icon: Home },
   { label: "Medición", icon: Droplets, children: medicion },
   { to: "/aforos", label: "Aforos", icon: Waves, permiso: ["aforos_ver", "aforos_avanzado"] },
   { to: "/inventario", label: "Inventario general", icon: Warehouse, permiso: ["inventario_ver", "inventario_avanzado"] },
-  { label: "Usuarios", icon: Shield, children: usuariosYRoles },
+  { to: "/admin", label: "Panel de administración", icon: ShieldAlert, permiso: "admin_panel" },
 ];
 
 function esGrupo(e: Entrada): e is { label: string; icon: typeof LayoutDashboard; children: Link[] } {

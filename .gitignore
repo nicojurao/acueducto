@@ -9,3 +9,4 @@ backup/ALERTA_DISCO.txt
 backup/minio_espejo/
 .claude/
 *.xlsx
+graphify-out/

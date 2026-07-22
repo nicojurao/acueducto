@@ -1,4 +1,4 @@
-import { X, Calendar, MapPin, User, Droplet } from "lucide-react";
+import { X, Calendar, MapPin, User, Droplet, Gauge, StickyNote } from "lucide-react";
 import { urlFoto } from "../api/client";
 import { useCierreAnimado } from "../lib/useCierreAnimado";
 
@@ -14,21 +14,29 @@ function fmtFechaHora(iso: string): string {
 
 export default function LecturaDetalleModal({
   periodo,
+  valorLectura,
   consumo,
   fotoUrl,
   latitud,
   longitud,
   fechaRegistro,
   capturadoPor,
+  observaciones,
+  consumoTotalMedidor,
+  nIntegrantes,
   onClose,
 }: {
   periodo: string;
+  valorLectura: number | null;
   consumo: number;
   fotoUrl: string | null;
   latitud: number | null;
   longitud: number | null;
   fechaRegistro: string | null;
   capturadoPor: string | null;
+  observaciones?: string | null;
+  consumoTotalMedidor?: number | null;
+  nIntegrantes?: number | null;
   onClose: () => void;
 }) {
   const { saliendo, cerrar } = useCierreAnimado(onClose);
@@ -59,10 +67,22 @@ export default function LecturaDetalleModal({
           )}
 
           <div className="space-y-2 text-sm">
+            {valorLectura != null && (
+              <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300">
+                <Gauge className="h-4 w-4 shrink-0 text-brand-500" />
+                Lectura: <strong>{valorLectura}</strong>
+              </div>
+            )}
             <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300">
               <Droplet className="h-4 w-4 shrink-0 text-brand-500" />
               Consumo: <strong>{consumo} m³</strong>
             </div>
+            {consumoTotalMedidor != null && nIntegrantes != null && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+                Medidor compartido entre {nIntegrantes} usuarios. Lectura real del medidor (sin
+                dividir): <strong>{consumoTotalMedidor} m³</strong>.
+              </div>
+            )}
             {fechaRegistro && (
               <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300">
                 <Calendar className="h-4 w-4 shrink-0 text-brand-500" />
@@ -89,6 +109,12 @@ export default function LecturaDetalleModal({
               <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300">
                 <MapPin className="h-4 w-4 shrink-0" />
                 Sin coordenadas registradas
+              </div>
+            )}
+            {observaciones && (
+              <div className="flex items-start gap-2 rounded-lg bg-slate-50 px-3 py-2 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                <StickyNote className="mt-0.5 h-4 w-4 shrink-0 text-brand-500" />
+                {observaciones}
               </div>
             )}
           </div>

@@ -6,6 +6,7 @@ import { guardarArchivo, borrarArchivo } from "../lib/storage.js";
 import { requirePermiso } from "../middleware/auth.js";
 import { encabezadoPdf, COLOR_MARCA } from "../lib/pdfBranding.js";
 import { crearInformeExcel, enviarExcel } from "../lib/excelBranding.js";
+import { registrarCambios, camposItemInventario } from "../lib/historial.js";
 
 // Tabla con encabezado sombreado en el color de marca (#00487f) y filas alternadas, con salto
 // de página automático — usada por los tres PDF de inventario (ítems, préstamos, movimientos).
@@ -124,10 +125,13 @@ async function disponibilidad(itemId: number, cantidadTotal: number): Promise<nu
 // "page" devuelve todo (compat, lo usa el combobox de "asignar préstamo"); con "page" pagina y
 // filtra en el servidor.
 itemsInventarioRouter.get("/", async (req, res) => {
-  const { page, limit, q, categoria, estado } = req.query;
+  const { page, limit, q, categoria, ubicacion, proveedor, estado, stockBajo } = req.query;
   const filtros: any[] = [{ activo: true }];
   if (categoria) filtros.push({ categoriaId: Number(categoria) });
+  if (ubicacion) filtros.push({ ubicacionId: Number(ubicacion) });
+  if (proveedor) filtros.push({ proveedorId: Number(proveedor) });
   if (estado) filtros.push({ estado: String(estado) });
+  if (stockBajo === "true") filtros.push({ stockMinimo: { not: null } });
   if (q) {
     const texto = String(q).trim();
     filtros.push({
@@ -140,7 +144,9 @@ itemsInventarioRouter.get("/", async (req, res) => {
   }
   const where = { AND: filtros };
 
-  async function conDisponible<T extends { id: number; cantidad: number }>(items: T[]): Promise<(T & { disponible: number })[]> {
+  async function conDisponible<T extends { id: number; cantidad: number; stockMinimo: number | null }>(
+    items: T[]
+  ): Promise<(T & { disponible: number; stockBajo: boolean })[]> {
     if (items.length === 0) return [];
     const prestados = await prisma.prestamoInventario.groupBy({
       by: ["itemId"],
@@ -148,10 +154,10 @@ itemsInventarioRouter.get("/", async (req, res) => {
       _sum: { cantidad: true },
     });
     const prestadosPorItem = new Map(prestados.map((p) => [p.itemId, p._sum.cantidad ?? 0]));
-    return items.map((item) => ({
-      ...item,
-      disponible: item.cantidad - (prestadosPorItem.get(item.id) ?? 0),
-    }));
+    return items.map((item) => {
+      const disponible = item.cantidad - (prestadosPorItem.get(item.id) ?? 0);
+      return { ...item, disponible, stockBajo: item.stockMinimo != null && disponible <= item.stockMinimo };
+    });
   }
 
   if (page) {
@@ -169,6 +175,17 @@ itemsInventarioRouter.get("/", async (req, res) => {
     };
     const orderBy = ORDENES[String(req.query.sort ?? "")] ?? { nombre: "asc" };
 
+    // "stockBajo" depende de un valor calculado (disponible = cantidad - prestado), no se puede
+    // filtrar/paginar directo en SQL — se trae todo lo que tenga stockMinimo, se calcula y se
+    // pagina en memoria. El volumen de este módulo (cientos de ítems) lo hace viable.
+    if (stockBajo === "true") {
+      const todos = await prisma.itemInventario.findMany({ where, include: includeCatalogos, orderBy });
+      const conDatos = (await conDisponible(todos)).filter((i) => i.stockBajo);
+      const total = conDatos.length;
+      const data = conDatos.slice((pageNum - 1) * limitNum, pageNum * limitNum);
+      return res.json({ data, total, page: pageNum, limit: limitNum });
+    }
+
     const [items, total] = await Promise.all([
       prisma.itemInventario.findMany({
         where, include: includeCatalogos, orderBy, skip: (pageNum - 1) * limitNum, take: limitNum,
@@ -185,9 +202,11 @@ itemsInventarioRouter.get("/", async (req, res) => {
 // Excel de ítems con los mismos filtros que el listado (q, categoria, estado), con columnas
 // adicionales (proveedor, fechas, valor) que no caben en la tabla de la UI.
 itemsInventarioRouter.get("/excel", async (req, res) => {
-  const { q, categoria, estado, ids } = req.query;
+  const { q, categoria, ubicacion, proveedor, estado, ids } = req.query;
   const filtros: any[] = [{ activo: true }];
   if (categoria) filtros.push({ categoriaId: Number(categoria) });
+  if (ubicacion) filtros.push({ ubicacionId: Number(ubicacion) });
+  if (proveedor) filtros.push({ proveedorId: Number(proveedor) });
   if (estado) filtros.push({ estado: String(estado) });
   if (ids) {
     const idsFiltro = String(ids)
@@ -262,9 +281,11 @@ itemsInventarioRouter.get("/excel", async (req, res) => {
 // PDF con la plantilla institucional (logo + azul de marca, igual que Aforos/Actas), en horizontal
 // porque el ítem trae bastantes columnas. Mismos filtros que el listado y el Excel.
 itemsInventarioRouter.get("/pdf", async (req, res) => {
-  const { q, categoria, estado } = req.query;
+  const { q, categoria, ubicacion, proveedor, estado } = req.query;
   const filtros: any[] = [{ activo: true }];
   if (categoria) filtros.push({ categoriaId: Number(categoria) });
+  if (ubicacion) filtros.push({ ubicacionId: Number(ubicacion) });
+  if (proveedor) filtros.push({ proveedorId: Number(proveedor) });
   if (estado) filtros.push({ estado: String(estado) });
   if (q) {
     const texto = String(q).trim();
@@ -324,8 +345,9 @@ itemsInventarioRouter.get("/pdf", async (req, res) => {
 });
 
 itemsInventarioRouter.post("/", soloAvanzado, upload.single("foto"), async (req, res) => {
-  const { nombre, categoriaId, codigo, descripcion, cantidad, unidadMedida, estado, ubicacionId, proveedorId, fechaCompra, fechaIngreso, valor } =
-    req.body;
+  const {
+    nombre, categoriaId, codigo, descripcion, cantidad, stockMinimo, unidadMedida, estado, ubicacionId, proveedorId, fechaCompra, fechaIngreso, valor,
+  } = req.body;
   if (!nombre || !String(nombre).trim()) return res.status(400).json({ error: "El nombre es requerido" });
 
   const fotoUrl = req.file
@@ -340,6 +362,7 @@ itemsInventarioRouter.post("/", soloAvanzado, upload.single("foto"), async (req,
         codigo: codigo || null,
         descripcion: descripcion || null,
         cantidad: cantidad ? Number(cantidad) : 1,
+        stockMinimo: stockMinimo ? Number(stockMinimo) : null,
         unidadMedida: unidadMedida || "unidad",
         estado: estado || "bueno",
         ubicacionId: ubicacionId ? Number(ubicacionId) : null,
@@ -352,7 +375,7 @@ itemsInventarioRouter.post("/", soloAvanzado, upload.single("foto"), async (req,
       },
       include: includeCatalogos,
     });
-    res.status(201).json({ ...item, disponible: item.cantidad });
+    res.status(201).json({ ...item, disponible: item.cantidad, stockBajo: item.stockMinimo != null && item.cantidad <= item.stockMinimo });
   } catch (err: any) {
     // Si la foto ya se subió a MinIO pero el registro no se pudo crear (ej. código duplicado),
     // no dejar el archivo huérfano — sin este cleanup, cualquier intento fallido de crear un
@@ -365,11 +388,11 @@ itemsInventarioRouter.post("/", soloAvanzado, upload.single("foto"), async (req,
 
 itemsInventarioRouter.put("/:id", soloAvanzado, upload.single("foto"), async (req, res) => {
   const id = Number(req.params.id);
-  const existente = await prisma.itemInventario.findUnique({ where: { id } });
+  const existente = await prisma.itemInventario.findUnique({ where: { id }, include: includeCatalogos });
   if (!existente) return res.status(404).json({ error: "No encontrado" });
 
   const {
-    nombre, categoriaId, codigo, descripcion, cantidad, unidadMedida, estado, ubicacionId, proveedorId, fechaCompra, fechaIngreso, valor, quitarFoto,
+    nombre, categoriaId, codigo, descripcion, cantidad, stockMinimo, unidadMedida, estado, ubicacionId, proveedorId, fechaCompra, fechaIngreso, valor, quitarFoto,
   } = req.body;
 
   let fotoUrl: string | null | undefined;
@@ -388,6 +411,7 @@ itemsInventarioRouter.put("/:id", soloAvanzado, upload.single("foto"), async (re
         codigo: codigo !== undefined ? codigo || null : undefined,
         descripcion: descripcion !== undefined ? descripcion || null : undefined,
         cantidad: cantidad !== undefined ? Number(cantidad) : undefined,
+        stockMinimo: stockMinimo !== undefined ? (stockMinimo ? Number(stockMinimo) : null) : undefined,
         unidadMedida: unidadMedida !== undefined ? unidadMedida : undefined,
         estado: estado !== undefined ? estado : undefined,
         ubicacionId: ubicacionId !== undefined ? (ubicacionId ? Number(ubicacionId) : null) : undefined,
@@ -400,7 +424,9 @@ itemsInventarioRouter.put("/:id", soloAvanzado, upload.single("foto"), async (re
       include: includeCatalogos,
     });
     if (fotoUrl !== undefined && existente.fotoUrl) await borrarArchivo(existente.fotoUrl);
-    res.json({ ...item, disponible: await disponibilidad(item.id, item.cantidad) });
+    await registrarCambios("item_inventario", item.id, camposItemInventario(existente), camposItemInventario(item), req.usuario?.id);
+    const disponible = await disponibilidad(item.id, item.cantidad);
+    res.json({ ...item, disponible, stockBajo: item.stockMinimo != null && disponible <= item.stockMinimo });
   } catch (err: any) {
     // Mismo cleanup que en el POST: si se subió una foto nueva pero el UPDATE falló, no dejarla
     // huérfana (la foto vieja del ítem sigue intacta, no se toca).
@@ -417,7 +443,7 @@ itemsInventarioRouter.put("/:id", soloAvanzado, upload.single("foto"), async (re
 // el rastro de quién tuvo qué prestado.
 itemsInventarioRouter.delete("/:id", soloAvanzado, async (req, res) => {
   const id = Number(req.params.id);
-  const item = await prisma.itemInventario.findUnique({ where: { id } });
+  const item = await prisma.itemInventario.findUnique({ where: { id }, include: includeCatalogos });
   if (!item) return res.status(404).json({ error: "No encontrado" });
 
   const prestamosActivos = await prisma.prestamoInventario.count({ where: { itemId: id, fechaDevolucion: null } });
@@ -428,7 +454,8 @@ itemsInventarioRouter.delete("/:id", soloAvanzado, async (req, res) => {
   const tieneHistorial = await prisma.prestamoInventario.count({ where: { itemId: id } });
   const tieneMovimientos = await prisma.movimientoInventario.count({ where: { itemId: id } });
   if (tieneHistorial > 0 || tieneMovimientos > 0) {
-    await prisma.itemInventario.update({ where: { id }, data: { activo: false } });
+    const inactivo = await prisma.itemInventario.update({ where: { id }, data: { activo: false }, include: includeCatalogos });
+    await registrarCambios("item_inventario", id, camposItemInventario(item), camposItemInventario(inactivo), req.usuario?.id);
     return res.status(204).end();
   }
 
@@ -438,14 +465,18 @@ itemsInventarioRouter.delete("/:id", soloAvanzado, async (req, res) => {
   res.status(204).end();
 });
 
-// Préstamos: historial y activos. Filtros opcionales por itemId, usuarioId, y "activos=true"
-// (solo los que no tienen fechaDevolucion).
+// Préstamos: historial y activos. Filtros opcionales por itemId, usuarioId, "activos=true"
+// (solo los que no tienen fechaDevolucion) y "vencidos=true" (sin devolver y con
+// fechaEsperadaDevolucion ya pasada).
 prestamosInventarioRouter.get("/", async (req, res) => {
-  const { itemId, usuarioId, activos } = req.query;
+  const { itemId, usuarioId, activos, vencidos } = req.query;
   const filtros: any[] = [];
   if (itemId) filtros.push({ itemId: Number(itemId) });
   if (usuarioId) filtros.push({ usuarioId: Number(usuarioId) });
   if (activos === "true") filtros.push({ fechaDevolucion: null });
+  if (vencidos === "true") {
+    filtros.push({ fechaDevolucion: null }, { fechaEsperadaDevolucion: { lt: new Date() } });
+  }
   const where = filtros.length ? { AND: filtros } : {};
 
   const prestamos = await prisma.prestamoInventario.findMany({
@@ -455,6 +486,13 @@ prestamosInventarioRouter.get("/", async (req, res) => {
   });
   res.json(prestamos);
 });
+
+// "Vencido" = sigue sin devolver y ya pasó la fecha esperada de devolución (si se registró una).
+function estadoPrestamo(p: { fechaDevolucion: Date | null; fechaEsperadaDevolucion: Date | null }): string {
+  if (p.fechaDevolucion) return "Devuelto";
+  if (p.fechaEsperadaDevolucion && p.fechaEsperadaDevolucion < new Date()) return "Vencido";
+  return "Sin devolver";
+}
 
 prestamosInventarioRouter.get("/excel", async (req, res) => {
   const { itemId, usuarioId, activos } = req.query;
@@ -475,8 +513,9 @@ prestamosInventarioRouter.get("/excel", async (req, res) => {
     cantidad: p.cantidad,
     responsable: p.usuario.nombre,
     entrega: p.fechaEntrega.toISOString().slice(0, 10),
+    esperada: p.fechaEsperadaDevolucion ? p.fechaEsperadaDevolucion.toISOString().slice(0, 10) : "",
     devolucion: p.fechaDevolucion ? p.fechaDevolucion.toISOString().slice(0, 10) : "",
-    estado: p.fechaDevolucion ? "Devuelto" : "Sin devolver",
+    estado: estadoPrestamo(p),
     observaciones: p.observaciones ?? "",
   }));
 
@@ -489,6 +528,7 @@ prestamosInventarioRouter.get("/excel", async (req, res) => {
       { titulo: "CANTIDAD", clave: "cantidad", ancho: 11 },
       { titulo: "RESPONSABLE", clave: "responsable", ancho: 22 },
       { titulo: "FECHA DE ENTREGA", clave: "entrega", ancho: 16 },
+      { titulo: "DEVOLUCIÓN ESPERADA", clave: "esperada", ancho: 18 },
       { titulo: "FECHA DE DEVOLUCIÓN", clave: "devolucion", ancho: 18 },
       { titulo: "ESTADO", clave: "estado", ancho: 14 },
       { titulo: "OBSERVACIONES", clave: "observaciones", ancho: 30 },
@@ -520,20 +560,22 @@ prestamosInventarioRouter.get("/pdf", async (req, res) => {
   tablaInventarioPdf(
     doc,
     [
-      { titulo: "ÍTEM", clave: "item", ancho: 150 },
-      { titulo: "CANT.", clave: "cantidad", ancho: 45, align: "right" },
-      { titulo: "RESPONSABLE", clave: "responsable", ancho: 130 },
-      { titulo: "ENTREGA", clave: "entrega", ancho: 65 },
-      { titulo: "DEVOLUCIÓN", clave: "devolucion", ancho: 70 },
-      { titulo: "ESTADO", clave: "estado", ancho: 55 },
+      { titulo: "ÍTEM", clave: "item", ancho: 130 },
+      { titulo: "CANT.", clave: "cantidad", ancho: 40, align: "right" },
+      { titulo: "RESPONSABLE", clave: "responsable", ancho: 110 },
+      { titulo: "ENTREGA", clave: "entrega", ancho: 60 },
+      { titulo: "DEV. ESPERADA", clave: "esperada", ancho: 65 },
+      { titulo: "DEVOLUCIÓN", clave: "devolucion", ancho: 65 },
+      { titulo: "ESTADO", clave: "estado", ancho: 50 },
     ],
     prestamos.map((p) => ({
       item: p.item.nombre,
       cantidad: String(p.cantidad),
       responsable: p.usuario.nombre,
       entrega: p.fechaEntrega.toISOString().slice(0, 10),
+      esperada: p.fechaEsperadaDevolucion ? p.fechaEsperadaDevolucion.toISOString().slice(0, 10) : "-",
       devolucion: p.fechaDevolucion ? p.fechaDevolucion.toISOString().slice(0, 10) : "-",
-      estado: p.fechaDevolucion ? "Devuelto" : "Sin devolver",
+      estado: estadoPrestamo(p),
     }))
   );
 
@@ -541,7 +583,7 @@ prestamosInventarioRouter.get("/pdf", async (req, res) => {
 });
 
 prestamosInventarioRouter.post("/", soloAvanzado, async (req, res) => {
-  const { itemId, usuarioId, cantidad, observaciones } = req.body;
+  const { itemId, usuarioId, cantidad, observaciones, fechaEsperadaDevolucion } = req.body;
   if (!itemId || !usuarioId) return res.status(400).json({ error: "itemId y usuarioId son requeridos" });
 
   const item = await prisma.itemInventario.findUnique({ where: { id: Number(itemId) } });
@@ -559,6 +601,7 @@ prestamosInventarioRouter.post("/", soloAvanzado, async (req, res) => {
       usuarioId: Number(usuarioId),
       cantidad: cantidadPrestada,
       observaciones: observaciones || null,
+      fechaEsperadaDevolucion: fechaEsperadaDevolucion ? new Date(fechaEsperadaDevolucion) : null,
     },
     include: { item: true, usuario: { select: { id: true, nombre: true } } },
   });
@@ -575,7 +618,7 @@ prestamosInventarioRouter.put("/:id", soloAvanzado, async (req, res) => {
   const prestamo = await prisma.prestamoInventario.findUnique({ where: { id } });
   if (!prestamo) return res.status(404).json({ error: "No encontrado" });
 
-  const { usuarioId, cantidad, observaciones } = req.body;
+  const { usuarioId, cantidad, observaciones, fechaEsperadaDevolucion } = req.body;
 
   let nuevaCantidad = prestamo.cantidad;
   if (cantidad !== undefined) {
@@ -603,6 +646,8 @@ prestamosInventarioRouter.put("/:id", soloAvanzado, async (req, res) => {
       cantidad: nuevaCantidad,
       usuarioId: usuarioId !== undefined ? Number(usuarioId) : undefined,
       observaciones: observaciones !== undefined ? observaciones || null : undefined,
+      fechaEsperadaDevolucion:
+        fechaEsperadaDevolucion !== undefined ? (fechaEsperadaDevolucion ? new Date(fechaEsperadaDevolucion) : null) : undefined,
     },
     include: { item: true, usuario: { select: { id: true, nombre: true } } },
   });
@@ -665,7 +710,7 @@ movimientosInventarioRouter.get("/excel", async (req, res) => {
 
   const filas = movimientos.map((m) => ({
     fecha: m.createdAt.toISOString().slice(0, 10),
-    tipo: m.tipo === "entrada" ? "Entrada" : "Salida",
+    tipo: m.tipo === "entrada" ? "Entrada" : m.tipo === "salida" ? "Salida" : "Transferencia",
     item: m.item.nombre,
     cantidad: m.cantidad,
     motivo: m.motivo ?? "",
@@ -721,7 +766,7 @@ movimientosInventarioRouter.get("/pdf", async (req, res) => {
     ],
     movimientos.map((m) => ({
       fecha: m.createdAt.toISOString().slice(0, 10),
-      tipo: m.tipo === "entrada" ? "Entrada" : "Salida",
+      tipo: m.tipo === "entrada" ? "Entrada" : m.tipo === "salida" ? "Salida" : "Transferencia",
       item: m.item.nombre,
       cantidad: String(m.cantidad),
       motivo: m.motivo ?? "-",
@@ -775,17 +820,73 @@ movimientosInventarioRouter.post("/", soloAvanzado, async (req, res) => {
   res.status(201).json(movimiento);
 });
 
+// Transferencia entre ubicaciones: no toca "cantidad" (a diferencia de entrada/salida), solo
+// cambia ubicacionId del ítem. Se registra como MovimientoInventario (tipo "transferencia") para
+// que quede en el mismo historial de Entradas/Salidas, y también genera su entrada en el
+// historial de cambios del ítem (vía registrarCambios, mismo mecanismo que el resto de ediciones).
+movimientosInventarioRouter.post("/transferencia", soloAvanzado, async (req, res) => {
+  const { itemId, ubicacionId, observaciones } = req.body;
+  if (!itemId) return res.status(400).json({ error: "itemId es requerido" });
+
+  const item = await prisma.itemInventario.findUnique({ where: { id: Number(itemId) }, include: includeCatalogos });
+  if (!item) return res.status(404).json({ error: "Ítem no encontrado" });
+
+  const nuevaUbicacionId = ubicacionId ? Number(ubicacionId) : null;
+  if (nuevaUbicacionId === item.ubicacionId) {
+    return res.status(400).json({ error: "El ítem ya está en esa ubicación" });
+  }
+
+  const nuevaUbicacion = nuevaUbicacionId
+    ? await prisma.ubicacionInventario.findUnique({ where: { id: nuevaUbicacionId } })
+    : null;
+  if (nuevaUbicacionId && !nuevaUbicacion) return res.status(404).json({ error: "Ubicación no encontrada" });
+
+  const origenNombre = item.ubicacionCat?.nombre ?? "sin ubicación";
+  const destinoNombre = nuevaUbicacion?.nombre ?? "sin ubicación";
+
+  const [, movimiento] = await prisma.$transaction([
+    prisma.itemInventario.update({ where: { id: item.id }, data: { ubicacionId: nuevaUbicacionId } }),
+    prisma.movimientoInventario.create({
+      data: {
+        itemId: item.id,
+        tipo: "transferencia",
+        cantidad: item.cantidad,
+        motivo: `De "${origenNombre}" a "${destinoNombre}"`,
+        observaciones: observaciones || null,
+        usuarioId: req.usuario!.id,
+      },
+      include: { item: true, usuario: { select: { id: true, nombre: true } } },
+    }),
+  ]);
+
+  const itemActualizado = await prisma.itemInventario.findUnique({ where: { id: item.id }, include: includeCatalogos });
+  await registrarCambios(
+    "item_inventario",
+    item.id,
+    camposItemInventario(item),
+    camposItemInventario(itemActualizado!),
+    req.usuario?.id
+  );
+
+  res.status(201).json(movimiento);
+});
+
 movimientosInventarioRouter.delete("/:id", soloAvanzado, async (req, res) => {
   const id = Number(req.params.id);
   const movimiento = await prisma.movimientoInventario.findUnique({ where: { id } });
   if (!movimiento) return res.status(404).json({ error: "No encontrado" });
 
-  // Revierte el ajuste de cantidad que hizo este movimiento al crearse.
+  // Una transferencia no tocó "cantidad" al crearse (solo cambió ubicacionId), así que borrarla
+  // tampoco debe tocarla — a diferencia de entrada/salida, que sí hay que revertir.
   await prisma.$transaction([
-    prisma.itemInventario.update({
-      where: { id: movimiento.itemId },
-      data: { cantidad: { [movimiento.tipo === "entrada" ? "decrement" : "increment"]: movimiento.cantidad } },
-    }),
+    ...(movimiento.tipo === "entrada" || movimiento.tipo === "salida"
+      ? [
+          prisma.itemInventario.update({
+            where: { id: movimiento.itemId },
+            data: { cantidad: { [movimiento.tipo === "entrada" ? "decrement" : "increment"]: movimiento.cantidad } },
+          }),
+        ]
+      : []),
     prisma.movimientoInventario.delete({ where: { id } }),
   ]);
 
@@ -795,9 +896,14 @@ movimientosInventarioRouter.delete("/:id", soloAvanzado, async (req, res) => {
 // Resumen para la pestaña "Dashboard" de Inventario general: conteos, valor total y
 // distribución por categoría/estado/movimientos de los últimos 6 meses.
 inventarioKpisRouter.get("/", async (_req, res) => {
-  const [items, prestamosActivos, categorias, estados, movimientos] = await Promise.all([
+  const [items, itemsConMinimo, prestamosActivos, prestamosVencidos, categorias, estados, movimientos] = await Promise.all([
     prisma.itemInventario.findMany({ where: { activo: true }, select: { cantidad: true, valor: true } }),
+    prisma.itemInventario.findMany({
+      where: { activo: true, stockMinimo: { not: null } },
+      select: { id: true, cantidad: true, stockMinimo: true },
+    }),
     prisma.prestamoInventario.count({ where: { fechaDevolucion: null } }),
+    prisma.prestamoInventario.count({ where: { fechaDevolucion: null, fechaEsperadaDevolucion: { lt: new Date() } } }),
     prisma.itemInventario.groupBy({
       by: ["categoriaId"],
       where: { activo: true },
@@ -817,6 +923,22 @@ inventarioKpisRouter.get("/", async (_req, res) => {
   const totalItems = items.length;
   const valorTotalInventario = items.reduce((acc, i) => acc + i.cantidad * Number(i.valor ?? 0), 0);
 
+  // "disponible" real (descontando préstamos activos) para cada ítem con umbral configurado.
+  const prestadosPorItem = itemsConMinimo.length
+    ? new Map(
+        (
+          await prisma.prestamoInventario.groupBy({
+            by: ["itemId"],
+            where: { itemId: { in: itemsConMinimo.map((i) => i.id) }, fechaDevolucion: null },
+            _sum: { cantidad: true },
+          })
+        ).map((p) => [p.itemId, p._sum.cantidad ?? 0])
+      )
+    : new Map<number, number>();
+  const itemsStockBajo = itemsConMinimo.filter(
+    (i) => i.cantidad - (prestadosPorItem.get(i.id) ?? 0) <= (i.stockMinimo ?? 0)
+  ).length;
+
   const categoriaIds = categorias.map((c) => c.categoriaId).filter((id): id is number => id !== null);
   const nombresCategoria = await prisma.categoriaInventario.findMany({ where: { id: { in: categoriaIds } } });
   const nombrePorCategoriaId = new Map(nombresCategoria.map((c) => [c.id, c.nombre]));
@@ -832,7 +954,7 @@ inventarioKpisRouter.get("/", async (_req, res) => {
     const clave = `${m.createdAt.getUTCFullYear()}-${String(m.createdAt.getUTCMonth() + 1).padStart(2, "0")}`;
     const acumulado = porMes.get(clave) ?? { entradas: 0, salidas: 0 };
     if (m.tipo === "entrada") acumulado.entradas += m.cantidad;
-    else acumulado.salidas += m.cantidad;
+    else if (m.tipo === "salida") acumulado.salidas += m.cantidad;
     porMes.set(clave, acumulado);
   }
   const movimientosPorMes = Array.from({ length: 6 }, (_, i) => {
@@ -842,5 +964,14 @@ inventarioKpisRouter.get("/", async (_req, res) => {
     return { mes: clave, ...acumulado };
   });
 
-  res.json({ totalItems, valorTotalInventario, prestamosActivos, itemsPorCategoria, itemsPorEstado, movimientosPorMes });
+  res.json({
+    totalItems,
+    valorTotalInventario,
+    prestamosActivos,
+    prestamosVencidos,
+    itemsStockBajo,
+    itemsPorCategoria,
+    itemsPorEstado,
+    movimientosPorMes,
+  });
 });

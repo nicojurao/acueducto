@@ -35,6 +35,21 @@ function hojasDeAnio(wb: ExcelJS.Workbook): { nombre: string; anio: number }[] {
     .sort((a, b) => a.anio - b.anio);
 }
 
+// Saca mes/año de un encabezado de columna LECTURA a partir de la fecha que trae el título
+// (ej. "LECTURA 20/01/2026", "JUNIO SEXTA LECTURA 20/06/2025"). Esto es inequívoco sin importar
+// el orden de las columnas o si hay columnas extra (ej. una lectura de diciembre del año
+// anterior colada como referencia) — a diferencia de emparejar por POSICIÓN, que se rompe en
+// cuanto una hoja no sigue exactamente el mismo layout que las demás (ver [[project-convencion-
+// lectura-periodo-2026-07]] en la memoria: esto YA se rompió una vez por confiar en la posición).
+function fechaDeEncabezado(header: string): { mes: number; anio: number } | null {
+  const m = header.match(/(\d{1,2})\s*\/\s*(\d{1,2})\s*\/\s*(\d{4})/);
+  if (!m) return null;
+  const mes = Number(m[2]);
+  const anio = Number(m[3]);
+  if (mes < 1 || mes > 12) return null;
+  return { mes, anio };
+}
+
 function leerHojaLecturas(wb: ExcelJS.Workbook, nombreHoja: string) {
   const sheet = wb.getWorksheet(nombreHoja);
   if (!sheet) return null;
@@ -46,22 +61,17 @@ function leerHojaLecturas(wb: ExcelJS.Workbook, nombreHoja: string) {
   const iCodigo = colIndexContains(headers, "CODIGO", "SUSCRIPTOR");
   const iLecturaInicialCol = headers.findIndex((h) => norm(h).startsWith("LECTURA INICIAL"));
 
-  const clasificadas: { idx: number; tipo: "L" | "C" }[] = [];
+  // Solo columnas de tipo LECTURA (no CONSUMO) — el consumo se recalcula siempre como
+  // lectura_actual - lectura_previa, así no depende de emparejar bien la columna de CONSUMO.
+  const columnasLectura: { idx: number; mes: number; anio: number }[] = [];
   for (let i = iLecturaInicialCol + 1; i < headers.length; i++) {
     const h = norm(headers[i]);
-    if (!h) continue;
-    if (h.includes("CONSUMO")) clasificadas.push({ idx: i, tipo: "C" });
-    else if (h.includes("LECTURA")) clasificadas.push({ idx: i, tipo: "L" });
+    if (!h || !h.includes("LECTURA")) continue;
+    const fecha = fechaDeEncabezado(headers[i]);
+    if (fecha) columnasLectura.push({ idx: i, ...fecha });
   }
 
-  let baselineIdx: number | null = null;
-  let resto = clasificadas;
-  if (clasificadas.length % 2 === 1 && clasificadas[0].tipo === "L") {
-    baselineIdx = clasificadas[0].idx;
-    resto = clasificadas.slice(1);
-  }
-
-  return { filas: rows.slice(headerRowIdx + 1), iCodigo, baselineIdx, resto };
+  return { filas: rows.slice(headerRowIdx + 1), iCodigo, columnasLectura };
 }
 
 async function main() {
@@ -111,35 +121,24 @@ async function main() {
 
       let lecturaPrevia = Number(medidor.lecturaInicial ?? 0);
 
-      if (hoja.baselineIdx !== null) {
-        const baseVal = Number(row[hoja.baselineIdx]);
-        if (Number.isFinite(baseVal)) {
-          const periodo = new Date(Date.UTC(anio - 1, 11, 1));
-          const existente = await prisma.lectura.findUnique({ where: { medidorId_periodo: { medidorId: medidor.id, periodo } } });
-          await prisma.lectura.upsert({
-            where: { medidorId_periodo: { medidorId: medidor.id, periodo } },
-            create: { medidorId: medidor.id, periodo, valorLectura: baseVal, consumo: baseVal - lecturaPrevia },
-            update: { valorLectura: baseVal },
-          });
-          existente ? actualizados++ : creados++;
-          lecturaPrevia = baseVal;
-        }
+      // Columnas de años anteriores (ej. diciembre del año pasado, colada en la hoja del año
+      // actual como referencia) sirven para sembrar lecturaPrevia, pero no generan su propio
+      // registro acá — ya deberían haber quedado guardadas al procesar la hoja de ese año.
+      const columnasDelAnio = hoja.columnasLectura.filter((c) => c.anio === anio).sort((a, b) => a.mes - b.mes);
+      const baseline = hoja.columnasLectura.filter((c) => c.anio === anio - 1).sort((a, b) => b.mes - a.mes)[0];
+      if (baseline) {
+        const baseVal = Number(row[baseline.idx]);
+        if (Number.isFinite(baseVal)) lecturaPrevia = baseVal;
       }
 
-      let mes = 1;
-      for (let i = 0; i + 1 < hoja.resto.length; i += 2, mes++) {
-        const a = hoja.resto[i];
-        const b = hoja.resto[i + 1];
-        const lecturaCol = a.tipo === "L" ? a : b;
-        const consumoCol = a.tipo === "C" ? a : b;
-        const lectura = row[lecturaCol.idx];
-        const consumo = row[consumoCol.idx];
+      for (const col of columnasDelAnio) {
+        const lectura = row[col.idx];
         if (lectura == null || lectura === "") continue;
 
         const valorLectura = Number(lectura);
         if (!Number.isFinite(valorLectura)) continue;
-        const consumoNum = Number.isFinite(Number(consumo)) ? Number(consumo) : valorLectura - lecturaPrevia;
-        const periodo = new Date(Date.UTC(anio, mes - 1, 1));
+        const consumoNum = valorLectura - lecturaPrevia;
+        const periodo = new Date(Date.UTC(col.anio, col.mes - 1, 1));
 
         const existente = await prisma.lectura.findUnique({ where: { medidorId_periodo: { medidorId: medidor.id, periodo } } });
         await prisma.lectura.upsert({

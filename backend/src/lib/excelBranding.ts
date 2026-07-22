@@ -3,7 +3,14 @@ import { COLOR_MARCA } from "./pdfBranding.js";
 
 export const COLOR_MARCA_ARGB = `FF${COLOR_MARCA.replace("#", "").toUpperCase()}`;
 
-export type ColumnaExcel = { titulo: string; clave: string; ancho?: number };
+// colorFondo: color ARGB (ej. "FFDCEEFB") para pintar toda la columna (encabezado y datos) —
+// útil para resaltar un grupo de columnas relacionadas, ej. las de LECTURA en el informe ancho.
+// ancho: si se omite, se calcula del largo del título (para que el encabezado no quede cortado).
+export type ColumnaExcel = { titulo: string; clave: string; ancho?: number; colorFondo?: string };
+
+function anchoColumna(c: ColumnaExcel): number {
+  return c.ancho ?? Math.max(c.titulo.length + 2, 10);
+}
 
 // Excel de un "informe" (solo lectura): banda de título en el azul de marca, subtítulo,
 // encabezado de columnas sombreado y filas alternadas — misma plantilla visual que los PDF
@@ -18,7 +25,7 @@ export async function crearInformeExcel(
 ): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet(hoja);
-  ws.columns = columnas.map((c) => ({ key: c.clave, width: c.ancho ?? 18 }));
+  ws.columns = columnas.map((c) => ({ key: c.clave, width: anchoColumna(c) }));
 
   const filaTitulo = ws.addRow([tituloReporte]);
   ws.mergeCells(filaTitulo.number, 1, filaTitulo.number, columnas.length);
@@ -76,7 +83,9 @@ function colorearFilaEncabezado(fila: ExcelJS.Row) {
 
 // "_resaltar: true" en una fila la pinta de un color de aviso (ej. para marcar una lectura que
 // no se tomó) en vez de la franja alterna normal — úsalo agregando esa clave al objeto de la fila,
-// no hace falta declararla en la lista de columnas.
+// no hace falta declararla en la lista de columnas. "_cotitular: true" la pinta de azul
+// institucional claro (ej. para las filas de cotitulares de un medidor compartido, debajo de su
+// titular) — pierde contra _resaltar si ambas aplican (falta de lectura manda).
 function agregarFilasAlternadas(ws: ExcelJS.Worksheet, columnas: ColumnaExcel[], filas: Record<string, unknown>[]) {
   filas.forEach((fila, i) => {
     const filaExcel = ws.addRow(columnas.map((c) => fila[c.clave] ?? ""));
@@ -85,9 +94,22 @@ function agregarFilasAlternadas(ws: ExcelJS.Worksheet, columnas: ColumnaExcel[],
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFECACA" } };
         cell.font = { color: { argb: "FF991B1B" } };
       });
+    } else if (fila._cotitular) {
+      filaExcel.eachCell((cell) => {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFBFDEF5" } };
+      });
     } else if (i % 2 === 1) {
       filaExcel.eachCell((cell) => {
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF1F5F9" } };
+      });
+    }
+    // Las columnas con colorFondo (ej. LECTURA en el informe horizontal) se pintan encima de la
+    // franja alterna, salvo que la fila ya esté resaltada en rojo por falta de lectura.
+    if (!fila._resaltar) {
+      columnas.forEach((c, idx) => {
+        if (c.colorFondo) {
+          filaExcel.getCell(idx + 1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: c.colorFondo } };
+        }
       });
     }
   });

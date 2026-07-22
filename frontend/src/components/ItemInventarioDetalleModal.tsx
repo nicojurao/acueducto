@@ -2,6 +2,9 @@ import { X, Pencil, Image as ImageIcon, Download, ExternalLink } from "lucide-re
 import { ItemInventario, urlFoto } from "../api/client";
 import { UNIDAD_ABREVIADA, UNIDADES } from "./ItemInventarioModal";
 import { useCierreAnimado } from "../lib/useCierreAnimado";
+import { fmtFecha as fmtFechaBase } from "../lib/fecha";
+import { useAuth } from "../contexts/AuthContext";
+import { HistorialSeccion } from "./HistorialTimeline";
 
 const ESTADO_LABELS: Record<string, string> = { bueno: "Bueno", regular: "Regular", dañado: "Dañado", de_baja: "De baja" };
 const ESTADO_COLORS: Record<string, string> = {
@@ -16,14 +19,14 @@ function fmtMoneda(n: number): string {
 }
 
 function fmtFecha(iso: string | null): string {
-  return iso ? new Date(iso).toLocaleDateString("es-CO") : "-";
+  return fmtFechaBase(iso, {});
 }
 
 function Campo({ etiqueta, valor }: { etiqueta: string; valor: string }) {
   return (
-    <div>
+    <div className="min-w-0">
       <div className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">{etiqueta}</div>
-      <div className="text-sm font-medium text-slate-800 dark:text-slate-100">{valor}</div>
+      <div className="break-words text-sm font-medium text-slate-800 dark:text-slate-100">{valor}</div>
     </div>
   );
 }
@@ -42,6 +45,7 @@ export default function ItemInventarioDetalleModal({
   const unidadLabel = UNIDADES.find((u) => u.value === item.unidadMedida)?.label ?? item.unidadMedida;
   const abreviada = UNIDAD_ABREVIADA[item.unidadMedida] ?? item.unidadMedida;
   const { saliendo, cerrar } = useCierreAnimado(onClose);
+  const { usuario } = useAuth();
 
   return (
     <div className={`fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-4 ${saliendo ? "animate-fade-out" : "animate-fade-in"}`}>
@@ -95,6 +99,11 @@ export default function ItemInventarioDetalleModal({
               {item.codigo}
             </span>
           )}
+          {item.stockBajo && (
+            <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 dark:bg-red-500/20 dark:text-red-400">
+              Stock bajo
+            </span>
+          )}
         </div>
 
         {item.descripcion && (
@@ -106,6 +115,7 @@ export default function ItemInventarioDetalleModal({
           <Campo etiqueta="Ubicación" valor={item.ubicacionCat?.nombre ?? "-"} />
           <Campo etiqueta="Cantidad" valor={`${item.cantidad} ${abreviada}`} />
           <Campo etiqueta="Disponible" valor={`${item.disponible} ${abreviada}`} />
+          <Campo etiqueta="Stock mínimo" valor={item.stockMinimo != null ? `${item.stockMinimo} ${abreviada}` : "-"} />
           <Campo etiqueta="Unidad de medida" valor={unidadLabel} />
           <Campo etiqueta="Proveedor" valor={item.proveedor?.nombre ?? "-"} />
           <Campo etiqueta="Fecha de compra" valor={fmtFecha(item.fechaCompra)} />
@@ -113,6 +123,12 @@ export default function ItemInventarioDetalleModal({
           <Campo etiqueta="Valor unitario" valor={item.valor ? fmtMoneda(Number(item.valor)) : "-"} />
           <Campo etiqueta="Ingresado por" valor={item.ingresadoPor?.nombre ?? "-"} />
         </div>
+
+        {usuario?.permisos?.includes("historial") && (
+          <div className="mt-4 border-t border-slate-200 pt-4 dark:border-slate-800">
+            <HistorialSeccion entidad="item_inventario" entidadId={item.id} />
+          </div>
+        )}
 
         {puedeEditar && (
           <div className="mt-5 flex justify-end">

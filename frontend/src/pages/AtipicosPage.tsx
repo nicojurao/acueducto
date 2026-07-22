@@ -4,6 +4,7 @@ import { ArrowLeft, AlertTriangle, ArrowUp, ArrowDown, ArrowUpDown } from "lucid
 import { api } from "../api/client";
 import SuscriptorDetailModal from "../components/SuscriptorDetailModal";
 import EmptyState from "../components/EmptyState";
+import ListCard from "../components/ListCard";
 
 // Las lecturas del mes no empiezan a capturarse hasta el día 20, así que antes de esa fecha se
 // muestra el mes anterior (que sí tiene datos) en vez del mes actual vacío. Mismo criterio que
@@ -143,70 +144,96 @@ export default function AtipicosPage() {
       ) : atipicos.length === 0 ? (
         <EmptyState mensaje="No hay consumos atípicos en este periodo." />
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-brand-200 bg-white shadow-sm animate-content-in dark:border-slate-800 dark:bg-slate-900">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-brand-100 bg-brand-50 text-left text-brand-800 dark:border-slate-800 dark:bg-slate-800/50 dark:text-slate-400">
-                <EncabezadoOrdenable
-                  label="NUID"
-                  columna="codigo"
-                  ordenColumna={ordenColumna}
-                  ordenDireccion={ordenDireccion}
-                  onClick={ordenarPor}
-                />
-                <EncabezadoOrdenable
-                  label="Suscriptor"
-                  columna="nombre"
-                  ordenColumna={ordenColumna}
-                  ordenDireccion={ordenDireccion}
-                  onClick={ordenarPor}
-                />
-                <EncabezadoOrdenable
-                  label="Consumo actual"
-                  columna="consumoActual"
-                  ordenColumna={ordenColumna}
-                  ordenDireccion={ordenDireccion}
-                  onClick={ordenarPor}
-                />
-                <EncabezadoOrdenable
-                  label="Promedio histórico"
-                  columna="promedioHistorico"
-                  ordenColumna={ordenColumna}
-                  ordenDireccion={ordenDireccion}
-                  onClick={ordenarPor}
-                />
-                <EncabezadoOrdenable
-                  label="Desviación"
-                  columna="desviacionPct"
-                  ordenColumna={ordenColumna}
-                  ordenDireccion={ordenDireccion}
-                  onClick={ordenarPor}
-                />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {atipicosOrdenados.map((a) => (
-                <tr
-                  key={a.medidorId}
-                  onClick={() => setDetalleId(a.suscriptorId)}
-                  className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/40"
-                >
-                  <td className="px-4 py-2.5">{a.codigo}</td>
-                  <td className="px-4 py-2.5">{a.nombre}</td>
-                  <td className="px-4 py-2.5">{fmt(a.consumoActual)}</td>
-                  <td className="px-4 py-2.5">{fmt(a.promedioHistorico)}</td>
-                  <td
-                    className={`px-4 py-2.5 font-semibold ${
-                      a.desviacionPct > 200 ? "text-red-600 dark:text-red-400" : "text-amber-600 dark:text-amber-400"
+        <>
+          <div className="hidden md:block overflow-x-auto rounded-xl border border-brand-200 bg-white shadow-sm animate-content-in dark:border-slate-800 dark:bg-slate-900">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-brand-100 bg-brand-50 text-left text-brand-800 dark:border-slate-800 dark:bg-slate-800/50 dark:text-slate-400">
+                  <EncabezadoOrdenable
+                    label="NUID"
+                    columna="codigo"
+                    ordenColumna={ordenColumna}
+                    ordenDireccion={ordenDireccion}
+                    onClick={ordenarPor}
+                  />
+                  <EncabezadoOrdenable
+                    label="Suscriptor"
+                    columna="nombre"
+                    ordenColumna={ordenColumna}
+                    ordenDireccion={ordenDireccion}
+                    onClick={ordenarPor}
+                  />
+                  <EncabezadoOrdenable
+                    label="Consumo actual"
+                    columna="consumoActual"
+                    ordenColumna={ordenColumna}
+                    ordenDireccion={ordenDireccion}
+                    onClick={ordenarPor}
+                  />
+                  <EncabezadoOrdenable
+                    label="Promedio histórico"
+                    columna="promedioHistorico"
+                    ordenColumna={ordenColumna}
+                    ordenDireccion={ordenDireccion}
+                    onClick={ordenarPor}
+                  />
+                  <EncabezadoOrdenable
+                    label="Desviación"
+                    columna="desviacionPct"
+                    ordenColumna={ordenColumna}
+                    ordenDireccion={ordenDireccion}
+                    onClick={ordenarPor}
+                  />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                {atipicosOrdenados.map((a) => (
+                  <tr
+                    key={a.medidorId}
+                    onClick={() => setDetalleId(a.suscriptorId)}
+                    className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/40"
+                  >
+                    <td className="px-4 py-2.5">{a.codigo}</td>
+                    <td className="px-4 py-2.5">{a.nombre}</td>
+                    <td className="px-4 py-2.5">{fmt(a.consumoActual)}</td>
+                    <td className="px-4 py-2.5">{fmt(a.promedioHistorico)}</td>
+                    <td
+                      className={`px-4 py-2.5 font-semibold ${
+                        a.desviacionPct > 200 ? "text-red-600 dark:text-red-400" : "text-amber-600 dark:text-amber-400"
+                      }`}
+                    >
+                      {fmt(a.desviacionPct)}%
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="space-y-2 md:hidden">
+            {atipicosOrdenados.map((a) => (
+              <ListCard key={a.medidorId} onClick={() => setDetalleId(a.suscriptorId)}>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold text-slate-800 dark:text-slate-100">{a.codigo}</span>
+                  <span
+                    className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
+                      a.desviacionPct > 200
+                        ? "bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-400"
+                        : "bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400"
                     }`}
                   >
-                    {fmt(a.desviacionPct)}%
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                    +{fmt(a.desviacionPct)}%
+                  </span>
+                </div>
+                <div className="truncate text-sm text-slate-700 dark:text-slate-300">{a.nombre}</div>
+                <div className="mt-1 flex items-center justify-between gap-2 text-xs text-slate-600 dark:text-slate-400">
+                  <span>Actual: {fmt(a.consumoActual)} m³</span>
+                  <span>Promedio: {fmt(a.promedioHistorico)} m³</span>
+                </div>
+              </ListCard>
+            ))}
+          </div>
+        </>
       )}
 
       {detalleId !== null && (

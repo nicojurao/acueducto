@@ -270,9 +270,19 @@ export interface ModeloMedidor {
   id: number;
   nombre: string;
   tipo: string;
+  clasePrecision: string | null;
+  varianteId: number | null;
+  varianteCat?: VarianteMedidor | null;
   marcaId: number;
   marca?: MarcaMedidor;
   diametros?: DiametroMedidor[];
+}
+
+export interface VarianteMedidor {
+  id: number;
+  codigo: string;
+  etiqueta: string;
+  tipo: string;
 }
 
 export interface DiametroMedidor {
@@ -799,13 +809,27 @@ export const api = {
       if (marcaId) qs.set("marcaId", String(marcaId));
       return request<ModeloMedidor[]>(`/api/modelos?${qs}`);
     },
-    create: (data: { nombre: string; tipo: string; marcaId: number }) =>
+    create: (data: { nombre: string; tipo: string; marcaId: number; clasePrecision?: string; varianteId?: number }) =>
       request<ModeloMedidor>("/api/modelos", { method: "POST", body: JSON.stringify(data) }),
-    update: (id: number, data: { nombre: string; tipo: string; marcaId: number }) =>
-      request<ModeloMedidor>(`/api/modelos/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+    update: (
+      id: number,
+      data: { nombre: string; tipo: string; marcaId: number; clasePrecision?: string; varianteId?: number }
+    ) => request<ModeloMedidor>(`/api/modelos/${id}`, { method: "PUT", body: JSON.stringify(data) }),
     remove: (id: number) => request<void>(`/api/modelos/${id}`, { method: "DELETE" }),
     setDiametros: (id: number, diametroIds: number[]) =>
       request<ModeloMedidor>(`/api/modelos/${id}/diametros`, { method: "PUT", body: JSON.stringify({ diametroIds }) }),
+  },
+  variantes: {
+    list: (tipo?: string) => {
+      const qs = new URLSearchParams();
+      if (tipo) qs.set("tipo", tipo);
+      return request<VarianteMedidor[]>(`/api/variantes?${qs}`);
+    },
+    create: (data: { codigo: string; etiqueta: string; tipo: string }) =>
+      request<VarianteMedidor>("/api/variantes", { method: "POST", body: JSON.stringify(data) }),
+    update: (id: number, data: { codigo: string; etiqueta: string; tipo: string }) =>
+      request<VarianteMedidor>(`/api/variantes/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+    remove: (id: number) => request<void>(`/api/variantes/${id}`, { method: "DELETE" }),
   },
   diametros: {
     list: () => request<DiametroMedidor[]>("/api/diametros"),
@@ -1253,15 +1277,21 @@ export const api = {
       const qs = meses ? `?meses=${meses}` : "";
       return descargarArchivo(`/api/reportes/consumo-suscriptor/${id}/pdf${qs}`, `informe-suscriptor-${id}.pdf`, true);
     },
+    mapaConsumo: (periodo: string) =>
+      request<{ id: number; latitud: number; longitud: number; consumo: number }[]>(
+        `/api/reportes/mapa-consumo?periodo=${periodo}`
+      ),
     porRuta: (periodo: string) =>
       request<{ ruta: string; usuarios: number; consumo: number }[]>(`/api/reportes/por-ruta?periodo=${periodo}`),
     porBarrio: (periodo: string, estratos?: string[]) => {
       const qs = new URLSearchParams({ periodo });
       if (estratos && estratos.length > 0) qs.set("estratos", estratos.join(","));
-      return request<{ barrio: string; usuarios: number; consumo: number }[]>(`/api/reportes/por-barrio?${qs}`);
+      return request<{ barrio: string; barrioId: number | null; usuarios: number; consumo: number }[]>(
+        `/api/reportes/por-barrio?${qs}`
+      );
     },
     porEstrato: (periodo: string) =>
-      request<{ estrato: string; usuarios: number; consumo: number }[]>(
+      request<{ estrato: string; estratoId: number | null; usuarios: number; consumo: number }[]>(
         `/api/reportes/por-estrato?periodo=${periodo}`
       ),
     exportLecturas: (periodo: string) =>
@@ -1289,6 +1319,7 @@ export const api = {
         facturadosPorMedicion: number;
         consumoMesActual: number;
         promedioPorUsuario: number;
+        promedioMesAnterior: number;
         lecturasPendientes: number;
         variacionMesAnterior: number | null;
         variacionAnioAnterior: number | null;
@@ -1305,10 +1336,14 @@ export const api = {
           desviacionPct: number;
         }[]
       >(`/api/dashboard/atipicos?periodo=${periodo}`),
-    topConsumidores: (periodo: string, limit = 10) =>
-      request<{ codigo: string; nombre: string; consumo: number }[]>(
-        `/api/dashboard/top-consumidores?periodo=${periodo}&limit=${limit}`
-      ),
+    topConsumidores: (periodo: string, limit = 10, filtros?: { barrio?: number; estrato?: number }) => {
+      const qs = new URLSearchParams({ periodo, limit: String(limit) });
+      if (filtros?.barrio) qs.set("barrio", String(filtros.barrio));
+      if (filtros?.estrato) qs.set("estrato", String(filtros.estrato));
+      return request<{ codigo: string; nombre: string; consumo: number }[]>(
+        `/api/dashboard/top-consumidores?${qs}`
+      );
+    },
     distribucionMedidores: () =>
       request<{
         porTipo: { tipo: string; cantidad: number }[];

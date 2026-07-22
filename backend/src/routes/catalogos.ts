@@ -6,6 +6,7 @@ export const marcasRouter = Router();
 export const modelosRouter = Router();
 export const diametrosRouter = Router();
 export const lotesRouter = Router();
+export const variantesRouter = Router();
 
 function esErrorFK(err: unknown): boolean {
   return err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2003";
@@ -54,32 +55,44 @@ modelosRouter.get("/", async (req, res) => {
   const { marcaId } = req.query;
   const modelos = await prisma.modeloMedidor.findMany({
     where: { marcaId: marcaId ? Number(marcaId) : undefined },
-    include: { marca: true, diametros: true },
+    include: { marca: true, diametros: true, varianteCat: true },
     orderBy: { nombre: "asc" },
   });
   res.json(modelos);
 });
 
 modelosRouter.post("/", async (req, res) => {
-  const { nombre, tipo, marcaId } = req.body;
+  const { nombre, tipo, marcaId, clasePrecision, varianteId } = req.body;
   if (!nombre || !tipo || !marcaId) {
     return res.status(400).json({ error: "nombre, tipo y marcaId son requeridos" });
   }
   const modelo = await prisma.modeloMedidor.create({
-    data: { nombre, tipo, marcaId: Number(marcaId) },
+    data: {
+      nombre,
+      tipo,
+      marcaId: Number(marcaId),
+      clasePrecision: clasePrecision || null,
+      varianteId: varianteId ? Number(varianteId) : null,
+    },
   });
   res.status(201).json(modelo);
 });
 
 modelosRouter.put("/:id", async (req, res) => {
-  const { nombre, tipo, marcaId } = req.body;
+  const { nombre, tipo, marcaId, clasePrecision, varianteId } = req.body;
   if (!nombre || !tipo || !marcaId) {
     return res.status(400).json({ error: "nombre, tipo y marcaId son requeridos" });
   }
   const id = Number(req.params.id);
   const modelo = await prisma.modeloMedidor.update({
     where: { id },
-    data: { nombre, tipo, marcaId: Number(marcaId) },
+    data: {
+      nombre,
+      tipo,
+      marcaId: Number(marcaId),
+      clasePrecision: clasePrecision || null,
+      varianteId: varianteId ? Number(varianteId) : null,
+    },
   });
   // Medidor.tipo es copia del catálogo (para no depender de un join al filtrar/mostrar);
   // si se corrige el tipo de un modelo ya en uso, hay que propagarlo a los medidores existentes.
@@ -137,6 +150,50 @@ diametrosRouter.delete("/:id", async (req, res) => {
   } catch (err) {
     if (esErrorFK(err)) {
       return res.status(400).json({ error: "No se puede eliminar: hay medidores que usan este diámetro" });
+    }
+    throw err;
+  }
+});
+
+// Sub-variantes del tipo (CU/CM para velocidad, PR/DN para volumétrico). Cada modelo tiene a lo
+// sumo una (a diferencia de diámetros, que puede tener varios).
+variantesRouter.get("/", async (req, res) => {
+  const { tipo } = req.query;
+  const variantes = await prisma.varianteMedidor.findMany({
+    where: { tipo: tipo ? String(tipo) : undefined },
+    orderBy: { etiqueta: "asc" },
+  });
+  res.json(variantes);
+});
+
+variantesRouter.post("/", async (req, res) => {
+  const { codigo, etiqueta, tipo } = req.body;
+  if (!codigo || !etiqueta || !tipo) {
+    return res.status(400).json({ error: "codigo, etiqueta y tipo son requeridos" });
+  }
+  const variante = await prisma.varianteMedidor.create({ data: { codigo, etiqueta, tipo } });
+  res.status(201).json(variante);
+});
+
+variantesRouter.put("/:id", async (req, res) => {
+  const { codigo, etiqueta, tipo } = req.body;
+  if (!codigo || !etiqueta || !tipo) {
+    return res.status(400).json({ error: "codigo, etiqueta y tipo son requeridos" });
+  }
+  const variante = await prisma.varianteMedidor.update({
+    where: { id: Number(req.params.id) },
+    data: { codigo, etiqueta, tipo },
+  });
+  res.json(variante);
+});
+
+variantesRouter.delete("/:id", async (req, res) => {
+  try {
+    await prisma.varianteMedidor.delete({ where: { id: Number(req.params.id) } });
+    res.status(204).end();
+  } catch (err) {
+    if (esErrorFK(err)) {
+      return res.status(400).json({ error: "No se puede eliminar: hay modelos que usan esta variante" });
     }
     throw err;
   }

@@ -74,13 +74,16 @@ model MarcaMedidor {
 }
 
 model ModeloMedidor {
-  id        Int          @id @default(autoincrement())
-  nombre    String
-  tipo      String        // "volumetrico" | "velocidad"
-  marcaId   Int
-  marca     MarcaMedidor  @relation(fields: [marcaId], references: [id])
-  medidores Medidor[]
-  diametros DiametroMedidor[]
+  id              Int          @id @default(autoincrement())
+  nombre          String
+  tipo            String        // "volumetrico" | "velocidad"
+  clasePrecision  String?       // ej. "A", "B", "C", "R100", "R160"
+  varianteId      Int?
+  varianteCat     VarianteMedidor? @relation(fields: [varianteId], references: [id])
+  marcaId         Int
+  marca           MarcaMedidor  @relation(fields: [marcaId], references: [id])
+  medidores       Medidor[]
+  diametros       DiametroMedidor[]
 
   @@unique([marcaId, nombre])
 }
@@ -90,6 +93,17 @@ model DiametroMedidor {
   valor     String    @unique // ej. 1/2", 3/4", 1"
   medidores Medidor[]
   modelos   ModeloMedidor[]
+}
+
+// Sub-variante del tipo de medición: para "velocidad" son CU (Chorro Único) / CM (Chorro
+// Múltiple); para "volumetrico" son PR (Pistón Rotativo) / DN (Disco Nutante). A lo sumo una
+// por modelo (a diferencia de los diámetros, que un modelo puede tener varios).
+model VarianteMedidor {
+  id       Int             @id @default(autoincrement())
+  codigo   String          @unique // "CU", "CM", "PR", "DN"
+  etiqueta String          // "Chorro Único", "Chorro Múltiple", "Pistón Rotativo", "Disco Nutante"
+  tipo     String          // "volumetrico" | "velocidad" — a cuál tipo aplica
+  modelos  ModeloMedidor[]
 }
 
 // Una caja de fábrica trae varios medidores con seriales consecutivos (ej. 23001 a 23020); el
@@ -317,6 +331,7 @@ model ItemInventario {
   codigo        String?  @unique // placa/código de inventario, opcional
   descripcion   String?
   cantidad      Int      @default(1)
+  stockMinimo   Int? // opcional: si "disponible" cae a este número o menos, se marca como stock bajo
   unidadMedida  String   @default("unidad") // "unidad" | "metro" | "kilogramo" | "litro" | "galon" | "rollo" | "caja" | "par"
   estado        String   @default("bueno") // "bueno" | "regular" | "dañado" | "de_baja"
   ubicacionId   Int?
@@ -370,6 +385,7 @@ model PrestamoInventario {
   usuario         Usuario        @relation(fields: [usuarioId], references: [id])
   cantidad        Int            @default(1)
   fechaEntrega    DateTime       @default(now())
+  fechaEsperadaDevolucion DateTime? // opcional: para marcar como "vencido" un préstamo sin devolver
   fechaDevolucion DateTime? // null = todavía está prestado
   observaciones   String?
   createdAt       DateTime       @default(now())
@@ -377,14 +393,16 @@ model PrestamoInventario {
   @@index([itemId, fechaDevolucion])
 }
 
-// Entradas (compra, reposición) y salidas (consumo, ej. tubos usados en una instalación) de
-// stock — distinto de PrestamoInventario, que es para equipos que se prestan y se devuelven.
-// Una entrada suma "cantidad" al ItemInventario, una salida la resta.
+// Entradas (compra, reposición), salidas (consumo, ej. tubos usados en una instalación) y
+// transferencias (cambio de ubicación, no toca "cantidad") de stock — distinto de
+// PrestamoInventario, que es para equipos que se prestan y se devuelven.
+// Una entrada suma "cantidad" al ItemInventario, una salida la resta, una transferencia no la
+// toca (solo cambia ubicacionId del ítem, registrada acá para dejar rastro).
 model MovimientoInventario {
   id            Int            @id @default(autoincrement())
   itemId        Int
   item          ItemInventario @relation(fields: [itemId], references: [id])
-  tipo          String // "entrada" | "salida"
+  tipo          String // "entrada" | "salida" | "transferencia"
   cantidad      Int
   motivo        String?
   observaciones String?
@@ -425,6 +443,34 @@ model RolPermiso {
   permiso   Permiso @relation(fields: [permisoId], references: [id], onDelete: Cascade)
 
   @@id([rolId, permisoId])
+}
+
+// Una fila por día: tamaño de la BD Postgres y de MinIO en ese momento, para graficar la
+// tendencia de crecimiento en el Panel de administración. La escribe un cron interno del
+// backend (ver src/lib/snapshotAlmacenamiento.ts), no el usuario.
+model SnapshotAlmacenamiento {
+  id             Int      @id @default(autoincrement())
+  fecha          DateTime @unique // día (medianoche UTC), una sola foto por día
+  tamanoBdBytes  BigInt
+  tamanoMinioBytes BigInt
+  createdAt      DateTime @default(now())
+}
+
+// Foto de los KPIs del dashboard que dependen del estado ACTUAL del suscriptor (cobertura con
+// medidor, facturados por medición) — a diferencia del consumo/lecturas, que ya son históricamente
+// exactos porque se filtran por el campo periodo de Lectura. Se toma el día 19 de cada mes (justo
+// antes de que arranque la captura del periodo siguiente, día 20) para que el dashboard de un mes
+// ya cerrado no cambie según el estado de HOY. Ver backend/src/lib/snapshotPeriodo.ts.
+model SnapshotPeriodo {
+  id                    Int      @id @default(autoincrement())
+  periodo               String   @unique // "YYYY-MM"
+  suscriptoresActivos   Int
+  medidoresActivos      Int
+  sinMedidor            Int
+  instaladoPrueba       Int
+  facturando            Int
+  inactivo              Int
+  createdAt             DateTime @default(now())
 }
 
 // Módulo de Aforos: mide caudal de una fuente/bocatoma (no de un medidor de suscriptor).

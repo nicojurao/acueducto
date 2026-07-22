@@ -25,6 +25,7 @@ import {
   MarcaMedidor,
   ModeloMedidor,
   DiametroMedidor,
+  VarianteMedidor,
   ActaInstalacion,
   Lote,
 } from "../api/client";
@@ -40,6 +41,7 @@ import BusquedaInput from "../components/BusquedaInput";
 import { useFilasAutoajustadas } from "../lib/useFilasAutoajustadas";
 import ThOrdenable, { Orden, alternarOrden } from "../components/ThOrdenable";
 import { inputClass } from "../lib/ui";
+import { fmtFecha } from "../lib/fecha";
 import EmptyState from "../components/EmptyState";
 
 const TIPO_LABELS: Record<string, string> = { volumetrico: "Volumétrico", velocidad: "Velocidad" };
@@ -151,6 +153,9 @@ function InventarioTab() {
     modeloId: "",
     diametroId: "",
     loteId: "",
+    fechaFabricacion: "",
+    fechaCertificacion: "",
+    certificado: "",
   });
   const [nuevaActaCalibracion, setNuevaActaCalibracion] = useState<File | null>(null);
 
@@ -213,18 +218,30 @@ function InventarioTab() {
 
   async function crearMedidor(e: React.FormEvent) {
     e.preventDefault();
-    if (!nuevo.serial) return;
+    if (!nuevo.serial || !nuevo.fechaFabricacion || !nuevo.fechaCertificacion) return;
     const creado = await api.medidores.create({
       serial: nuevo.serial,
       marcaId: nuevo.marcaId ? Number(nuevo.marcaId) : undefined,
       modeloId: nuevo.modeloId ? Number(nuevo.modeloId) : undefined,
       diametroId: nuevo.diametroId ? Number(nuevo.diametroId) : undefined,
       loteId: nuevo.loteId ? Number(nuevo.loteId) : undefined,
+      fechaFabricacion: nuevo.fechaFabricacion,
+      fechaCertificacion: nuevo.fechaCertificacion,
+      certificado: nuevo.certificado || undefined,
     });
     if (nuevaActaCalibracion) {
       await api.medidores.subirActaCalibracion(creado.id, nuevaActaCalibracion);
     }
-    setNuevo({ serial: "", marcaId: "", modeloId: "", diametroId: "", loteId: "" });
+    setNuevo({
+      serial: "",
+      marcaId: "",
+      modeloId: "",
+      diametroId: "",
+      loteId: "",
+      fechaFabricacion: "",
+      fechaCertificacion: "",
+      certificado: "",
+    });
     setNuevaActaCalibracion(null);
     cargar();
   }
@@ -387,10 +404,45 @@ function InventarioTab() {
               </div>
               {modeloSeleccionado && (
                 <p className="text-xs text-slate-700 dark:text-slate-400">
-                  Tipo: <span className="font-medium">{tipoLabel(modeloSeleccionado.tipo)}</span> (definido por el modelo)
+                  Tipo: <span className="font-medium">{tipoLabel(modeloSeleccionado.tipo)}</span>
+                  {modeloSeleccionado.clasePrecision && (
+                    <>
+                      {" "}
+                      · Clase: <span className="font-medium">{modeloSeleccionado.clasePrecision}</span>
+                    </>
+                  )}{" "}
+                  (definido por el modelo)
                   {diametrosDelModelo.length === 0 && " · este modelo no tiene diámetros configurados en el Catálogo"}
                 </p>
               )}
+              <div className="grid grid-cols-2 gap-3">
+                <label className="flex flex-col gap-1 text-xs text-slate-600 dark:text-slate-300">
+                  Fecha de fabricación *
+                  <input
+                    type="date"
+                    value={nuevo.fechaFabricacion}
+                    onChange={(e) => setNuevo({ ...nuevo, fechaFabricacion: e.target.value })}
+                    className={inputClass}
+                    required
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-slate-600 dark:text-slate-300">
+                  Fecha de calibración *
+                  <input
+                    type="date"
+                    value={nuevo.fechaCertificacion}
+                    onChange={(e) => setNuevo({ ...nuevo, fechaCertificacion: e.target.value })}
+                    className={inputClass}
+                    required
+                  />
+                </label>
+              </div>
+              <input
+                placeholder="N° certificado (opcional)"
+                value={nuevo.certificado}
+                onChange={(e) => setNuevo({ ...nuevo, certificado: e.target.value })}
+                className={inputClass}
+              />
               <div>
                 <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">
                   Acta de calibración (escaneada, opcional)
@@ -552,7 +604,7 @@ function InventarioTab() {
               {medidores.map((m) => (
                 <tr
                   key={m.id}
-                  onClick={() => (m.suscriptorId ? setDetalleSuscriptorId(m.suscriptorId) : setDetalleMedidor(m))}
+                  onClick={() => setDetalleMedidor(m)}
                   className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/40"
                 >
                   <td className="px-3 py-1.5 sm:px-4 sm:py-2.5" onClick={(e) => e.stopPropagation()}>
@@ -620,7 +672,7 @@ function InventarioTab() {
               <div className="flex items-start justify-between gap-2">
                 <button
                   type="button"
-                  onClick={() => (m.suscriptorId ? setDetalleSuscriptorId(m.suscriptorId) : setDetalleMedidor(m))}
+                  onClick={() => setDetalleMedidor(m)}
                   className="min-w-0 flex-1 text-left"
                 >
                   <div className="font-semibold text-slate-800 dark:text-slate-100">{m.serial ?? "Sin serial"}</div>
@@ -704,6 +756,14 @@ function InventarioTab() {
             setDetalleMedidor(null);
             cargar();
           }}
+          onVerSuscriptor={
+            detalleMedidor.suscriptorId
+              ? () => {
+                  setDetalleSuscriptorId(detalleMedidor.suscriptorId!);
+                  setDetalleMedidor(null);
+                }
+              : undefined
+          }
         />
       )}
 
@@ -724,6 +784,7 @@ function CatalogoTab() {
   const [marcas, setMarcas] = useState<MarcaMedidor[]>([]);
   const [diametros, setDiametros] = useState<DiametroMedidor[]>([]);
   const [lotes, setLotes] = useState<Lote[]>([]);
+  const [variantes, setVariantes] = useState<VarianteMedidor[]>([]);
   const [modalMarcaAbierto, setModalMarcaAbierto] = useState(false);
   const [marcaEnModal, setMarcaEnModal] = useState<MarcaMedidor | null>(null);
 
@@ -733,14 +794,28 @@ function CatalogoTab() {
   const [nuevoLote, setNuevoLote] = useState({ serialInicial: "", serialFinal: "" });
   const [editandoLote, setEditandoLote] = useState<{ id: number; serialInicial: string; serialFinal: string } | null>(null);
 
+  const [nuevaVariante, setNuevaVariante] = useState({ codigo: "", etiqueta: "", tipo: "velocidad" });
+  const [editandoVariante, setEditandoVariante] = useState<{
+    id: number;
+    codigo: string;
+    etiqueta: string;
+    tipo: string;
+  } | null>(null);
+
   const { error, run } = useErrorHandler();
   const { pedirConfirmacion, modal } = useConfirm();
 
   async function cargar() {
-    const [ma, d, lo] = await Promise.all([api.marcas.list(), api.diametros.list(), api.lotes.list()]);
+    const [ma, d, lo, va] = await Promise.all([
+      api.marcas.list(),
+      api.diametros.list(),
+      api.lotes.list(),
+      api.variantes.list(),
+    ]);
     setMarcas(ma);
     setDiametros(d);
     setLotes(lo);
+    setVariantes(va);
   }
 
   useEffect(() => {
@@ -769,6 +844,33 @@ function CatalogoTab() {
     await run(async () => {
       await api.diametros.create(nuevoDiametro.trim());
       setNuevoDiametro("");
+      await cargar();
+    });
+  }
+
+  async function crearVariante(e: React.FormEvent) {
+    e.preventDefault();
+    if (!nuevaVariante.codigo.trim() || !nuevaVariante.etiqueta.trim()) return;
+    await run(async () => {
+      await api.variantes.create({
+        codigo: nuevaVariante.codigo.trim(),
+        etiqueta: nuevaVariante.etiqueta.trim(),
+        tipo: nuevaVariante.tipo,
+      });
+      setNuevaVariante({ codigo: "", etiqueta: "", tipo: "velocidad" });
+      await cargar();
+    });
+  }
+
+  async function guardarEdicionVariante() {
+    if (!editandoVariante || !editandoVariante.codigo.trim() || !editandoVariante.etiqueta.trim()) return;
+    await run(async () => {
+      await api.variantes.update(editandoVariante.id, {
+        codigo: editandoVariante.codigo.trim(),
+        etiqueta: editandoVariante.etiqueta.trim(),
+        tipo: editandoVariante.tipo,
+      });
+      setEditandoVariante(null);
       await cargar();
     });
   }
@@ -1079,10 +1181,136 @@ function CatalogoTab() {
         </table>
       </div>
 
+      <div className="mt-6 rounded-xl border border-brand-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <h3 className="mb-1 flex items-center gap-1.5 text-sm font-semibold text-slate-700 dark:text-slate-200">
+          <Tag className="h-4 w-4 text-brand-500" />
+          Variantes
+        </h3>
+        <p className="mb-3 text-xs text-slate-700 dark:text-slate-400">
+          Sub-variante del tipo de medición (ej. CU/CM para velocidad, PR/DN para volumétrico). Se
+          elige una por modelo dentro del cuadro de cada marca.
+        </p>
+        <form className="mb-3 flex flex-wrap gap-2" onSubmit={crearVariante}>
+          <input
+            placeholder="Código (ej. CU)"
+            value={nuevaVariante.codigo}
+            onChange={(e) => setNuevaVariante({ ...nuevaVariante, codigo: e.target.value })}
+            className={`${inputClass} w-28`}
+          />
+          <input
+            placeholder="Etiqueta (ej. Chorro Único)"
+            value={nuevaVariante.etiqueta}
+            onChange={(e) => setNuevaVariante({ ...nuevaVariante, etiqueta: e.target.value })}
+            className={`${inputClass} flex-1`}
+          />
+          <select
+            value={nuevaVariante.tipo}
+            onChange={(e) => setNuevaVariante({ ...nuevaVariante, tipo: e.target.value })}
+            className={inputClass}
+          >
+            <option value="velocidad">Velocidad</option>
+            <option value="volumetrico">Volumétrico</option>
+          </select>
+          <button
+            type="submit"
+            className="flex shrink-0 items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-500"
+          >
+            <Plus className="h-4 w-4" />
+            Agregar
+          </button>
+        </form>
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-200 text-left text-slate-700 dark:border-slate-800 dark:text-slate-400">
+              <th className="py-2 font-medium">Código</th>
+              <th className="py-2 font-medium">Etiqueta</th>
+              <th className="py-2 font-medium">Tipo</th>
+              <th className="py-2 font-medium"></th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+            {variantes.map((v) =>
+              editandoVariante?.id === v.id ? (
+                <tr key={v.id}>
+                  <td colSpan={4} className="py-1.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input
+                        value={editandoVariante.codigo}
+                        onChange={(e) => setEditandoVariante({ ...editandoVariante, codigo: e.target.value })}
+                        className={`${inputClass} w-24 py-1`}
+                        autoFocus
+                      />
+                      <input
+                        value={editandoVariante.etiqueta}
+                        onChange={(e) => setEditandoVariante({ ...editandoVariante, etiqueta: e.target.value })}
+                        className={`${inputClass} flex-1 py-1`}
+                      />
+                      <select
+                        value={editandoVariante.tipo}
+                        onChange={(e) => setEditandoVariante({ ...editandoVariante, tipo: e.target.value })}
+                        className={`${inputClass} py-1`}
+                      >
+                        <option value="velocidad">Velocidad</option>
+                        <option value="volumetrico">Volumétrico</option>
+                      </select>
+                      <button onClick={guardarEdicionVariante} className="text-emerald-600 hover:text-emerald-500">
+                        <Check className="h-4 w-4" />
+                      </button>
+                      <button onClick={() => setEditandoVariante(null)} className="text-slate-600 hover:text-slate-600">
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                <tr key={v.id}>
+                  <td className="py-1.5 font-medium text-slate-700 dark:text-slate-200">{v.codigo}</td>
+                  <td className="py-1.5 text-slate-700 dark:text-slate-400">{v.etiqueta}</td>
+                  <td className="py-1.5 text-slate-700 dark:text-slate-400">{tipoLabel(v.tipo)}</td>
+                  <td className="py-1.5 text-right">
+                    <span className="flex justify-end gap-2 text-slate-600">
+                      <button
+                        onClick={() =>
+                          setEditandoVariante({ id: v.id, codigo: v.codigo, etiqueta: v.etiqueta, tipo: v.tipo })
+                        }
+                        className="hover:text-brand-600"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        onClick={() =>
+                          pedirConfirmacion(`¿Eliminar la variante "${v.etiqueta}"?`, () =>
+                            run(async () => {
+                              await api.variantes.remove(v.id);
+                              await cargar();
+                            })
+                          )
+                        }
+                        className="hover:text-red-600"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </span>
+                  </td>
+                </tr>
+              )
+            )}
+            {variantes.length === 0 && (
+              <tr>
+                <td colSpan={4} className="py-2">
+                  <EmptyState mensaje="Aún no hay variantes. Agrega la primera arriba." className="py-2" />
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
       {modalMarcaAbierto && (
         <MarcaModal
           marca={marcaEnModal}
           diametrosCatalogo={diametros}
+          variantesCatalogo={variantes}
           onCreada={(nueva) => setMarcaEnModal(nueva)}
           onCerrar={cerrarModalMarca}
         />
@@ -1094,11 +1322,13 @@ function CatalogoTab() {
 function MarcaModal({
   marca,
   diametrosCatalogo,
+  variantesCatalogo,
   onCreada,
   onCerrar,
 }: {
   marca: MarcaMedidor | null;
   diametrosCatalogo: DiametroMedidor[];
+  variantesCatalogo: VarianteMedidor[];
   onCreada: (marca: MarcaMedidor) => void;
   onCerrar: () => void;
 }) {
@@ -1110,12 +1340,23 @@ function MarcaModal({
 
   const [modelos, setModelos] = useState<ModeloMedidor[]>([]);
   const [cargandoModelos, setCargandoModelos] = useState(false);
-  const [formModelo, setFormModelo] = useState<{ id: number | null; nombre: string; tipo: string; diametroIds: number[] }>({
+  const [formModelo, setFormModelo] = useState<{
+    id: number | null;
+    nombre: string;
+    tipo: string;
+    clasePrecision: string;
+    varianteId: string;
+    diametroIds: number[];
+  }>({
     id: null,
     nombre: "",
     tipo: "",
+    clasePrecision: "",
+    varianteId: "",
     diametroIds: [],
   });
+
+  const variantesDelTipo = variantesCatalogo.filter((v) => v.tipo === formModelo.tipo);
 
   async function cargarModelos(marcaId: number) {
     setCargandoModelos(true);
@@ -1145,7 +1386,7 @@ function MarcaModal({
   }
 
   function limpiarFormModelo() {
-    setFormModelo({ id: null, nombre: "", tipo: "", diametroIds: [] });
+    setFormModelo({ id: null, nombre: "", tipo: "", clasePrecision: "", varianteId: "", diametroIds: [] });
   }
 
   function editarModelo(mo: ModeloMedidor) {
@@ -1153,6 +1394,8 @@ function MarcaModal({
       id: mo.id,
       nombre: mo.nombre,
       tipo: mo.tipo,
+      clasePrecision: mo.clasePrecision ?? "",
+      varianteId: mo.varianteId ? String(mo.varianteId) : "",
       diametroIds: (mo.diametros ?? []).map((d) => d.id),
     });
   }
@@ -1171,10 +1414,22 @@ function MarcaModal({
     if (!marca || !formModelo.nombre.trim() || !formModelo.tipo) return;
     await run(async () => {
       if (formModelo.id) {
-        await api.modelos.update(formModelo.id, { nombre: formModelo.nombre.trim(), tipo: formModelo.tipo, marcaId: marca.id });
+        await api.modelos.update(formModelo.id, {
+          nombre: formModelo.nombre.trim(),
+          tipo: formModelo.tipo,
+          marcaId: marca.id,
+          clasePrecision: formModelo.clasePrecision.trim() || undefined,
+          varianteId: formModelo.varianteId ? Number(formModelo.varianteId) : undefined,
+        });
         await api.modelos.setDiametros(formModelo.id, formModelo.diametroIds);
       } else {
-        const creado = await api.modelos.create({ nombre: formModelo.nombre.trim(), tipo: formModelo.tipo, marcaId: marca.id });
+        const creado = await api.modelos.create({
+          nombre: formModelo.nombre.trim(),
+          tipo: formModelo.tipo,
+          marcaId: marca.id,
+          clasePrecision: formModelo.clasePrecision.trim() || undefined,
+          varianteId: formModelo.varianteId ? Number(formModelo.varianteId) : undefined,
+        });
         if (formModelo.diametroIds.length > 0) {
           await api.modelos.setDiametros(creado.id, formModelo.diametroIds);
         }
@@ -1258,7 +1513,7 @@ function MarcaModal({
                   />
                   <select
                     value={formModelo.tipo}
-                    onChange={(e) => setFormModelo({ ...formModelo, tipo: e.target.value })}
+                    onChange={(e) => setFormModelo({ ...formModelo, tipo: e.target.value, varianteId: "" })}
                     className={inputClass}
                     required
                   >
@@ -1268,6 +1523,25 @@ function MarcaModal({
                     <option value="volumetrico">Volumétrico</option>
                     <option value="velocidad">Velocidad</option>
                   </select>
+                  <select
+                    value={formModelo.varianteId}
+                    onChange={(e) => setFormModelo({ ...formModelo, varianteId: e.target.value })}
+                    className={inputClass}
+                    disabled={!formModelo.tipo}
+                  >
+                    <option value="">Variante...</option>
+                    {variantesDelTipo.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.codigo} — {v.etiqueta}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    placeholder="Clase de precisión (ej. B, R100)"
+                    value={formModelo.clasePrecision}
+                    onChange={(e) => setFormModelo({ ...formModelo, clasePrecision: e.target.value })}
+                    className={`${inputClass} sm:w-48`}
+                  />
                 </div>
 
                 <div>
@@ -1335,6 +1609,8 @@ function MarcaModal({
                     <tr className="border-b border-slate-200 text-left text-slate-700 dark:border-slate-800 dark:text-slate-400">
                       <th className="py-2 font-medium">Modelo</th>
                       <th className="py-2 font-medium">Tipo</th>
+                      <th className="py-2 font-medium">Variante</th>
+                      <th className="py-2 font-medium">Clase</th>
                       <th className="py-2 font-medium">Diámetros</th>
                       <th className="py-2 font-medium"></th>
                     </tr>
@@ -1344,6 +1620,8 @@ function MarcaModal({
                       <tr key={mo.id}>
                         <td className="py-2 font-medium text-slate-700 dark:text-slate-200">{mo.nombre}</td>
                         <td className="py-2 text-slate-700 dark:text-slate-400">{tipoLabel(mo.tipo)}</td>
+                        <td className="py-2 text-slate-700 dark:text-slate-400">{mo.varianteCat?.codigo ?? "-"}</td>
+                        <td className="py-2 text-slate-700 dark:text-slate-400">{mo.clasePrecision || "-"}</td>
                         <td className="py-2">
                           {(mo.diametros ?? []).length === 0 ? (
                             <span className="text-xs font-medium text-amber-600 dark:text-amber-400">Sin diámetros</span>
@@ -1410,12 +1688,12 @@ function ActasTab() {
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {actas.map((a) => (
                 <tr key={a.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                  <td className="px-4 py-2.5">{new Date(a.fechaInstalacion).toLocaleDateString("es-CO")}</td>
+                  <td className="px-4 py-2.5">{fmtFecha(a.fechaInstalacion, {})}</td>
                   <td className="px-4 py-2.5">
                     {a.suscriptor ? `${a.suscriptor.codigo} — ${a.suscriptor.nombre}` : "-"}
                   </td>
                   <td className="px-4 py-2.5">{a.serial}</td>
-                  <td className="px-4 py-2.5">{a.instaladoPor}</td>
+                  <td className="px-4 py-2.5">{a.usuario?.nombre ?? a.instaladoPor}</td>
                   <td className="px-4 py-2.5">
                     {a.actaFirmadaUrl ? (
                       <a

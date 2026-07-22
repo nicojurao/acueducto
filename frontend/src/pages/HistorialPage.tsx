@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { History, ChevronLeft, ChevronRight } from "lucide-react";
 import { api, HistorialCambio, Usuario } from "../api/client";
 import { useEsMovil } from "../lib/useEsMovil";
@@ -49,7 +49,14 @@ export default function HistorialPage() {
     api.usuarios.list().then(setUsuarios);
   }, []);
 
+  // porPagina cambia solo una vez que useFilasAutoajustadas termina de medir el layout (después
+  // del primer render), así que el efecto de abajo dispara DOS pedidos casi seguidos al montar
+  // (uno con el porPagina inicial, otro con el ya ajustado). Sin descartar la respuesta más
+  // vieja si llega después, esa pisa a la buena y la tabla se queda en blanco hasta que algo
+  // (redimensionar, cambiar de pestaña) fuerza un nuevo pedido que sí gana la carrera.
+  const peticionIdRef = useRef(0);
   useEffect(() => {
+    const idPeticion = ++peticionIdRef.current;
     setCargando(true);
     api.historial
       .listPaginado(pagina, porPagina, {
@@ -60,10 +67,13 @@ export default function HistorialPage() {
         campo: campoDebounced || undefined,
       })
       .then((r) => {
+        if (idPeticion !== peticionIdRef.current) return;
         setCambios(r.data);
         setTotal(r.total);
       })
-      .finally(() => setCargando(false));
+      .finally(() => {
+        if (idPeticion === peticionIdRef.current) setCargando(false);
+      });
   }, [pagina, porPagina, entidadFiltro, usuarioFiltro, desde, hasta, campoDebounced]);
 
   useEffect(() => setPagina(1), [entidadFiltro, usuarioFiltro, desde, hasta, campoDebounced]);
@@ -83,6 +93,7 @@ export default function HistorialPage() {
           <option value="medidor">Medidores</option>
           <option value="suscriptor">Suscriptores</option>
           <option value="usuario">Usuarios</option>
+          <option value="item_inventario">Inventario</option>
         </select>
         <select value={usuarioFiltro} onChange={(e) => setUsuarioFiltro(e.target.value)} className={inputClass}>
           <option value="">Todos los usuarios</option>
@@ -151,7 +162,13 @@ export default function HistorialPage() {
                   <td className="whitespace-nowrap px-4 py-2.5 text-slate-700 dark:text-slate-400">{fmtFechaHora(c.fecha)}</td>
                   <td className="px-4 py-2.5">
                     <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                      {c.entidad === "medidor" ? "Medidor" : c.entidad === "usuario" ? "Usuario" : "Suscriptor"}
+                      {c.entidad === "medidor"
+                        ? "Medidor"
+                        : c.entidad === "usuario"
+                        ? "Usuario"
+                        : c.entidad === "item_inventario"
+                        ? "Inventario"
+                        : "Suscriptor"}
                     </span>{" "}
                     <span className="font-medium text-slate-800 dark:text-slate-100">{c.entidadNombre}</span>
                   </td>

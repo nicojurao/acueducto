@@ -13,7 +13,15 @@ export function useCierreAnimado(cerrarDeVerdad: () => void) {
   function cerrar() {
     if (saliendo) return;
     setSaliendo(true);
-    setTimeout(cerrarDeVerdad, DURACION_SALIDA_MS);
+    setTimeout(() => {
+      cerrarDeVerdad();
+      // Sin este reset, un modal que vive "en línea" dentro de un componente que no se
+      // desmonta (ej. una pestaña con el modal de edición embebido, no como componente aparte)
+      // reabre la próxima vez con "saliendo" todavía en true: entra directo con la animación de
+      // SALIDA, termina en opacity:0 pero sigue ocupando toda la pantalla (fixed inset-0) y
+      // bloqueando todos los clics — invisible pero interceptando todo, sin ningún error visible.
+      setSaliendo(false);
+    }, DURACION_SALIDA_MS);
   }
 
   return { saliendo, cerrar };

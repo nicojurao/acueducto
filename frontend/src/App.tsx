@@ -22,12 +22,9 @@ const LecturasPage = lazy(() => import("./pages/LecturasPage"));
 const ReportesPage = lazy(() => import("./pages/ReportesPage"));
 const AtipicosPage = lazy(() => import("./pages/AtipicosPage"));
 const MapaPage = lazy(() => import("./pages/MapaPage"));
-const UsuariosPage = lazy(() => import("./pages/UsuariosPage"));
-const RolesPage = lazy(() => import("./pages/RolesPage"));
 const AforosPage = lazy(() => import("./pages/AforosPage"));
 const InventarioPage = lazy(() => import("./pages/InventarioPage"));
-const HistorialPage = lazy(() => import("./pages/HistorialPage"));
-const AuditoriaPage = lazy(() => import("./pages/AuditoriaPage"));
+const AdminPage = lazy(() => import("./pages/AdminPage"));
 
 function CargandoPagina() {
   return (
@@ -132,34 +129,10 @@ function AppShell() {
               }
             />
             <Route
-              path="/usuarios"
+              path="/admin"
               element={
-                <RutaProtegida permiso="usuarios">
-                  <UsuariosPage />
-                </RutaProtegida>
-              }
-            />
-            <Route
-              path="/roles"
-              element={
-                <RutaProtegida permiso="roles">
-                  <RolesPage />
-                </RutaProtegida>
-              }
-            />
-            <Route
-              path="/historial"
-              element={
-                <RutaProtegida permiso="historial">
-                  <HistorialPage />
-                </RutaProtegida>
-              }
-            />
-            <Route
-              path="/auditoria"
-              element={
-                <RutaProtegida permiso="auditoria">
-                  <AuditoriaPage />
+                <RutaProtegida permiso="admin_panel">
+                  <AdminPage />
                 </RutaProtegida>
               }
             />

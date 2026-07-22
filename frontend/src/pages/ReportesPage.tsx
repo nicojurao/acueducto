@@ -16,7 +16,7 @@ import {
 } from "recharts";
 import { Link, useNavigate } from "react-router-dom";
 import { Users, Gauge, AlertTriangle, ChevronRight, Percent, ChevronDown, ChevronUp, Download } from "lucide-react";
-import { api, ESTRATO_LABELS, ESTADO_FACTURACION_LABELS } from "../api/client";
+import { api, ESTRATO_LABELS, ESTADO_FACTURACION_LABELS, Estrato } from "../api/client";
 import KpiCard from "../components/KpiCard";
 import ChartCard from "../components/ChartCard";
 import { SkeletonLista } from "../components/Skeleton";
@@ -95,6 +95,7 @@ export default function ReportesPage() {
   const [porEstrato, setPorEstrato] = useState<({ estrato: string } & FilaComparable)[]>([]);
   const [porEstratoComparar, setPorEstratoComparar] = useState<({ estrato: string } & FilaComparable)[]>([]);
   const [estadosFacturacion, setEstadosFacturacion] = useState<{ estado: string; cantidad: number }[]>([]);
+  const [estadosFacturacionHistorico, setEstadosFacturacionHistorico] = useState(true);
   const [cargando, setCargando] = useState(true);
 
   const [rangoResumen, setRangoResumen] = useState<"6" | "12" | "todos" | "personalizado">("6");
@@ -103,6 +104,15 @@ export default function ReportesPage() {
 
   const [barriosOcultos, setBarriosOcultos] = useState<Set<string>>(new Set());
   const [estratosOcultos, setEstratosOcultos] = useState<Set<string>>(new Set());
+
+  const [barriosCatalogo, setBarriosCatalogo] = useState<{ id: number; nombre: string }[]>([]);
+  const [estratosCatalogo, setEstratosCatalogo] = useState<Estrato[]>([]);
+  const [topBarrioFiltro, setTopBarrioFiltro] = useState("");
+  const [topEstratoFiltro, setTopEstratoFiltro] = useState("");
+  useEffect(() => {
+    api.suscriptores.barrios().then(setBarriosCatalogo).catch(() => {});
+    api.estratos.list().then(setEstratosCatalogo).catch(() => {});
+  }, []);
 
   function toggleBarrio(barrio: string) {
     setBarriosOcultos((prev) => {
@@ -144,19 +154,28 @@ export default function ReportesPage() {
       api.reportes.resumenMensual(),
       api.dashboard.kpis(periodo),
       api.dashboard.atipicos(periodo),
-      api.dashboard.topConsumidores(periodo),
       api.reportes.porEstrato(periodo),
-      api.dashboard.estadosFacturacion(),
-    ]).then(([r, k, a, t, estrato, estados]) => {
+      api.dashboard.estadosFacturacion(periodo),
+    ]).then(([r, k, a, estrato, estados]) => {
       setResumen(r);
       setKpis(k);
       setAtipicos(a);
-      setTopConsumidores(t);
       setPorEstrato(estrato);
-      setEstadosFacturacion(estados);
+      setEstadosFacturacion(estados.estados);
+      setEstadosFacturacionHistorico(estados.historico);
       setCargando(false);
     });
   }, [periodo]);
+
+  // Filtro del Top 10 consumidores: barrio o estrato, mutuamente excluyentes.
+  useEffect(() => {
+    api.dashboard
+      .topConsumidores(periodo, 10, {
+        barrio: topBarrioFiltro ? Number(topBarrioFiltro) : undefined,
+        estrato: topEstratoFiltro ? Number(topEstratoFiltro) : undefined,
+      })
+      .then(setTopConsumidores);
+  }, [periodo, topBarrioFiltro, topEstratoFiltro]);
 
   useEffect(() => {
     if (!periodoComparar) {
@@ -206,6 +225,7 @@ export default function ReportesPage() {
   const barriosIncluidos = porBarrio.filter((b) => !barriosOcultos.has(b.barrio));
   const dataBarrio = barriosIncluidos.map((b) => ({
     barrio: b.barrio,
+    barrioId: b.barrioId,
     consumo: promedioPorBarrio(b),
     consumoComparado: barrioMapComparar.get(b.barrio) ?? 0,
   }));
@@ -213,6 +233,12 @@ export default function ReportesPage() {
   const totalUsuariosBarrio = barriosIncluidos.reduce((acc, b) => acc + b.usuarios, 0);
   const totalConsumoBarrio = barriosIncluidos.reduce((acc, b) => acc + b.consumo, 0);
   const promedioBarrio = totalUsuariosBarrio > 0 ? totalConsumoBarrio / totalUsuariosBarrio : 0;
+  // Mismo cálculo pero para el mes de comparación, con los mismos barrios/estratos visibles.
+  const barriosComparadosIncluidos = porBarrioComparar.filter((b) => !barriosOcultos.has(b.barrio));
+  const totalUsuariosBarrioComparar = barriosComparadosIncluidos.reduce((acc, b) => acc + b.usuarios, 0);
+  const totalConsumoBarrioComparar = barriosComparadosIncluidos.reduce((acc, b) => acc + b.consumo, 0);
+  const promedioBarrioComparar =
+    totalUsuariosBarrioComparar > 0 ? totalConsumoBarrioComparar / totalUsuariosBarrioComparar : 0;
 
   // Igual que en el gráfico de barrios: promedio por suscriptor, no el total del estrato.
   const promedioPorEstrato = (e: { consumo: number; usuarios: number }) => (e.usuarios > 0 ? e.consumo / e.usuarios : 0);
@@ -227,6 +253,7 @@ export default function ReportesPage() {
     .sort((a, b) => Object.keys(ESTRATO_LABELS).indexOf(a.estrato) - Object.keys(ESTRATO_LABELS).indexOf(b.estrato))
     .map((e) => ({
       estrato: e.estrato,
+      estratoId: e.estratoId,
       consumo: promedioPorEstrato(e),
       consumoComparado: estratoMapComparar.get(e.estrato) ?? 0,
     }));
@@ -285,7 +312,13 @@ export default function ReportesPage() {
             <KpiCard
               label="Consumo promedio del mes (m³)"
               value={fmt(kpis.promedioPorUsuario)}
-              hint={mostrarPromedioEstratos ? "Clic para ocultar por estrato" : "Clic para ver por estrato"}
+              hint={
+                kpis.variacionMesAnterior !== null
+                  ? `${kpis.variacionMesAnterior >= 0 ? "▲" : "▼"} ${fmt(Math.abs(kpis.variacionMesAnterior))}% · mes anterior: ${fmt(kpis.promedioMesAnterior)} m³`
+                  : kpis.promedioMesAnterior > 0
+                  ? `Mes anterior: ${fmt(kpis.promedioMesAnterior)} m³`
+                  : "Clic para ver por estrato"
+              }
               icon={mostrarPromedioEstratos ? ChevronUp : ChevronDown}
               onClick={() => setMostrarPromedioEstratos((v) => !v)}
             />
@@ -299,8 +332,15 @@ export default function ReportesPage() {
             />
           </div>
 
+          {!estadosFacturacionHistorico && periodo !== periodoActual() && (
+            <p className="mb-3 text-xs text-amber-600 dark:text-amber-400 sm:mb-6">
+              "Medidores activos" y "Cobertura con medidor" de este periodo son aproximados (reflejan el estado
+              actual, no el que tenía exactamente ese mes) — todavía no tienen una foto histórica guardada.
+            </p>
+          )}
+
           {mostrarPromedioEstratos && (
-            <div className="mb-3 hidden rounded-xl border border-brand-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:mb-6 sm:block sm:p-4">
+            <div className="mb-3 rounded-xl border border-brand-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:mb-6 sm:p-4">
               <h3 className="mb-2 text-sm font-semibold text-slate-700 dark:text-slate-200 sm:mb-3">
                 Consumo promedio por suscriptor, por estrato ({periodo})
               </h3>
@@ -390,6 +430,55 @@ export default function ReportesPage() {
             </ChartCard>
 
             <ChartCard title={`Top 10 consumidores (${periodo})`}>
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <label className="flex items-center gap-1.5 text-xs text-slate-700 dark:text-slate-400">
+                  Barrio
+                  <select
+                    value={topBarrioFiltro}
+                    onChange={(e) => {
+                      setTopBarrioFiltro(e.target.value);
+                      if (e.target.value) setTopEstratoFiltro("");
+                    }}
+                    className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
+                  >
+                    <option value="">Todos</option>
+                    {barriosCatalogo.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.nombre}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex items-center gap-1.5 text-xs text-slate-700 dark:text-slate-400">
+                  Estrato
+                  <select
+                    value={topEstratoFiltro}
+                    onChange={(e) => {
+                      setTopEstratoFiltro(e.target.value);
+                      if (e.target.value) setTopBarrioFiltro("");
+                    }}
+                    className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
+                  >
+                    <option value="">Todos</option>
+                    {estratosCatalogo.map((e) => (
+                      <option key={e.id} value={e.id}>
+                        {e.codigo} — {e.etiqueta}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {(topBarrioFiltro || topEstratoFiltro) && (
+                  <button
+                    onClick={() => {
+                      setTopBarrioFiltro("");
+                      setTopEstratoFiltro("");
+                    }}
+                    className="text-xs text-slate-600 hover:underline dark:text-slate-400"
+                  >
+                    quitar filtro
+                  </button>
+                )}
+              </div>
               <ResponsiveContainer width="100%" height={280}>
                 <BarChart data={topConsumidores} layout="vertical" margin={{ left: 60 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke={GRID_STROKE} opacity={0.3} />
@@ -426,8 +515,13 @@ export default function ReportesPage() {
             <ChartCard title={`Consumo promedio por suscriptor, por barrio (${periodo}${periodoComparar ? ` vs ${periodoComparar}` : ""})`}>
               <div className="mb-3 flex flex-wrap items-center gap-2">
                 <span className="rounded-full border border-orange-300 bg-orange-50 px-2.5 py-1 text-xs font-medium text-orange-700 dark:border-orange-700/50 dark:bg-orange-900/20 dark:text-orange-400">
-                  Promedio general: {fmt(promedioBarrio)} m³/suscriptor
+                  Promedio general {periodo}: {fmt(promedioBarrio)} m³/suscriptor
                 </span>
+                {periodoComparar && (
+                  <span className="rounded-full border border-purple-300 bg-purple-50 px-2.5 py-1 text-xs font-medium text-purple-700 dark:border-purple-700/50 dark:bg-purple-900/20 dark:text-purple-400">
+                    Promedio general {periodoComparar}: {fmt(promedioBarrioComparar)} m³/suscriptor
+                  </span>
+                )}
                 <label className="flex items-center gap-1.5 text-xs text-slate-700 dark:text-slate-400">
                   Comparar con
                   <input
@@ -509,6 +603,10 @@ export default function ReportesPage() {
                     fill={COLORES[2]}
                     radius={[4, 4, 0, 0]}
                     activeBar={{ stroke: "#fff", strokeWidth: 2 }}
+                    cursor="pointer"
+                    onClick={(data: any) => {
+                      if (data?.barrioId) navigate(`/suscriptores?barrio=${data.barrioId}`);
+                    }}
                   >
                     <LabelList dataKey="consumo" position="insideTop" formatter={(v: number) => fmt(v, 2)} fill="#fff" fontSize={10} />
                   </Bar>
@@ -591,6 +689,10 @@ export default function ReportesPage() {
                     fill={COLORES[3]}
                     radius={[4, 4, 0, 0]}
                     activeBar={{ stroke: "#fff", strokeWidth: 2 }}
+                    cursor="pointer"
+                    onClick={(data: any) => {
+                      if (data?.estratoId) navigate(`/suscriptores?estrato=${data.estratoId}`);
+                    }}
                   >
                     <LabelList dataKey="consumo" position="insideTop" formatter={(v: number) => fmt(v, 2)} fill="#fff" fontSize={11} />
                   </Bar>

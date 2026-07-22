@@ -35,13 +35,19 @@ actasRouter.get("/instaladores", async (_req, res) => {
 // del seleccionado directo; si no viene (o viene inválido), se intenta enlazar por nombre exacto
 // como respaldo. Las actas antiguas (creadas antes de que existiera esta FK) se quedan sin
 // enlazar a propósito — no se adivina el vínculo con un backfill automático.
-async function resolverUsuarioId(usuarioIdBody: unknown, nombre: string): Promise<number | null> {
+//
+// "instaladoPor" YA NO es un snapshot congelado: si se resuelve un usuarioId real, el texto se
+// pisa siempre con el nombre ACTUAL de ese usuario (usuario.nombre), para que renombrar a alguien
+// no deje actas viejas mostrando "usuario inactivo/eliminado" solo porque el texto guardado no
+// coincide con el nombre nuevo — la relación por ID manda, el texto es solo un espejo de eso.
+async function resolverInstalador(usuarioIdBody: unknown, nombre: string): Promise<{ usuarioId: number | null; instaladoPor: string }> {
   if (usuarioIdBody) {
-    const usuario = await prisma.usuario.findUnique({ where: { id: Number(usuarioIdBody) }, select: { id: true } });
-    if (usuario) return usuario.id;
+    const usuario = await prisma.usuario.findUnique({ where: { id: Number(usuarioIdBody) }, select: { id: true, nombre: true } });
+    if (usuario) return { usuarioId: usuario.id, instaladoPor: usuario.nombre };
   }
-  const usuario = await prisma.usuario.findFirst({ where: { nombre, activo: true }, select: { id: true } });
-  return usuario?.id ?? null;
+  const usuario = await prisma.usuario.findFirst({ where: { nombre, activo: true }, select: { id: true, nombre: true } });
+  if (usuario) return { usuarioId: usuario.id, instaladoPor: usuario.nombre };
+  return { usuarioId: null, instaladoPor: nombre };
 }
 
 // ?suscriptorId= trae el historial completo de ese suscriptor (incluye actas con fechaRetiro,
@@ -51,7 +57,11 @@ actasRouter.get("/", async (req, res) => {
   const { suscriptorId } = req.query;
   const actas = await prisma.actaInstalacion.findMany({
     where: suscriptorId ? { suscriptorId: Number(suscriptorId) } : undefined,
-    include: { suscriptor: true, medidor: { include: { marcaCat: true, modeloCat: true, diametroCat: true } } },
+    include: {
+      suscriptor: true,
+      medidor: { include: { marcaCat: true, modeloCat: true, diametroCat: true } },
+      usuario: { select: { id: true, nombre: true, activo: true } },
+    },
     orderBy: { id: "desc" },
   });
   res.json(actas);
@@ -60,7 +70,11 @@ actasRouter.get("/", async (req, res) => {
 actasRouter.get("/:id", async (req, res) => {
   const acta = await prisma.actaInstalacion.findUnique({
     where: { id: Number(req.params.id) },
-    include: { suscriptor: true, medidor: { include: { marcaCat: true, modeloCat: true, diametroCat: true } } },
+    include: {
+      suscriptor: true,
+      medidor: { include: { marcaCat: true, modeloCat: true, diametroCat: true } },
+      usuario: { select: { id: true, nombre: true, activo: true } },
+    },
   });
   if (!acta) return res.status(404).json({ error: "No encontrada" });
   res.json(acta);
@@ -92,14 +106,15 @@ actasRouter.post("/", upload.array("fotos", 10), async (req, res) => {
     data: { activo: false },
   });
 
+  const instalador = await resolverInstalador(usuarioId, instaladoPor);
   const acta = await prisma.actaInstalacion.create({
     data: {
       medidorId: Number(medidorId),
       suscriptorId: Number(suscriptorId),
       serial: medidor.serial,
       fechaInstalacion: new Date(fechaInstalacion),
-      instaladoPor,
-      usuarioId: await resolverUsuarioId(usuarioId, instaladoPor),
+      instaladoPor: instalador.instaladoPor,
+      usuarioId: instalador.usuarioId,
       observaciones: observaciones || null,
       fotos,
     },
@@ -149,12 +164,13 @@ actasRouter.put("/:id", upload.array("fotos", 10), async (req, res) => {
 
   // fechaRetiro solo se envía al editar el historial de un medidor retirado (corregir la fecha
   // de retiro); si no viene en el body, no se toca (no es una forma de "reactivar" el medidor).
+  const instalador = await resolverInstalador(usuarioId, instaladoPor);
   const actaActualizada = await prisma.actaInstalacion.update({
     where: { id: acta.id },
     data: {
       fechaInstalacion: new Date(fechaInstalacion),
-      instaladoPor,
-      usuarioId: await resolverUsuarioId(usuarioId, instaladoPor),
+      instaladoPor: instalador.instaladoPor,
+      usuarioId: instalador.usuarioId,
       observaciones: observaciones || null,
       fotos: fotosFinales,
       fechaRetiro: fechaRetiro !== undefined ? new Date(fechaRetiro) : undefined,

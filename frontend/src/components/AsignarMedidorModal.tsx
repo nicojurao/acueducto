@@ -27,9 +27,17 @@ export type FormMedidor = {
 export type FormActa = {
   medidorId: string;
   fechaInstalacion: string;
+  // El texto es solo lo que se manda al backend como fallback/registro; la selección real del
+  // formulario se hace por usuarioId (ver comentario en actas.ts sobre por qué ya no se
+  // relaciona por nombre — renombrar a alguien no debe mostrar "usuario inactivo/eliminado").
   instaladoPor: string;
+  usuarioId: string;
   observaciones: string;
   fechaRetiro: string;
+  // Lectura de fábrica con la que arranca el medidor al instalarse (varios ya traen 1 o 2 m³ de
+  // fábrica/pruebas). Se guarda en Medidor.lecturaInicial y sirve de base para calcular el
+  // consumo de la primera lectura real que se le tome.
+  lecturaInicial: string;
 };
 
 export default function AsignarMedidorModal({
@@ -76,7 +84,7 @@ export default function AsignarMedidorModal({
   modelos: ModeloMedidor[];
   lotes: Lote[];
   medidoresBodega: Medidor[];
-  instaladores: { id: number; nombre: string }[];
+  instaladores: { id: number; nombre: string; activo?: boolean }[];
   fotos: File[];
   setFotos: (f: File[]) => void;
   fotosExistentes: string[];
@@ -120,6 +128,9 @@ export default function AsignarMedidorModal({
         <form className="min-h-0 flex-1 space-y-3 overflow-y-auto p-5" onSubmit={onSubmit}>
           {editandoMedidorId ? (
             <>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                Información del medidor
+              </h3>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 <input
                   placeholder="Serial"
@@ -238,30 +249,50 @@ export default function AsignarMedidorModal({
             </p>
           )}
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            <input
-              type="date"
-              value={formActa.fechaInstalacion}
-              onChange={(e) => setFormActa({ ...formActa, fechaInstalacion: e.target.value })}
-              className={inputClass}
-              required={!editandoMedidorId || !!editandoActaId || !!actaFirmadaArchivo || fotos.length > 0}
-            />
-            <select
-              value={formActa.instaladoPor}
-              onChange={(e) => setFormActa({ ...formActa, instaladoPor: e.target.value })}
-              className={inputClass}
-              required={!editandoMedidorId || !!editandoActaId || !!actaFirmadaArchivo || fotos.length > 0}
-            >
-              <option value="">Instalado por...</option>
-              {instaladores.map((u) => (
-                <option key={u.id} value={u.nombre}>
-                  {u.nombre}
-                </option>
-              ))}
-              {formActa.instaladoPor && !instaladores.some((u) => u.nombre === formActa.instaladoPor) && (
-                <option value={formActa.instaladoPor}>{formActa.instaladoPor} (usuario inactivo/eliminado)</option>
-              )}
-            </select>
+            <label className="flex flex-col gap-1 text-xs text-slate-600 dark:text-slate-300">
+              Fecha de instalación
+              <input
+                type="date"
+                value={formActa.fechaInstalacion}
+                onChange={(e) => setFormActa({ ...formActa, fechaInstalacion: e.target.value })}
+                className={inputClass}
+                required={!editandoMedidorId || !!editandoActaId || !!actaFirmadaArchivo || fotos.length > 0}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-slate-600 dark:text-slate-300">
+              Instalado por
+              <select
+                value={formActa.usuarioId}
+                onChange={(e) => setFormActa({ ...formActa, usuarioId: e.target.value })}
+                className={inputClass}
+                required={!editandoMedidorId || !!editandoActaId || !!actaFirmadaArchivo || fotos.length > 0}
+              >
+                <option value="">Instalado por...</option>
+                {instaladores.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.nombre}
+                    {u.activo === false ? " (inactivo)" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
+          <label className="flex flex-col gap-1 text-xs text-slate-600 dark:text-slate-300">
+            Lectura inicial (m³)
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              placeholder="0"
+              value={formActa.lecturaInicial}
+              onChange={(e) => setFormActa({ ...formActa, lecturaInicial: e.target.value })}
+              className={inputClass}
+            />
+            <span className="text-[11px] font-normal text-slate-500 dark:text-slate-500">
+              Con la que arranca el medidor de fábrica (déjala en 0 si empieza en 0). La primera lectura real que se
+              le tome descontará este valor para calcular el consumo.
+            </span>
+          </label>
           {editandoEsRetirado && (
             <label className="flex flex-col gap-1 text-xs font-medium text-slate-700 dark:text-slate-300">
               Fecha de retiro

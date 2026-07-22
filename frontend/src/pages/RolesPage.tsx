@@ -55,8 +55,10 @@ function RolModal({
   return (
     <div className={`fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-4 ${saliendo ? "animate-fade-out" : "animate-fade-in"}`}>
       {modalConfirmacion}
-      <div className={`w-full max-w-lg rounded-xl bg-white p-5 shadow-xl dark:bg-slate-900 ${saliendo ? "animate-scale-out" : "animate-scale-in"}`}>
-        <div className="mb-4 flex items-center justify-between">
+      <div
+        className={`flex max-h-[90vh] w-full max-w-lg flex-col rounded-xl bg-white shadow-xl dark:bg-slate-900 ${saliendo ? "animate-scale-out" : "animate-scale-in"}`}
+      >
+        <div className="flex shrink-0 items-center justify-between p-5 pb-4">
           <h3 className="text-base font-semibold text-slate-800 dark:text-slate-100">
             {rol ? "Editar rol" : "Nuevo rol"}
           </h3>
@@ -65,58 +67,62 @@ function RolModal({
           </button>
         </div>
 
-        {error && (
-          <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-400">
-            {error}
-          </div>
-        )}
-        <form onSubmit={onSubmit} className="flex flex-col gap-3">
-          <label className={labelClass}>
-            Nombre del rol
-            <input
-              value={nombre}
-              onChange={(e) => setNombre(e.target.value)}
-              placeholder="Ej. Supervisor"
-              className={inputClass}
-              required
-              disabled={rol?.esSistema}
-              title={rol?.esSistema ? "El nombre de un rol del sistema no se puede cambiar" : undefined}
-            />
-          </label>
-          <label className={labelClass}>
-            Descripción (opcional)
-            <input
-              value={descripcion}
-              onChange={(e) => setDescripcion(e.target.value)}
-              placeholder="Para qué es este rol"
-              className={inputClass}
-            />
-          </label>
+        <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col">
+          <div className="min-h-0 flex-1 overflow-y-auto px-5">
+            {error && (
+              <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-400">
+                {error}
+              </div>
+            )}
+            <div className="flex flex-col gap-3">
+              <label className={labelClass}>
+                Nombre del rol
+                <input
+                  value={nombre}
+                  onChange={(e) => setNombre(e.target.value)}
+                  placeholder="Ej. Supervisor"
+                  className={inputClass}
+                  required
+                  disabled={rol?.esSistema}
+                  title={rol?.esSistema ? "El nombre de un rol del sistema no se puede cambiar" : undefined}
+                />
+              </label>
+              <label className={labelClass}>
+                Descripción (opcional)
+                <input
+                  value={descripcion}
+                  onChange={(e) => setDescripcion(e.target.value)}
+                  placeholder="Para qué es este rol"
+                  className={inputClass}
+                />
+              </label>
 
-          <div>
-            <div className="mb-1.5 text-xs font-medium text-slate-600 dark:text-slate-300">Permisos por módulo</div>
-            <div className="grid grid-cols-1 gap-1.5 rounded-lg border border-slate-200 p-2 dark:border-slate-800 sm:grid-cols-2">
-              {permisosDisponibles.map((p) => (
-                <label
-                  key={p.clave}
-                  className="flex cursor-pointer items-start gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800/60"
-                >
-                  <input
-                    type="checkbox"
-                    checked={permisos.includes(p.clave)}
-                    onChange={() => togglePermiso(p.clave)}
-                    className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500 dark:border-slate-600"
-                  />
-                  <div>
-                    <div className="text-sm font-medium text-slate-700 dark:text-slate-200">{p.nombre}</div>
-                    <div className="text-xs text-slate-600">{p.descripcion}</div>
-                  </div>
-                </label>
-              ))}
+              <div>
+                <div className="mb-1.5 text-xs font-medium text-slate-600 dark:text-slate-300">Permisos por módulo</div>
+                <div className="grid grid-cols-1 gap-1.5 rounded-lg border border-slate-200 p-2 dark:border-slate-800 sm:grid-cols-2">
+                  {permisosDisponibles.map((p) => (
+                    <label
+                      key={p.clave}
+                      className="flex cursor-pointer items-start gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800/60"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={permisos.includes(p.clave)}
+                        onChange={() => togglePermiso(p.clave)}
+                        className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500 dark:border-slate-600"
+                      />
+                      <div>
+                        <div className="text-sm font-medium text-slate-700 dark:text-slate-200">{p.nombre}</div>
+                        <div className="text-xs text-slate-600">{p.descripcion}</div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
 
-          <div className="mt-2 flex justify-end gap-2">
+          <div className="flex shrink-0 justify-end gap-2 p-5 pt-4">
             <button
               type="button"
               onClick={cerrar}

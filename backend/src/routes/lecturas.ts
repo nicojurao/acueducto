@@ -23,29 +23,66 @@ function primerDiaMes(periodo: string): Date {
   return new Date(Date.UTC(y, m - 1, 1));
 }
 
+// Recalcula el consumo de la PRÓXIMA lectura ya registrada de un medidor (si existe) después de
+// crear, editar o borrar una lectura de un periodo anterior a esa. Necesario porque acá se suele
+// capturar el histórico "al revés" (el mes más reciente primero, hacia atrás): cuando eso pasa,
+// la lectura más nueva se guarda con consumo = su propio valor (no hay lectura previa todavía),
+// y al llegar después la lectura de un mes anterior real, ese consumo viejo queda desactualizado
+// hasta que se recalcula acá.
+async function recalcularConsumoSiguiente(medidorId: number, periodo: Date) {
+  const siguiente = await prisma.lectura.findFirst({
+    where: { medidorId, periodo: { gt: periodo } },
+    orderBy: { periodo: "asc" },
+  });
+  if (!siguiente) return;
+
+  const anterior = await prisma.lectura.findFirst({
+    where: { medidorId, periodo: { lt: siguiente.periodo } },
+    orderBy: { periodo: "desc" },
+  });
+  const medidor = await prisma.medidor.findUnique({ where: { id: medidorId } });
+  const base = anterior?.valorLectura ?? medidor?.lecturaInicial ?? 0;
+  const consumoCorrecto = Number(siguiente.valorLectura) - Number(base);
+  if (Number(siguiente.consumo) !== consumoCorrecto) {
+    await prisma.lectura.update({ where: { id: siguiente.id }, data: { consumo: consumoCorrecto } });
+  }
+}
+
 // Lecturas de un periodo (YYYY-MM), incluye medidores sin lectura ese mes y su novedad si tienen
 // una. Sin "page" devuelve todo (compatibilidad con quien ya lo consuma así); con "page" pagina
 // y filtra en el servidor (estado=pendientes|tomadas, q=texto) — para la pantalla de captura,
 // que ya no necesita traer todos los medidores del municipio de una sola vez.
 lecturasRouter.get("/", async (req, res) => {
-  const { periodo, ruta, estado, q, page, limit } = req.query;
+  const { periodo, ruta, barrio, estado, q, page, limit } = req.query;
   if (!periodo) return res.status(400).json({ error: "periodo es requerido (YYYY-MM)" });
   const fecha = primerDiaMes(String(periodo));
 
-  const filtros: any[] = [{ activo: true }, { suscriptorId: { not: null } }];
+  // Un medidor instalado DESPUÉS del día 20 del periodo que se está viendo no debe aparecer como
+  // pendiente de lectura ese mes: la captura de lecturas arranca el día 20, así que un medidor
+  // instalado el 21 o después ya no alcanza a tener su primera lectura real ese mes y pasa
+  // derecho al periodo siguiente (ej. instalado el 21 de julio → aparece hasta agosto).
+  const corteInstalacion = new Date(Date.UTC(fecha.getUTCFullYear(), fecha.getUTCMonth(), 21));
+  const filtros: any[] = [
+    { activo: true },
+    { suscriptorId: { not: null } },
+    { OR: [{ fechaInstalacion: null }, { fechaInstalacion: { lt: corteInstalacion } }] },
+    // Un suscriptor con estado "inactivo" (medidor dañado/inactivo) no debe seguir apareciendo
+    // como pendiente de lectura mes a mes hasta que alguien lo vuelva a poner en servicio.
+    { suscriptor: { estadoFacturacion: { not: "inactivo" } } },
+  ];
   if (ruta) filtros.push({ suscriptor: { ruta: String(ruta) } });
+  if (barrio) filtros.push({ suscriptor: { barrioId: Number(barrio) } });
   if (estado === "pendientes") filtros.push({ lecturas: { none: { periodo: fecha } } });
   if (estado === "tomadas") filtros.push({ lecturas: { some: { periodo: fecha } } });
   if (q) {
     const texto = String(q).trim();
     filtros.push({
-      suscriptor: {
-        OR: [
-          { nombre: { contains: texto, mode: "insensitive" as const } },
-          { codigo: { contains: texto, mode: "insensitive" as const } },
-          { ruta: { contains: texto, mode: "insensitive" as const } },
-        ],
-      },
+      OR: [
+        { serial: { contains: texto, mode: "insensitive" as const } },
+        { suscriptor: { nombre: { contains: texto, mode: "insensitive" as const } } },
+        { suscriptor: { codigo: { contains: texto, mode: "insensitive" as const } } },
+        { suscriptor: { ruta: { contains: texto, mode: "insensitive" as const } } },
+      ],
     });
   }
   const where = { AND: filtros };
@@ -71,23 +108,61 @@ lecturasRouter.get("/", async (req, res) => {
   }
 
   const include = {
-    suscriptor: true,
+    suscriptor: { include: { barrioCat: true } },
     lecturas: { where: { periodo: fecha }, include: { capturadoPor: { select: { nombre: true } } } },
     novedadesLectura: { where: { periodo: fecha } },
   };
+
+  // Por defecto se ordena por ruta del suscriptor (de menor a mayor). Para "ya tomadas" tiene más
+  // sentido ver primero lo más reciente capturado: como cada medidor tiene a lo sumo UNA lectura
+  // en este periodo (constraint medidorId_periodo), se puede consultar directo por Lectura y
+  // ordenar por su fechaRegistro, en vez de por Medidor (que no permite ordenar por un campo de
+  // una relación uno-a-muchos aunque solo haya una fila).
+  if (estado === "tomadas") {
+    const whereLectura = { periodo: fecha, medidor: where };
+    if (page) {
+      const pageNum = Math.max(1, Number(page) || 1);
+      const limitNum = Math.max(1, Number(limit) || 10);
+      const [lecturasPag, total] = await Promise.all([
+        prisma.lectura.findMany({
+          where: whereLectura,
+          include: { medidor: { include } },
+          orderBy: { fechaRegistro: "desc" },
+          skip: (pageNum - 1) * limitNum,
+          take: limitNum,
+        }),
+        prisma.lectura.count({ where: whereLectura }),
+      ]);
+      const data = await Promise.all(lecturasPag.map((l) => armarFila(l.medidor)));
+      return res.json({ data, total, page: pageNum, limit: limitNum });
+    }
+    const lecturasTodas = await prisma.lectura.findMany({
+      where: whereLectura,
+      include: { medidor: { include } },
+      orderBy: { fechaRegistro: "desc" },
+    });
+    const resultado = await Promise.all(lecturasTodas.map((l) => armarFila(l.medidor)));
+    return res.json(resultado);
+  }
 
   if (page) {
     const pageNum = Math.max(1, Number(page) || 1);
     const limitNum = Math.max(1, Number(limit) || 10);
     const [medidores, total] = await Promise.all([
-      prisma.medidor.findMany({ where, include, orderBy: { id: "asc" }, skip: (pageNum - 1) * limitNum, take: limitNum }),
+      prisma.medidor.findMany({
+        where,
+        include,
+        orderBy: { suscriptor: { ruta: "asc" } },
+        skip: (pageNum - 1) * limitNum,
+        take: limitNum,
+      }),
       prisma.medidor.count({ where }),
     ]);
     const data = await Promise.all(medidores.map(armarFila));
     return res.json({ data, total, page: pageNum, limit: limitNum });
   }
 
-  const medidores = await prisma.medidor.findMany({ where, include, orderBy: { id: "asc" } });
+  const medidores = await prisma.medidor.findMany({ where, include, orderBy: { suscriptor: { ruta: "asc" } } });
   const resultado = await Promise.all(medidores.map(armarFila));
   res.json(resultado);
 });
@@ -98,8 +173,13 @@ lecturasRouter.get("/resumen", async (req, res) => {
   const { periodo } = req.query;
   if (!periodo) return res.status(400).json({ error: "periodo es requerido (YYYY-MM)" });
   const fecha = primerDiaMes(String(periodo));
+  const corteInstalacion = new Date(Date.UTC(fecha.getUTCFullYear(), fecha.getUTCMonth(), 21));
 
-  const where = { activo: true, suscriptorId: { not: null } };
+  const where = {
+    activo: true,
+    suscriptorId: { not: null },
+    OR: [{ fechaInstalacion: null }, { fechaInstalacion: { lt: corteInstalacion } }],
+  };
   const [total, tomadas] = await Promise.all([
     prisma.medidor.count({ where }),
     prisma.medidor.count({ where: { ...where, lecturas: { some: { periodo: fecha } } } }),
@@ -114,7 +194,14 @@ lecturasRouter.get("/resumen", async (req, res) => {
 lecturasRouter.post("/", uploadLectura.single("foto"), async (req, res) => {
   const { medidorId: medidorIdRaw, periodo, valorLectura, observaciones, latitud, longitud } = req.body;
   const medidorId = Number(medidorIdRaw);
-  if (!req.file) return res.status(400).json({ error: "La foto del medidor es obligatoria" });
+  if (!req.file) {
+    if (!req.usuario?.permisos.includes("lecturas_sin_foto")) {
+      return res.status(400).json({ error: "La foto del medidor es obligatoria" });
+    }
+    if (!observaciones || !String(observaciones).trim()) {
+      return res.status(400).json({ error: "Si no adjuntas foto, debes escribir una observación" });
+    }
+  }
 
   const fecha = primerDiaMes(periodo);
 
@@ -128,7 +215,9 @@ lecturasRouter.post("/", uploadLectura.single("foto"), async (req, res) => {
 
   const base = lecturaAnterior?.valorLectura ?? medidor.lecturaInicial ?? 0;
   const consumo = Number(valorLectura) - Number(base);
-  const fotoUrl = await guardarArchivo("lecturas", req.file.buffer, req.file.originalname, req.file.mimetype);
+  const fotoUrl = req.file
+    ? await guardarArchivo("lecturas", req.file.buffer, req.file.originalname, req.file.mimetype)
+    : null;
 
   const novedadPrevia = await prisma.novedadLectura.findUnique({
     where: { medidorId_periodo: { medidorId, periodo: fecha } },
@@ -163,16 +252,19 @@ lecturasRouter.post("/", uploadLectura.single("foto"), async (req, res) => {
 
   await Promise.all((novedadPrevia?.fotos ?? []).map((foto) => borrarArchivo(foto)));
 
-  // Si el suscriptor todavía no tiene un punto marcado en el Mapa, se lo asignamos con el
-  // GPS de esta lectura. Si ya tiene uno (puesto a mano o por una lectura anterior), no se toca.
+  // El punto del suscriptor en el Mapa se actualiza con el GPS de CADA lectura nueva (no solo
+  // la primera vez): el frontend solo manda latitud/longitud cuando la foto se tomó ahí mismo
+  // con la cámara (no al "Subir un archivo"), así que esto siempre refleja la ubicación real de
+  // la última visita al predio.
   if (latitud && longitud && medidor.suscriptorId) {
-    await prisma.suscriptor.updateMany({
-      where: { id: medidor.suscriptorId, latitud: null, longitud: null },
+    await prisma.suscriptor.update({
+      where: { id: medidor.suscriptorId },
       data: { latitud: Number(latitud), longitud: Number(longitud) },
     });
   }
 
   await registrarCambioLectura(medidorId, fecha, null, String(valorLectura), req.usuario?.id);
+  await recalcularConsumoSiguiente(medidorId, fecha);
 
   res.status(201).json(lectura);
 });
@@ -222,6 +314,7 @@ lecturasRouter.put("/:id", uploadLectura.single("foto"), async (req, res) => {
       req.usuario?.id
     );
   }
+  await recalcularConsumoSiguiente(lecturaExistente.medidorId, lecturaExistente.periodo);
 
   res.json(lectura);
 });
@@ -243,6 +336,7 @@ lecturasRouter.delete("/:id", async (req, res) => {
     null,
     req.usuario?.id
   );
+  await recalcularConsumoSiguiente(lectura.medidorId, lectura.periodo);
 
   res.status(204).end();
 });
@@ -324,4 +418,3 @@ lecturasRouter.delete("/novedad/:id", async (req, res) => {
 
   res.status(204).end();
 });
-

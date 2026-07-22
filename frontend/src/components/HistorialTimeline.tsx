@@ -14,7 +14,7 @@ function fmtFechaHora(fecha: string): string {
 
 // Lista compacta de cambios de un registro puntual (medidor o suscriptor), pensada para
 // incrustarse dentro de su modal de detalle. La vista global con filtros vive en HistorialPage.
-export default function HistorialTimeline({ entidad, entidadId }: { entidad: "medidor" | "suscriptor"; entidadId: number }) {
+export default function HistorialTimeline({ entidad, entidadId }: { entidad: "medidor" | "suscriptor" | "item_inventario"; entidadId: number }) {
   const [cambios, setCambios] = useState<HistorialCambio[] | null>(null);
 
   useEffect(() => {
@@ -45,7 +45,7 @@ export default function HistorialTimeline({ entidad, entidadId }: { entidad: "me
   );
 }
 
-export function HistorialSeccion({ entidad, entidadId }: { entidad: "medidor" | "suscriptor"; entidadId: number }) {
+export function HistorialSeccion({ entidad, entidadId }: { entidad: "medidor" | "suscriptor" | "item_inventario"; entidadId: number }) {
   const [abierto, setAbierto] = useState(false);
   return (
     <div>

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { X, Camera, AlertCircle, CheckCircle2, Pencil, Trash2, MapPin, Loader2, CloudOff, UserRound } from "lucide-react";
+import { X, Camera, AlertCircle, CheckCircle2, Pencil, Trash2, MapPin, Loader2, CloudOff, UserRound, Calendar, User } from "lucide-react";
 import { api, urlFoto, LecturaPendiente } from "../api/client";
 import { useConfirm, useErrorHandler } from "./ConfirmModal";
 import CamaraModal from "./CamaraModal";
@@ -13,6 +13,16 @@ import { inputClass } from "../lib/ui";
 
 function esErrorDeRed(err: unknown): boolean {
   return err instanceof TypeError || (err instanceof DOMException && err.name === "AbortError");
+}
+
+function fmtFechaHora(iso: string): string {
+  return new Date(iso).toLocaleString("es-CO", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 // Intenta obtener la ubicación GPS del dispositivo; si no hay permiso o no está disponible,
@@ -52,7 +62,12 @@ export default function LecturaModal({
   const [editandoNovedad, setEditandoNovedad] = useState(false);
 
   const [valorTexto, setValorTexto] = useState(lectura?.valorLectura ?? "");
+  const [observaciones, setObservaciones] = useState(lectura?.observaciones ?? "");
   const [foto, setFoto] = useState<File | null>(null);
+  // Las coordenadas solo tienen sentido si la foto se tomó ahí mismo con la cámara del celular;
+  // si se sube un archivo (ej. una foto vieja del rollo, o mandada por WhatsApp), el GPS del
+  // dispositivo en ESE momento no dice nada de dónde se tomó la foto y no se debe guardar.
+  const [fotoDesdeCamara, setFotoDesdeCamara] = useState(false);
   const [quitarFoto, setQuitarFoto] = useState(false);
   const [camaraAbierta, setCamaraAbierta] = useState(false);
   const [verSuscriptor, setVerSuscriptor] = useState(false);
@@ -69,11 +84,14 @@ export default function LecturaModal({
 
   const anterior = Number(fila.lecturaAnteriorValor ?? 0);
   const consumoPreview = valorTexto !== "" ? Number(valorTexto) - anterior : null;
+  const puedeGuardarSinFoto = usuario?.permisos?.includes("lecturas_sin_foto") ?? false;
+  const faltaObservacionPorFoto = puedeGuardarSinFoto && !foto && !observaciones.trim();
 
   async function guardarLectura() {
     const valor = Number(valorTexto);
     if (!Number.isFinite(valor)) return;
-    if (!lectura && !foto) return;
+    if (!lectura && !foto && !puedeGuardarSinFoto) return;
+    if (!lectura && !foto && faltaObservacionPorFoto) return;
 
     setGuardando(true);
     try {
@@ -81,25 +99,31 @@ export default function LecturaModal({
         await run(async () => {
           const actualizada = await api.lecturas.update(lectura.id, {
             valorLectura: valor,
+            observaciones: observaciones.trim() || undefined,
             foto: foto ?? undefined,
             quitarFoto: quitarFoto && !foto,
           });
-          setLectura({ ...lectura, valorLectura: String(valor), fotoUrl: actualizada.fotoUrl });
+          setLectura({ ...lectura, valorLectura: String(valor), observaciones: observaciones.trim() || null, fotoUrl: actualizada.fotoUrl });
           setFoto(null);
           setQuitarFoto(false);
           setEditando(false);
           onCambio();
         });
       } else {
-        setObteniendoUbicacion(true);
-        const { latitud, longitud } = await obtenerUbicacion();
-        setObteniendoUbicacion(false);
+        let latitud: number | undefined;
+        let longitud: number | undefined;
+        if (fotoDesdeCamara) {
+          setObteniendoUbicacion(true);
+          ({ latitud, longitud } = await obtenerUbicacion());
+          setObteniendoUbicacion(false);
+        }
         try {
           const nueva = await api.lecturas.create({
             medidorId: fila.medidorId,
             periodo,
             valorLectura: valor,
-            foto: foto!,
+            observaciones: observaciones.trim() || undefined,
+            foto: foto ?? undefined,
             latitud,
             longitud,
           });
@@ -107,7 +131,7 @@ export default function LecturaModal({
             id: nueva.id,
             valorLectura: String(valor),
             consumo: String(valor - anterior),
-            observaciones: null,
+            observaciones: observaciones.trim() || null,
             fotoUrl: nueva.fotoUrl,
             capturadoPor: usuario ? { nombre: usuario.nombre } : null,
           });
@@ -115,7 +139,9 @@ export default function LecturaModal({
           setFoto(null);
           onCambio();
         } catch (err) {
-          if (!esErrorDeRed(err)) throw err;
+          // Sin foto no hay nada que poner en la cola offline (requiere el blob de la foto);
+          // sin conexión, en ese caso se deja el error visible para reintentar cuando haya señal.
+          if (!foto || !esErrorDeRed(err)) throw err;
           // Sin conexión: se guarda en el dispositivo y se sincroniza sola más adelante
           // (ver frontend/src/lib/offlineQueue.ts).
           const id = await agregarPendiente({
@@ -227,7 +253,7 @@ export default function LecturaModal({
   return (
     <div className={`fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-4 ${saliendo ? "animate-fade-out" : "animate-fade-in"}`} onClick={cerrar}>
       <div
-        className={`flex max-h-[90vh] w-full max-w-md flex-col rounded-xl bg-white shadow-xl dark:bg-slate-900 ${saliendo ? "animate-scale-out" : "animate-scale-in"}`}
+        className={`flex max-h-[90vh] w-full max-w-lg flex-col rounded-xl bg-white shadow-xl dark:bg-slate-900 ${saliendo ? "animate-scale-out" : "animate-scale-in"}`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex shrink-0 items-start justify-between border-b border-slate-200 px-5 py-4 dark:border-slate-800">
@@ -315,24 +341,46 @@ export default function LecturaModal({
             <div className="space-y-3">
               <div className="flex items-start gap-2 rounded-lg bg-emerald-50 px-3 py-3 text-sm text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400">
                 <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-                <div>
-                  <div className="font-medium">
-                    Lectura registrada: {lectura.valorLectura} (consumo {lectura.consumo} m³)
-                  </div>
-                  {lectura.capturadoPor && <div className="text-xs opacity-80">Tomada por: {lectura.capturadoPor.nombre}</div>}
+                <div className="font-medium">
+                  Lectura registrada: {lectura.valorLectura} (consumo {lectura.consumo} m³)
                 </div>
               </div>
 
               {lectura.fotoUrl && (
-                <a href={urlFoto(lectura.fotoUrl)} target="_blank" rel="noreferrer">
+                <a href={urlFoto(lectura.fotoUrl)} target="_blank" rel="noreferrer" className="block">
                   <img
                     src={urlFoto(lectura.fotoUrl)}
                     alt="Foto de la lectura"
-                    style={{ width: 96, height: 96, objectFit: "cover" }}
-                    className="rounded-lg border border-slate-200 dark:border-slate-700"
+                    className="mx-auto max-h-96 w-full rounded-lg border border-slate-200 object-contain dark:border-slate-700"
                   />
                 </a>
               )}
+
+              <div className="space-y-1.5 text-sm">
+                {lectura.fechaRegistro && (
+                  <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300">
+                    <Calendar className="h-4 w-4 shrink-0 text-brand-500" />
+                    Tomada el {fmtFechaHora(lectura.fechaRegistro)}
+                  </div>
+                )}
+                {lectura.capturadoPor && (
+                  <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300">
+                    <User className="h-4 w-4 shrink-0 text-brand-500" />
+                    Tomada por: {lectura.capturadoPor.nombre}
+                  </div>
+                )}
+                {lectura.latitud != null && lectura.longitud != null && (
+                  <a
+                    href={`https://www.google.com/maps?q=${lectura.latitud},${lectura.longitud}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-2 text-brand-600 hover:underline dark:text-brand-400"
+                  >
+                    <MapPin className="h-4 w-4 shrink-0" />
+                    {lectura.latitud.toFixed(6)}, {lectura.longitud.toFixed(6)}
+                  </a>
+                )}
+              </div>
 
               <div className="flex gap-3">
                 <button
@@ -416,7 +464,12 @@ export default function LecturaModal({
                       variante: "normal",
                     })
                   }
-                  disabled={guardando || valorTexto === "" || (!lectura && !foto)}
+                  disabled={
+                    guardando ||
+                    valorTexto === "" ||
+                    (!lectura && !foto && !puedeGuardarSinFoto) ||
+                    (!lectura && !foto && faltaObservacionPorFoto)
+                  }
                   className="flex shrink-0 items-center gap-1.5 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-500 disabled:opacity-50"
                 >
                   {guardando && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
@@ -473,7 +526,13 @@ export default function LecturaModal({
                   className="flex items-center gap-1.5 rounded-lg border border-brand-200 px-3 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-50 dark:border-brand-500/30 dark:text-brand-400 dark:hover:bg-brand-500/10"
                 >
                   <Camera className="h-3.5 w-3.5" />
-                  {foto ? foto.name : lectura ? "Reemplazar foto (se subió mal)" : "Foto del medidor (obligatoria)"}
+                  {foto
+                    ? foto.name
+                    : lectura
+                    ? "Reemplazar foto (se subió mal)"
+                    : puedeGuardarSinFoto
+                    ? "Foto del medidor (opcional)"
+                    : "Foto del medidor (obligatoria)"}
                 </button>
                 <label className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">
                   Subir un archivo
@@ -484,10 +543,30 @@ export default function LecturaModal({
                     onChange={async (e) => {
                       const archivo = e.target.files?.[0];
                       setFoto(archivo ? await comprimirFoto(archivo) : null);
+                      setFotoDesdeCamara(false);
                       setQuitarFoto(false);
                     }}
                   />
                 </label>
+              </div>
+
+              <div>
+                <textarea
+                  placeholder={
+                    !lectura && !foto && puedeGuardarSinFoto
+                      ? "Observación (obligatoria si no adjuntas foto)"
+                      : "Observación (opcional)"
+                  }
+                  value={observaciones}
+                  onChange={(e) => setObservaciones(e.target.value)}
+                  className={`${inputClass} w-full`}
+                  rows={2}
+                />
+                {!lectura && !foto && faltaObservacionPorFoto && (
+                  <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                    Sin foto, debes escribir una observación para guardar la lectura.
+                  </p>
+                )}
               </div>
 
               {obteniendoUbicacion && (
@@ -527,6 +606,7 @@ export default function LecturaModal({
         <CamaraModal
           onCapturar={(file) => {
             setFoto(file);
+            setFotoDesdeCamara(true);
             setQuitarFoto(false);
             setCamaraAbierta(false);
           }}

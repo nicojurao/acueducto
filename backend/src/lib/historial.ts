@@ -1,8 +1,19 @@
 import { prisma } from "./prisma.js";
 
-type EntidadHistorial = "medidor" | "suscriptor" | "usuario";
+type EntidadHistorial = "medidor" | "suscriptor" | "usuario" | "item_inventario";
 
 const CONDICION_LABELS: Record<string, string> = { bueno: "Bueno", danado: "Dañado" };
+const ESTADO_ITEM_LABELS: Record<string, string> = { bueno: "Bueno", regular: "Regular", dañado: "Dañado", de_baja: "De baja" };
+const UNIDAD_ITEM_LABELS: Record<string, string> = {
+  unidad: "Unidad",
+  metro: "Metro",
+  kilogramo: "Kilogramo",
+  litro: "Litro",
+  galon: "Galón",
+  rollo: "Rollo",
+  caja: "Caja",
+  par: "Par",
+};
 const ESTADO_MEDIDOR_LABELS: Record<string, string> = { instalado: "Instalado", en_bodega: "En bodega" };
 const ESTADO_FACTURACION_LABELS: Record<string, string> = {
   sin_medidor: "Sin medidor",
@@ -172,5 +183,44 @@ export function camposSuscriptor(s: {
     Estrato: s.estratoCat ? `${s.estratoCat.codigo} — ${s.estratoCat.etiqueta}` : null,
     "Estado de facturación": ESTADO_FACTURACION_LABELS[s.estadoFacturacion] ?? s.estadoFacturacion,
     "Estado del predio": ESTADO_PREDIO_LABELS[s.estadoPredio] ?? s.estadoPredio,
+  };
+}
+
+// "Snapshot" legible de un ItemInventario. Recibe el registro con las relaciones de catálogo
+// incluidas (categoriaCat/ubicacionCat/proveedor/ingresadoPor, ver includeCatalogos en
+// routes/inventario.ts).
+export function camposItemInventario(i: {
+  nombre: string;
+  categoriaCat: { nombre: string } | null;
+  codigo: string | null;
+  descripcion: string | null;
+  cantidad: number;
+  stockMinimo: number | null;
+  unidadMedida: string;
+  estado: string;
+  ubicacionCat: { nombre: string } | null;
+  proveedor: { nombre: string } | null;
+  fechaCompra: Date | null;
+  fechaIngreso: Date | null;
+  valor: unknown;
+  activo: boolean;
+  fotoUrl: string | null;
+}): Record<string, unknown> {
+  return {
+    Nombre: i.nombre,
+    Categoría: i.categoriaCat?.nombre ?? null,
+    "Código/placa": i.codigo,
+    Descripción: i.descripcion,
+    Cantidad: i.cantidad,
+    "Stock mínimo": i.stockMinimo,
+    "Unidad de medida": UNIDAD_ITEM_LABELS[i.unidadMedida] ?? i.unidadMedida,
+    Estado: ESTADO_ITEM_LABELS[i.estado] ?? i.estado,
+    Ubicación: i.ubicacionCat?.nombre ?? null,
+    Proveedor: i.proveedor?.nombre ?? null,
+    "Fecha de compra": i.fechaCompra,
+    "Fecha de ingreso": i.fechaIngreso,
+    Valor: i.valor,
+    Activo: i.activo,
+    Foto: i.fotoUrl,
   };
 }

@@ -15,7 +15,7 @@ import {
   Download,
   X,
 } from "lucide-react";
-import { api, LecturaPendiente } from "../api/client";
+import { api, LecturaPendiente, Barrio } from "../api/client";
 import LecturaModal from "../components/LecturaModal";
 import { PendienteLectura, PendienteNovedad, useColaPendientes, useColaPendientesNovedad } from "../lib/offlineQueue";
 import { useEsMovil } from "../lib/useEsMovil";
@@ -76,6 +76,11 @@ export default function LecturasPage() {
   const [busquedaDebounced, setBusquedaDebounced] = useState("");
   const [verColaOffline, setVerColaOffline] = useState(false);
   const [filtroEstado, setFiltroEstado] = useState<FiltroEstado>("todos");
+  const [barrios, setBarrios] = useState<Barrio[]>([]);
+  const [filtroBarrio, setFiltroBarrio] = useState<number | "">("");
+  useEffect(() => {
+    api.barrios.list().then(setBarrios).catch(() => {});
+  }, []);
   // "Lecturas pendientes" en el Dashboard manda ?pendientes=1 para llegar con el filtro ya
   // aplicado — sin esto, se ignoraba el query param y quedaba lo que el usuario tuviera
   // guardado de antes (normalmente "todos"), mostrando de todo en vez de solo lo pendiente.
@@ -138,6 +143,7 @@ export default function LecturasPage() {
       const resultado = await api.lecturas.listPaginado(periodo, pagina, porPagina, {
         estado: filtroEstado === "todos" ? undefined : filtroEstado,
         q: busquedaDebounced || undefined,
+        barrio: filtroBarrio || undefined,
       });
       if (idPeticion !== peticionIdRef.current) return resultado.data;
       setFilas(resultado.data);
@@ -155,7 +161,7 @@ export default function LecturasPage() {
   useEffect(() => {
     cargar();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [periodo, pagina, porPagina, filtroEstado, busquedaDebounced, medidorResaltado]);
+  }, [periodo, pagina, porPagina, filtroEstado, busquedaDebounced, filtroBarrio, medidorResaltado]);
 
   function cargarResumen() {
     api.lecturas.resumen(periodo).then(setResumen).catch(() => {});
@@ -165,7 +171,7 @@ export default function LecturasPage() {
   // Cualquier cambio en los filtros vuelve a la primera página.
   useEffect(() => {
     setPagina(1);
-  }, [busquedaDebounced, filtroEstado, periodo]);
+  }, [busquedaDebounced, filtroEstado, filtroBarrio, periodo]);
 
   // La sincronización de pendientes (offlineQueue.ts) puede pasar en segundo plano — por el
   // evento "online" o el reintento automático — sin que esta página haga nada. Si la cola
@@ -277,7 +283,7 @@ export default function LecturasPage() {
         </label>
         <div className="flex items-center gap-2">
           <BusquedaInput
-            placeholder="Buscar por NUID, nombre o ruta..."
+            placeholder="Buscar por NUID, nombre, ruta o serial..."
             value={busqueda}
             onChange={(valor) => {
               setBusqueda(valor);
@@ -287,6 +293,21 @@ export default function LecturasPage() {
             autoFocus
           />
         </div>
+        <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+          Barrio
+          <select
+            value={filtroBarrio}
+            onChange={(e) => setFiltroBarrio(e.target.value ? Number(e.target.value) : "")}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-900"
+          >
+            <option value="">Todos</option>
+            {barrios.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.nombre}
+              </option>
+            ))}
+          </select>
+        </label>
         <div className="flex items-center gap-1 rounded-full border border-slate-200 p-1 dark:border-slate-800">
           {(
             [
@@ -373,8 +394,19 @@ export default function LecturasPage() {
                     {f.suscriptor.nombre}
                   </div>
                   <div className="text-xs text-slate-700 dark:text-slate-400">
-                    NUID {f.suscriptor.codigo} · Ruta {f.suscriptor.ruta ?? "-"}
+                    NUID {f.suscriptor.codigo} · Ruta {f.suscriptor.ruta ?? "-"} · {f.suscriptor.barrioCat?.nombre ?? "Sin barrio"}
                   </div>
+                  {f.lectura && (
+                    <div className="text-xs text-slate-500 dark:text-slate-500">
+                      Tomada el {new Date(f.lectura.fechaRegistro).toLocaleString("es-CO", {
+                        day: "2-digit",
+                        month: "2-digit",
+                        year: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </div>
+                  )}
                 </div>
                 {(pendiente || f.lectura) && (
                   <span className="shrink-0 text-xs text-slate-600">
@@ -435,11 +467,12 @@ function InformeLecturasPanel({ onCerrar }: { onCerrar: () => void }) {
   const [hasta, setHasta] = useState(periodoActual());
   const [estadoLectura, setEstadoLectura] = useState<"todas" | "tomadas" | "no_tomadas">("todas");
   const [alcance, setAlcance] = useState<"con_medidor" | "facturando">("con_medidor");
+  const [formato, setFormato] = useState<"lista" | "horizontal">("lista");
 
   function generar() {
     if (!desde || !hasta) return;
     const [d, h] = desde <= hasta ? [desde, hasta] : [hasta, desde];
-    api.reportes.exportLecturasRango(d, h, { estadoLectura, alcance });
+    api.reportes.exportLecturasRango(d, h, { estadoLectura, alcance, formato });
   }
 
   return (
@@ -494,6 +527,17 @@ function InformeLecturasPanel({ onCerrar }: { onCerrar: () => void }) {
           >
             <option value="con_medidor">Todos con medidor</option>
             <option value="facturando">Solo facturando</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-xs font-medium text-slate-700 dark:text-slate-300">
+          Formato
+          <select
+            value={formato}
+            onChange={(e) => setFormato(e.target.value as typeof formato)}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-900"
+          >
+            <option value="lista">Lista (una fila por periodo)</option>
+            <option value="horizontal">Horizontal (una columna por periodo)</option>
           </select>
         </label>
         <button

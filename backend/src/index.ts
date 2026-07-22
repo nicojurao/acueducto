@@ -15,7 +15,7 @@ import { medidoresRouter } from "./routes/medidores.js";
 import { lecturasRouter } from "./routes/lecturas.js";
 import { reportesRouter } from "./routes/reportes.js";
 import { dashboardRouter } from "./routes/dashboard.js";
-import { marcasRouter, modelosRouter, diametrosRouter, lotesRouter } from "./routes/catalogos.js";
+import { marcasRouter, modelosRouter, diametrosRouter, lotesRouter, variantesRouter } from "./routes/catalogos.js";
 import { actasRouter } from "./routes/actas.js";
 import { authRouter } from "./routes/auth.js";
 import { usuariosRouter } from "./routes/usuarios.js";
@@ -36,9 +36,12 @@ import {
 } from "./routes/catalogosInventario.js";
 import { historialRouter } from "./routes/historial.js";
 import { auditoriaRouter } from "./routes/auditoria.js";
+import { adminRouter } from "./routes/admin.js";
 import { requireAuth, requireAuthQuery, requirePermiso, requirePermisoCatalogos, requirePermisoVerAvanzado } from "./middleware/auth.js";
 import { limiteApi } from "./middleware/rateLimit.js";
 import { leerArchivo } from "./lib/storage.js";
+import { iniciarCronSnapshotAlmacenamiento } from "./lib/snapshotAlmacenamiento.js";
+import { iniciarCronSnapshotPeriodo } from "./lib/snapshotPeriodo.js";
 
 // Dominios desde los que se permite llamar a la API por CORS. Las llamadas normales de la app
 // (navegador -> mismo origen -> Vite hace de proxy hacia este backend) no pasan por aquí, así
@@ -121,6 +124,7 @@ app.use("/api/marcas", requirePermisoCatalogos, marcasRouter);
 app.use("/api/modelos", requirePermisoCatalogos, modelosRouter);
 app.use("/api/diametros", requirePermisoCatalogos, diametrosRouter);
 app.use("/api/lotes", requirePermisoCatalogos, lotesRouter);
+app.use("/api/variantes", requirePermisoCatalogos, variantesRouter);
 app.use("/api/actas", requirePermisoVerAvanzado("actas_ver", "actas_avanzado"), actasRouter);
 app.use("/api/puntos-aforo", requirePermiso("aforos_ver", "aforos_avanzado"), puntosAforoRouter);
 app.use("/api/aforos/kpis", requirePermiso("aforos_ver", "aforos_avanzado"), aforosKpisRouter);
@@ -136,6 +140,7 @@ app.use("/api/usuarios", requirePermiso("usuarios"), usuariosRouter);
 app.use("/api/roles", requirePermiso("roles"), rolesRouter);
 app.use("/api/historial", requirePermiso("historial"), historialRouter);
 app.use("/api/auditoria", requirePermiso("auditoria"), auditoriaRouter);
+app.use("/api/admin", requirePermiso("admin_panel"), adminRouter);
 
 // Red de seguridad final: cualquier error que llegue hasta acá (gracias a "express-async-errors")
 // se responde como 500 en vez de dejar caer el proceso completo. Debe ir después de todas las
@@ -156,3 +161,6 @@ const port = process.env.PORT ? Number(process.env.PORT) : 3001;
 app.listen(port, () => {
   logger.info(`Backend escuchando en puerto ${port}`);
 });
+
+iniciarCronSnapshotAlmacenamiento(logger);
+iniciarCronSnapshotPeriodo(logger);

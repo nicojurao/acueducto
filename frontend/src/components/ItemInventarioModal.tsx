@@ -56,6 +56,7 @@ export default function ItemInventarioModal({
   const [codigo, setCodigo] = useState(item?.codigo ?? "");
   const [descripcion, setDescripcion] = useState(item?.descripcion ?? "");
   const [cantidad, setCantidad] = useState(String(item?.cantidad ?? 1));
+  const [stockMinimo, setStockMinimo] = useState(item?.stockMinimo != null ? String(item.stockMinimo) : "");
   const [unidadMedida, setUnidadMedida] = useState<string>(item?.unidadMedida ?? "unidad");
   const [estado, setEstado] = useState<string>(item?.estado ?? "bueno");
   const [ubicacionId, setUbicacionId] = useState(item?.ubicacionId ? String(item.ubicacionId) : "");
@@ -84,6 +85,7 @@ export default function ItemInventarioModal({
           codigo: codigo.trim() || undefined,
           descripcion: descripcion.trim() || undefined,
           cantidad: Number(cantidad) || 1,
+          stockMinimo: stockMinimo !== "" ? Number(stockMinimo) : undefined,
           unidadMedida,
           estado,
           ubicacionId: ubicacionId ? Number(ubicacionId) : undefined,
@@ -97,6 +99,7 @@ export default function ItemInventarioModal({
           await api.inventario.update(item.id, {
             ...data,
             categoriaId: categoriaId ? Number(categoriaId) : null,
+            stockMinimo: stockMinimo !== "" ? Number(stockMinimo) : null,
             ubicacionId: ubicacionId ? Number(ubicacionId) : null,
             proveedorId: proveedorId ? Number(proveedorId) : null,
             fechaCompra: fechaCompra || null,
@@ -165,7 +168,7 @@ export default function ItemInventarioModal({
             />
           </label>
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 gap-3">
             <label className="block text-sm">
               <span className="mb-1 block text-slate-600 dark:text-slate-300">Cantidad</span>
               <input
@@ -176,6 +179,20 @@ export default function ItemInventarioModal({
                 className={`${inputClass} w-full`}
               />
             </label>
+            <label className="block text-sm">
+              <span className="mb-1 block text-slate-600 dark:text-slate-300">Stock mínimo (opcional)</span>
+              <input
+                type="number"
+                min={0}
+                value={stockMinimo}
+                onChange={(e) => setStockMinimo(e.target.value)}
+                placeholder="Avisar si el disponible baja de..."
+                className={`${inputClass} w-full`}
+              />
+            </label>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
             <label className="block text-sm">
               <span className="mb-1 block text-slate-600 dark:text-slate-300">Unidad</span>
               <select value={unidadMedida} onChange={(e) => setUnidadMedida(e.target.value)} className={`${inputClass} w-full`}>

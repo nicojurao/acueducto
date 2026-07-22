@@ -212,6 +212,19 @@ suscriptoresRouter.get("/:id", async (req, res) => {
   res.json(suscriptor);
 });
 
+// Mantiene sincronizado el estado de facturación del suscriptor con la condición física de su
+// medidor activo: "inactivo" (etiqueta "Medidor inactivo / dañado") marca el medidor como
+// dañado, y al salir de "inactivo" se asume que el medidor quedó bien. Antes eran dos campos
+// completamente independientes que se desincronizaban con facilidad.
+async function sincronizarCondicionMedidor(suscriptorId: number, estadoFacturacion: string, usuarioId?: number) {
+  const medidor = await prisma.medidor.findFirst({ where: { suscriptorId, activo: true } });
+  if (!medidor) return;
+  const nuevaCondicion = estadoFacturacion === "inactivo" ? "danado" : "bueno";
+  if (medidor.condicion === nuevaCondicion) return;
+  const actualizado = await prisma.medidor.update({ where: { id: medidor.id }, data: { condicion: nuevaCondicion } });
+  await registrarCambios("medidor", medidor.id, { condicion: medidor.condicion }, { condicion: actualizado.condicion }, usuarioId);
+}
+
 // Reglas de coherencia compartidas entre el PUT general y el PUT acotado de estado de
 // facturación: "sin_medidor" implica que no tiene medidor activo, y los estados que requieren
 // medición ("instalado_prueba"/"facturando") implican que sí lo tiene.
@@ -252,6 +265,7 @@ suscriptoresRouter.put("/:id/estado-facturacion", puedeEditarEstadoFacturacion, 
     include: { barrioCat: true, estratoCat: true },
   });
   await registrarCambios("suscriptor", suscriptor.id, camposSuscriptor(antes), camposSuscriptor(suscriptor), req.usuario?.id);
+  await sincronizarCondicionMedidor(id, estadoFacturacion, req.usuario?.id);
   res.json(suscriptor);
 });
 
@@ -334,6 +348,9 @@ suscriptoresRouter.put("/:id", soloAvanzado, async (req, res) => {
   });
 
   await registrarCambios("suscriptor", suscriptor.id, camposSuscriptor(antes), camposSuscriptor(suscriptor), req.usuario?.id);
+  if (estadoFacturacion !== undefined) {
+    await sincronizarCondicionMedidor(suscriptor.id, estadoFacturacion, req.usuario?.id);
+  }
 
   res.json(suscriptor);
 });

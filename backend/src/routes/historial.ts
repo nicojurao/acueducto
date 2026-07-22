@@ -45,7 +45,8 @@ historialRouter.get("/", async (req, res) => {
   const idsMedidor = [...new Set(items.filter((i) => i.entidad === "medidor").map((i) => i.entidadId))];
   const idsSuscriptor = [...new Set(items.filter((i) => i.entidad === "suscriptor").map((i) => i.entidadId))];
   const idsUsuario = [...new Set(items.filter((i) => i.entidad === "usuario").map((i) => i.entidadId))];
-  const [medidores, suscriptores, usuariosEntidad] = await Promise.all([
+  const idsItemInventario = [...new Set(items.filter((i) => i.entidad === "item_inventario").map((i) => i.entidadId))];
+  const [medidores, suscriptores, usuariosEntidad, itemsInventario] = await Promise.all([
     idsMedidor.length
       ? prisma.medidor.findMany({ where: { id: { in: idsMedidor } }, select: { id: true, serial: true } })
       : [],
@@ -55,10 +56,14 @@ historialRouter.get("/", async (req, res) => {
     idsUsuario.length
       ? prisma.usuario.findMany({ where: { id: { in: idsUsuario } }, select: { id: true, nombre: true } })
       : [],
+    idsItemInventario.length
+      ? prisma.itemInventario.findMany({ where: { id: { in: idsItemInventario } }, select: { id: true, nombre: true } })
+      : [],
   ]);
   const nombreMedidor = new Map(medidores.map((m) => [m.id, m.serial ?? `#${m.id}`]));
   const nombreSuscriptor = new Map(suscriptores.map((s) => [s.id, `${s.nombre} (${s.codigo})`]));
   const nombreUsuarioEntidad = new Map(usuariosEntidad.map((u) => [u.id, u.nombre]));
+  const nombreItemInventario = new Map(itemsInventario.map((i) => [i.id, i.nombre]));
 
   const data = items.map((i) => ({
     ...i,
@@ -67,6 +72,8 @@ historialRouter.get("/", async (req, res) => {
         ? nombreMedidor.get(i.entidadId) ?? `#${i.entidadId}`
         : i.entidad === "usuario"
         ? nombreUsuarioEntidad.get(i.entidadId) ?? `#${i.entidadId}`
+        : i.entidad === "item_inventario"
+        ? nombreItemInventario.get(i.entidadId) ?? `#${i.entidadId}`
         : nombreSuscriptor.get(i.entidadId) ?? `#${i.entidadId}`,
   }));
 

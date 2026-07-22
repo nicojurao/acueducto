@@ -26,6 +26,7 @@ import { HistorialSeccion } from "./HistorialTimeline";
 import { useAuth } from "../contexts/AuthContext";
 import { useCierreAnimado } from "../lib/useCierreAnimado";
 import { inputClass } from "../lib/ui";
+import { fmtFecha } from "../lib/fecha";
 
 const GRID_STROKE = "#475569";
 
@@ -35,10 +36,6 @@ function tipoLabel(tipo: string | null): string {
   return TIPO_LABELS[tipo] ?? tipo;
 }
 
-function fmtFecha(fecha: string | null): string {
-  if (!fecha) return "-";
-  return new Date(fecha).toLocaleDateString("es-CO", { year: "numeric", month: "long", day: "numeric" });
-}
 
 export default function SuscriptorDetailModal({
   suscriptorId,
@@ -63,6 +60,8 @@ export default function SuscriptorDetailModal({
       longitud?: number | null;
       fechaRegistro?: string;
       capturadoPor?: string | null;
+      consumoTotalMedidor?: number | null;
+      nIntegrantes?: number | null;
     }[]
   >([]);
   const [lecturaDetalle, setLecturaDetalle] = useState<(typeof historico)[number] | null>(null);
@@ -104,8 +103,10 @@ export default function SuscriptorDetailModal({
     medidorId: "",
     fechaInstalacion: "",
     instaladoPor: "",
+    usuarioId: "",
     observaciones: "",
     fechaRetiro: "",
+    lecturaInicial: "",
   });
   const [fotos, setFotos] = useState<File[]>([]);
   const [fotosExistentes, setFotosExistentes] = useState<string[]>([]);
@@ -114,6 +115,15 @@ export default function SuscriptorDetailModal({
   const { pedirConfirmacion, modal: modalConfirmacion } = useConfirm();
   const { saliendo, cerrar } = useCierreAnimado(onClose);
   const [instaladores, setInstaladores] = useState<{ id: number; nombre: string }[]>([]);
+  // Si el acta que se está editando quedó ligada a un usuario que ya no está en la lista de
+  // activos (inactivo, o simplemente no vino en la carga inicial), se agrega acá para que el
+  // selector lo muestre igual — en vez de mostrar "usuario inactivo/eliminado" como si no
+  // existiera, se ve el nombre real con la etiqueta "(inactivo)".
+  const [instaladorExtra, setInstaladorExtra] = useState<{ id: number; nombre: string; activo: boolean } | null>(null);
+  const instaladoresParaFormulario =
+    instaladorExtra && !instaladores.some((i) => i.id === instaladorExtra.id)
+      ? [...instaladores, instaladorExtra]
+      : instaladores;
   const { usuario } = useAuth();
   const puedeEditar = usuario?.permisos?.includes("suscriptores_avanzado") ?? false;
   // El estado de facturación se puede cambiar con un permiso propio, más acotado que
@@ -144,9 +154,6 @@ export default function SuscriptorDetailModal({
     modeloId: "",
     diametroId: "",
     loteId: "",
-    fechaFabricacion: "",
-    fechaCertificacion: "",
-    certificado: "",
   });
   const [actaCalibracionArchivo, setActaCalibracionArchivo] = useState<File | null>(null);
   const [actaFirmadaArchivo, setActaFirmadaArchivo] = useState<File | null>(null);
@@ -253,7 +260,16 @@ export default function SuscriptorDetailModal({
     setEditandoEsRetirado(false);
     setEditandoActaCalibracionUrl(null);
     setEditandoDiametroActual(null);
-    setFormActa({ medidorId: "", fechaInstalacion: "", instaladoPor: "", observaciones: "", fechaRetiro: "" });
+    setFormActa({
+      medidorId: "",
+      fechaInstalacion: "",
+      instaladoPor: "",
+      usuarioId: "",
+      observaciones: "",
+      fechaRetiro: "",
+      lecturaInicial: "",
+    });
+    setInstaladorExtra(null);
     setFotos([]);
     setFotosExistentes([]);
     setFotosARemover([]);
@@ -281,9 +297,12 @@ export default function SuscriptorDetailModal({
         ? medidor.fechaInstalacion.slice(0, 10)
         : "",
       instaladoPor: acta?.instaladoPor ?? "",
+      usuarioId: acta?.usuarioId ? String(acta.usuarioId) : "",
       observaciones: acta?.observaciones ?? "",
       fechaRetiro: "",
+      lecturaInicial: medidor.lecturaInicial ?? "",
     });
+    setInstaladorExtra(acta?.usuario ?? null);
     setFormMedidor({
       serial: medidor.serial ?? "",
       marcaId: medidor.marcaCat ? String(medidor.marcaCat.id) : "",
@@ -322,9 +341,12 @@ export default function SuscriptorDetailModal({
       medidorId: String(medidor.id),
       fechaInstalacion: acta.fechaInstalacion.slice(0, 10),
       instaladoPor: acta.instaladoPor,
+      usuarioId: acta.usuarioId ? String(acta.usuarioId) : "",
       observaciones: acta.observaciones ?? "",
       fechaRetiro: acta.fechaRetiro ? acta.fechaRetiro.slice(0, 10) : "",
+      lecturaInicial: medidor.lecturaInicial ?? "",
     });
+    setInstaladorExtra(acta.usuario ?? null);
     setFormMedidor({
       serial: medidor.serial ?? "",
       marcaId: medidor.marcaCat ? String(medidor.marcaCat.id) : "",
@@ -354,7 +376,16 @@ export default function SuscriptorDetailModal({
     setEditandoEsRetirado(false);
     setEditandoActaCalibracionUrl(null);
     setEditandoDiametroActual(null);
-    setFormActa({ medidorId: "", fechaInstalacion: "", instaladoPor: "", observaciones: "", fechaRetiro: "" });
+    setFormActa({
+      medidorId: "",
+      fechaInstalacion: "",
+      instaladoPor: "",
+      usuarioId: "",
+      observaciones: "",
+      fechaRetiro: "",
+      lecturaInicial: "",
+    });
+    setInstaladorExtra(null);
     setFormMedidor({
       serial: "",
       marcaId: "",
@@ -430,7 +461,8 @@ export default function SuscriptorDetailModal({
   }
 
   async function registrarAsignacion() {
-    const usuarioIdInstalador = instaladores.find((u) => u.nombre === formActa.instaladoPor)?.id;
+    const usuarioIdInstalador = formActa.usuarioId ? Number(formActa.usuarioId) : undefined;
+    const nombreInstalador = instaladoresParaFormulario.find((u) => u.id === usuarioIdInstalador)?.nombre ?? "";
     setGuardandoActa(true);
     try {
       if (editandoMedidorId) {
@@ -445,15 +477,16 @@ export default function SuscriptorDetailModal({
           fechaFabricacion: formMedidor.fechaFabricacion || null,
           fechaCertificacion: formMedidor.fechaCertificacion || null,
           certificado: formMedidor.certificado || null,
+          lecturaInicial: formActa.lecturaInicial !== "" ? Number(formActa.lecturaInicial) : null,
         });
         if (actaCalibracionArchivo) {
           await api.medidores.subirActaCalibracion(editandoMedidorId, actaCalibracionArchivo);
         }
         if (editandoActaId) {
-          if (!formActa.fechaInstalacion || !formActa.instaladoPor) return;
+          if (!formActa.fechaInstalacion || !nombreInstalador) return;
           await api.actas.update(editandoActaId, {
             fechaInstalacion: formActa.fechaInstalacion,
-            instaladoPor: formActa.instaladoPor,
+            instaladoPor: nombreInstalador,
             usuarioId: usuarioIdInstalador,
             observaciones: formActa.observaciones || undefined,
             fotosNuevas: fotos,
@@ -463,7 +496,7 @@ export default function SuscriptorDetailModal({
           if (actaFirmadaArchivo) {
             await api.actas.subirFirmada(editandoActaId, actaFirmadaArchivo);
           }
-        } else if (formActa.fechaInstalacion && formActa.instaladoPor) {
+        } else if (formActa.fechaInstalacion && nombreInstalador) {
           // El medidor no tenía acta: si se completó fecha e instalador, se genera ahora
           // (documenta retroactivamente una instalación que ya estaba hecha), y de una vez se le
           // puede adjuntar el escaneo firmado si el suscriptor ya lo tenía en papel.
@@ -471,7 +504,7 @@ export default function SuscriptorDetailModal({
             suscriptorId,
             medidorId: editandoMedidorId,
             fechaInstalacion: formActa.fechaInstalacion,
-            instaladoPor: formActa.instaladoPor,
+            instaladoPor: nombreInstalador,
             usuarioId: usuarioIdInstalador,
             observaciones: formActa.observaciones || undefined,
             fotos,
@@ -481,15 +514,18 @@ export default function SuscriptorDetailModal({
           }
         }
       } else {
-        if (!formActa.medidorId || !formActa.fechaInstalacion || !formActa.instaladoPor) return;
+        if (!formActa.medidorId || !formActa.fechaInstalacion || !nombreInstalador) return;
         await api.actas.create({
           suscriptorId,
           medidorId: Number(formActa.medidorId),
           fechaInstalacion: formActa.fechaInstalacion,
-          instaladoPor: formActa.instaladoPor,
+          instaladoPor: nombreInstalador,
           usuarioId: usuarioIdInstalador,
           observaciones: formActa.observaciones || undefined,
           fotos,
+        });
+        await api.medidores.update(Number(formActa.medidorId), {
+          lecturaInicial: formActa.lecturaInicial !== "" ? Number(formActa.lecturaInicial) : null,
         });
       }
       cerrarFormulario();
@@ -534,6 +570,16 @@ export default function SuscriptorDetailModal({
     setGuardandoUbicacion(false);
     setEditandoUbicacion(false);
     cargarDetalle();
+  }
+
+  function quitarUbicacion() {
+    pedirConfirmacion("¿Quitar la marca de este predio del mapa?", async () => {
+      setGuardandoUbicacion(true);
+      await api.suscriptores.update(suscriptorId, { latitud: null, longitud: null });
+      setGuardandoUbicacion(false);
+      setEditandoUbicacion(false);
+      cargarDetalle();
+    });
   }
 
   return (
@@ -737,36 +783,36 @@ export default function SuscriptorDetailModal({
                   </div>
                 )}
                 <div className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-3">
-                  <div>
+                  <div className="min-w-0">
                     <div className="text-xs uppercase text-slate-700 dark:text-slate-400">NUID</div>
-                    <div className="font-medium">{suscriptor.codigo}</div>
+                    <div className="break-words font-medium">{suscriptor.codigo}</div>
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <div className="text-xs uppercase text-slate-700 dark:text-slate-400">Ruta</div>
-                    <div className="font-medium">{suscriptor.ruta ?? "-"}</div>
+                    <div className="break-words font-medium">{suscriptor.ruta ?? "-"}</div>
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <div className="text-xs uppercase text-slate-700 dark:text-slate-400">Identificación</div>
-                    <div className="font-medium">{suscriptor.identificacion ?? "-"}</div>
+                    <div className="break-words font-medium">{suscriptor.identificacion ?? "-"}</div>
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <div className="text-xs uppercase text-slate-700 dark:text-slate-400">Estrato</div>
-                    <div className="font-medium">
+                    <div className="break-words font-medium">
                       {suscriptor.estratoCat ? `${suscriptor.estratoCat.codigo} — ${suscriptor.estratoCat.etiqueta}` : "-"}
                     </div>
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <div className="text-xs uppercase text-slate-700 dark:text-slate-400">Barrio</div>
-                    <div className="font-medium">{suscriptor.barrioCat?.nombre ?? "-"}</div>
+                    <div className="break-words font-medium">{suscriptor.barrioCat?.nombre ?? "-"}</div>
                   </div>
-                  <div className="col-span-2 sm:col-span-3">
+                  <div className="col-span-2 min-w-0 sm:col-span-3">
                     <div className="text-xs uppercase text-slate-700 dark:text-slate-400">Dirección</div>
-                    <div className="font-medium">{suscriptor.direccion ?? "-"}</div>
+                    <div className="break-words font-medium">{suscriptor.direccion ?? "-"}</div>
                   </div>
                   {suscriptor.direccionComercial && (
-                    <div className="col-span-2 sm:col-span-3">
+                    <div className="col-span-2 min-w-0 sm:col-span-3">
                       <div className="text-xs uppercase text-slate-700 dark:text-slate-400">Dirección comercial</div>
-                      <div className="font-medium">{suscriptor.direccionComercial}</div>
+                      <div className="break-words font-medium">{suscriptor.direccionComercial}</div>
                     </div>
                   )}
                 </div>
@@ -789,12 +835,22 @@ export default function SuscriptorDetailModal({
                   )}
                 </button>
                 {mapaAbierto && !editandoUbicacion && puedeEditar && (
-                  <button
-                    onClick={() => setEditandoUbicacion(true)}
-                    className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400"
-                  >
-                    {suscriptor.latitud != null ? "Cambiar ubicación" : "Fijar ubicación"}
-                  </button>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => setEditandoUbicacion(true)}
+                      className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400"
+                    >
+                      {suscriptor.latitud != null ? "Cambiar ubicación" : "Fijar ubicación"}
+                    </button>
+                    {suscriptor.latitud != null && (
+                      <button
+                        onClick={quitarUbicacion}
+                        className="text-xs font-medium text-red-500 hover:underline"
+                      >
+                        Quitar marca
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -889,7 +945,7 @@ export default function SuscriptorDetailModal({
                   modelos={modelos}
                   lotes={lotes}
                   medidoresBodega={medidoresBodega}
-                  instaladores={instaladores}
+                  instaladores={instaladoresParaFormulario}
                   fotos={fotos}
                   setFotos={setFotos}
                   fotosExistentes={fotosExistentes}
@@ -935,41 +991,41 @@ export default function SuscriptorDetailModal({
                       </span>
                     </div>
                     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                      <div>
+                      <div className="min-w-0">
                         <div className="text-xs text-slate-700 dark:text-slate-400">Tipo</div>
-                        <div>{tipoLabel(m.tipo)}</div>
+                        <div className="break-words">{tipoLabel(m.tipo)}</div>
                       </div>
-                      <div>
+                      <div className="min-w-0">
                         <div className="text-xs text-slate-700 dark:text-slate-400">Marca</div>
-                        <div>{m.marcaCat?.nombre ?? "-"}</div>
+                        <div className="break-words">{m.marcaCat?.nombre ?? "-"}</div>
                       </div>
-                      <div>
+                      <div className="col-span-2 min-w-0 sm:col-span-2">
                         <div className="text-xs text-slate-700 dark:text-slate-400">Modelo</div>
-                        <div>{m.modeloCat?.nombre ?? "-"}</div>
+                        <div className="break-words">{m.modeloCat?.nombre ?? "-"}</div>
                       </div>
-                      <div>
+                      <div className="min-w-0">
                         <div className="text-xs text-slate-700 dark:text-slate-400">Diámetro</div>
-                        <div>{m.diametroCat?.valor ?? "-"}</div>
+                        <div className="break-words">{m.diametroCat?.valor ?? "-"}</div>
                       </div>
-                      <div>
+                      <div className="min-w-0">
                         <div className="text-xs text-slate-700 dark:text-slate-400">Serial</div>
-                        <div>{m.serial ?? "-"}</div>
+                        <div className="break-words">{m.serial ?? "-"}</div>
                       </div>
-                      <div>
+                      <div className="min-w-0">
                         <div className="text-xs text-slate-700 dark:text-slate-400">Fecha de instalación</div>
-                        <div>{fmtFecha(m.fechaInstalacion)}</div>
+                        <div className="break-words">{fmtFecha(m.fechaInstalacion)}</div>
                       </div>
-                      <div>
+                      <div className="min-w-0">
                         <div className="text-xs text-slate-700 dark:text-slate-400">Fecha de fabricación</div>
-                        <div>{fmtFecha(m.fechaFabricacion)}</div>
+                        <div className="break-words">{fmtFecha(m.fechaFabricacion)}</div>
                       </div>
-                      <div>
+                      <div className="min-w-0">
                         <div className="text-xs text-slate-700 dark:text-slate-400">Fecha de certificación</div>
-                        <div>{fmtFecha(m.fechaCertificacion)}</div>
+                        <div className="break-words">{fmtFecha(m.fechaCertificacion)}</div>
                       </div>
-                      <div>
+                      <div className="min-w-0">
                         <div className="text-xs text-slate-700 dark:text-slate-400">N° certificado</div>
-                        <div>{m.certificado ?? "-"}</div>
+                        <div className="break-words">{m.certificado ?? "-"}</div>
                       </div>
                     </div>
                     <div className="mt-2 flex flex-wrap items-center gap-3">
@@ -1089,7 +1145,7 @@ export default function SuscriptorDetailModal({
                           Serial <strong>{a.serial}</strong> — instalado el {fmtFecha(a.fechaInstalacion)}, retirado
                           el {fmtFecha(a.fechaRetiro)}
                         </div>
-                        <div className="text-xs text-slate-600 dark:text-slate-400">Instalado por: {a.instaladoPor}</div>
+                        <div className="text-xs text-slate-600 dark:text-slate-400">Instalado por: {a.usuario?.nombre ?? a.instaladoPor}</div>
                         <div className="mt-1.5 flex items-center gap-3">
                           {a.medidor && puedeAsignarMedidor && (
                             <button
@@ -1260,12 +1316,16 @@ export default function SuscriptorDetailModal({
       {lecturaDetalle && (
         <LecturaDetalleModal
           periodo={lecturaDetalle.periodo}
+          valorLectura={lecturaDetalle.valorLectura ?? null}
           consumo={lecturaDetalle.consumo}
           fotoUrl={lecturaDetalle.fotoUrl ?? null}
           latitud={lecturaDetalle.latitud ?? null}
           longitud={lecturaDetalle.longitud ?? null}
           fechaRegistro={lecturaDetalle.fechaRegistro ?? null}
           capturadoPor={lecturaDetalle.capturadoPor ?? null}
+          observaciones={lecturaDetalle.observaciones ?? null}
+          consumoTotalMedidor={lecturaDetalle.consumoTotalMedidor ?? null}
+          nIntegrantes={lecturaDetalle.nIntegrantes ?? null}
           onClose={() => setLecturaDetalle(null)}
         />
       )}
