@@ -1,9 +1,13 @@
 import { Router } from "express";
 import PDFDocument from "pdfkit";
-import { prisma } from "../lib/prisma.js";
-import { crearInformeExcel, enviarExcel } from "../lib/excelBranding.js";
-import { encabezadoPdf, tituloSeccionPdf, tarjetaDatosPdf, COLOR_MARCA } from "../lib/pdfBranding.js";
-import { requirePermiso } from "../middleware/auth.js";
+import { prisma } from "../../lib/prisma.js";
+import { crearInformeExcel, enviarExcel } from "../../lib/excelBranding.js";
+import { encabezadoPdf, tituloSeccionPdf, tarjetaDatosPdf, tablaPdf } from "../../lib/pdfBranding.js";
+import { requirePermiso } from "../../middleware/auth.js";
+import { primerDiaMes as primerDiaMesPeriodo, periodoFacturableActual as mesFacturableActual } from "../../lib/periodo.js";
+import { repartirEntero } from "../../lib/cotitularSplit.js";
+import { agregarPorClave } from "../../lib/consumoAgregado.js";
+import { historicoSuscriptor } from "../../lib/historicoSuscriptor.js";
 
 export const reportesRouter = Router();
 
@@ -21,11 +25,6 @@ const permisoConsumoSuscriptor = requirePermiso("reportes", "suscriptores_ver", 
 // página pero el Promise.all que carga todo junto fallaría por estas llamadas, dejando el
 // dashboard entero en blanco.
 const permisoReportesODashboard = requirePermiso("reportes", "dashboard");
-
-function primerDiaMesPeriodo(periodo: string): Date {
-  const [y, m] = periodo.split("-").map(Number);
-  return new Date(Date.UTC(y, m - 1, 1));
-}
 
 function periodosEnRango(desde: string, hasta: string): string[] {
   const [y1, m1] = desde.split("-").map(Number);
@@ -112,14 +111,7 @@ reportesRouter.get("/lecturas-excel", permisoReportesODashboard, async (req, res
         const lectura = m.lecturas.find((l) => l.periodo.getTime() === fechaPeriodo.getTime());
         const integrantes = integrantesDelMedidor(m);
         const nIntegrantes = integrantes.length;
-        // Reparte un total entero: cada cotitular recibe la parte entera (floor), el titular se
-        // queda con lo que sobra — puede terminar con un poco más o menos que los demás, nunca
-        // ellos. Se aplica igual a lectura anterior, lectura actual y consumo.
-        function repartir(total: number, esCotitular: boolean): number {
-          if (nIntegrantes <= 1) return total;
-          const share = Math.floor(total / nIntegrantes);
-          return esCotitular ? share : total - share * (nIntegrantes - 1);
-        }
+        const repartir = (total: number, esCotitular: boolean) => repartirEntero(total, nIntegrantes, esCotitular);
         const consumoTotal = lectura ? Number(lectura.consumo) : 0;
         const lecturaActualTotal = lectura ? Number(lectura.valorLectura) : 0;
         const lecturaAnteriorTotal = lectura ? lecturaActualTotal - consumoTotal : 0;
@@ -262,8 +254,7 @@ reportesRouter.get("/mapa-consumo", requirePermiso("reportes", "dashboard", "map
     const nIntegrantes = integrantes.length;
     for (const { suscriptor: s, esCotitular } of integrantes) {
       if (s.latitud == null || s.longitud == null) continue;
-      const share = nIntegrantes > 1 ? Math.floor(consumoTotal / nIntegrantes) : consumoTotal;
-      const consumo = esCotitular ? share : consumoTotal - share * (nIntegrantes - 1);
+      const consumo = repartirEntero(consumoTotal, nIntegrantes, esCotitular);
       puntos.push({ id: s.id, latitud: s.latitud, longitud: s.longitud, consumo });
     }
   }
@@ -282,14 +273,7 @@ reportesRouter.get("/resumen-mensual", permisoReportesODashboard, async (req, re
     where: Object.keys(where).length ? { periodo: where } : undefined,
   });
 
-  const porMes = new Map<string, { usuarios: number; consumo: number }>();
-  for (const l of lecturas) {
-    const key = l.periodo.toISOString().slice(0, 7);
-    const acc = porMes.get(key) ?? { usuarios: 0, consumo: 0 };
-    acc.usuarios += 1;
-    acc.consumo += Number(l.consumo);
-    porMes.set(key, acc);
-  }
+  const porMes = agregarPorClave(lecturas, (l) => l.periodo.toISOString().slice(0, 7));
 
   const resultado = Array.from(porMes.entries())
     .sort(([a], [b]) => a.localeCompare(b))
@@ -298,213 +282,10 @@ reportesRouter.get("/resumen-mensual", permisoReportesODashboard, async (req, re
   res.json(resultado);
 });
 
-// Las lecturas del mes no empiezan a capturarse hasta el día 20 (mismo criterio que usa
-// ReportesPage.tsx para el periodo por defecto del Dashboard). Antes de esa fecha, el mes en
-// curso todavía no está "vencido" — no debe aparecer como hueco/"sin lectura" en el histórico.
-function mesFacturableActual(): string {
-  const now = new Date();
-  let anio = now.getUTCFullYear();
-  let mes = now.getUTCDate() < 20 ? now.getUTCMonth() : now.getUTCMonth() + 1;
-  if (mes === 0) {
-    mes = 12;
-    anio -= 1;
-  }
-  return `${anio}-${String(mes).padStart(2, "0")}`;
-}
-
-// Histórico de consumo de un suscriptor (para gráfico de tendencia).
-// Si el suscriptor es titular de un medidor, se cuenta el consumo completo.
-// Si es cotitular de un medidor compartido (acometida multiusuario), se reparte
-// el consumo en partes iguales entre el titular y todos sus cotitulares.
-// Los meses entre la primera lectura y el periodo actual que no tengan lectura se
-// marcan con sinLectura=true (y el motivo de la novedad, si se registró uno).
-// Extraído para reusarse también en el PDF del informe de suscriptor (misma lógica de huecos,
-// cotitulares y novedades, sin duplicarla).
-async function historicoSuscriptor(suscriptorId: number) {
-  const medidoresPropios = await prisma.medidor.findMany({
-    where: { suscriptorId },
-    include: {
-      lecturas: { orderBy: { periodo: "asc" }, include: { capturadoPor: { select: { nombre: true } } } },
-      cotitulares: true,
-    },
-  });
-
-  // Si el medidor propio tiene cotitulares, al titular le toca el total menos lo que ya se le dio
-  // en partes enteras a cada cotitular (mismo criterio que el informe de lecturas: el titular
-  // absorbe el resto de la división, no cada cotitular).
-  const historico = medidoresPropios.flatMap((m) => {
-    const nIntegrantes = 1 + m.cotitulares.length;
-    return m.lecturas.map((l) => {
-      const valorLecturaTotal = Number(l.valorLectura);
-      const consumoTotal = Number(l.consumo);
-      const shareValorLectura = nIntegrantes > 1 ? Math.floor(valorLecturaTotal / nIntegrantes) : valorLecturaTotal;
-      const shareConsumo = nIntegrantes > 1 ? Math.floor(consumoTotal / nIntegrantes) : consumoTotal;
-      return {
-        periodo: l.periodo.toISOString().slice(0, 7),
-        valorLectura: valorLecturaTotal - shareValorLectura * (nIntegrantes - 1),
-        consumo: consumoTotal - shareConsumo * (nIntegrantes - 1),
-        medidorId: m.id,
-        lecturaId: l.id,
-        fotoUrl: l.fotoUrl,
-        latitud: l.latitud,
-        longitud: l.longitud,
-        fechaRegistro: l.fechaRegistro.toISOString(),
-        capturadoPor: l.capturadoPor?.nombre ?? null,
-        observaciones: l.observaciones,
-        // Valor real del medidor, sin repartir entre cotitulares — para quien necesite el dato
-        // físico tal cual se capturó (auditoría, detectar fugas), no solo la parte facturable.
-        consumoTotalMedidor: nIntegrantes > 1 ? consumoTotal : null,
-        nIntegrantes: nIntegrantes > 1 ? nIntegrantes : null,
-      };
-    });
-  });
-
-  const medidorIds = medidoresPropios.map((m) => m.id);
-  // Medidor a usar para los meses sin lectura (huecos): el activo actual, si hay uno.
-  let medidorActivoId = medidoresPropios.find((m) => m.activo)?.id ?? medidoresPropios[0]?.id;
-
-  const cotitularDe = await prisma.cotitular.findUnique({
-    where: { suscriptorId },
-    include: {
-      medidor: {
-        include: { lecturas: { include: { capturadoPor: { select: { nombre: true } } } }, cotitulares: true },
-      },
-    },
-  });
-
-  if (cotitularDe) {
-    medidorIds.push(cotitularDe.medidor.id);
-    medidorActivoId = medidorActivoId ?? cotitularDe.medidor.id;
-    // Entero, no decimal: mismo criterio del informe de lecturas — cada cotitular recibe la
-    // parte entera (floor); lo que sobra se lo queda el titular, no se ve reflejado acá.
-    const nIntegrantes = 1 + cotitularDe.medidor.cotitulares.length;
-    for (const l of cotitularDe.medidor.lecturas) {
-      historico.push({
-        periodo: l.periodo.toISOString().slice(0, 7),
-        valorLectura: Math.floor(Number(l.valorLectura) / nIntegrantes),
-        consumo: Math.floor(Number(l.consumo) / nIntegrantes),
-        medidorId: cotitularDe.medidor.id,
-        lecturaId: l.id,
-        fotoUrl: l.fotoUrl,
-        latitud: l.latitud,
-        longitud: l.longitud,
-        fechaRegistro: l.fechaRegistro.toISOString(),
-        capturadoPor: l.capturadoPor?.nombre ?? null,
-        observaciones: l.observaciones,
-        consumoTotalMedidor: Number(l.consumo),
-        nIntegrantes,
-      });
-    }
-  }
-
-  if (historico.length === 0) return [];
-
-  historico.sort((a, b) => a.periodo.localeCompare(b.periodo));
-
-  const novedades = medidorIds.length
-    ? await prisma.novedadLectura.findMany({ where: { medidorId: { in: medidorIds } } })
-    : [];
-  const novedadPorPeriodo = new Map(
-    novedades.map((n) => [n.periodo.toISOString().slice(0, 7), { id: n.id, motivo: n.motivo, fotos: n.fotos }])
-  );
-  const existentePorPeriodo = new Map(historico.map((h) => [h.periodo, h]));
-
-  const completo: {
-    periodo: string;
-    valorLectura: number | null;
-    consumo: number;
-    sinLectura: boolean;
-    motivo?: string;
-    novedadId?: number;
-    fotos?: string[];
-    medidorId?: number;
-    lecturaId?: number;
-    fechaRegistro?: string;
-    capturadoPor?: string | null;
-  }[] = [];
-
-  // El rango llega hasta el mes calendario actual (o hasta el último periodo con novedad,
-  // si por algún motivo es más reciente), para que una novedad recién marcada sea visible ya.
-  const ultimaNovedad = novedades.reduce<string | null>((max, n) => {
-    const p = n.periodo.toISOString().slice(0, 7);
-    return !max || p > max ? p : max;
-  }, null);
-  const finRango = [mesFacturableActual(), ultimaNovedad ?? ""].sort().at(-1)!;
-
-  let [y, m] = historico[0].periodo.split("-").map(Number);
-  const [yFin, mFin] = finRango.split("-").map(Number);
-  while (y < yFin || (y === yFin && m <= mFin)) {
-    const key = `${y}-${String(m).padStart(2, "0")}`;
-    const existente = existentePorPeriodo.get(key);
-    if (existente) {
-      completo.push({ ...existente, sinLectura: false });
-    } else {
-      const novedad = novedadPorPeriodo.get(key);
-      completo.push({
-        periodo: key,
-        valorLectura: null,
-        consumo: 0,
-        sinLectura: true,
-        motivo: novedad?.motivo,
-        novedadId: novedad?.id,
-        fotos: novedad?.fotos,
-        medidorId: medidorActivoId,
-      });
-    }
-    m++;
-    if (m > 12) {
-      m = 1;
-      y++;
-    }
-  }
-
-  return completo;
-}
-
 reportesRouter.get("/consumo-suscriptor/:id", permisoConsumoSuscriptor, async (req, res) => {
   res.json(await historicoSuscriptor(Number(req.params.id)));
 });
 
-// Tabla simple con encabezado en el color de marca y filas alternadas — mismo estilo que la de
-// inventario.ts, reescrita acá para no tener que exportarla desde otro router.
-type ColumnaPdf = { titulo: string; clave: string; ancho: number; align?: "left" | "right" };
-function tablaPdf(doc: PDFKit.PDFDocument, columnas: ColumnaPdf[], filas: Record<string, string>[]) {
-  const x = doc.page.margins.left;
-  const anchoTotal = columnas.reduce((a, c) => a + c.ancho, 0);
-  const altoFila = 18;
-
-  function dibujarEncabezado(y: number) {
-    doc.rect(x, y, anchoTotal, altoFila).fill(COLOR_MARCA);
-    let cx = x;
-    doc.font("Helvetica-Bold").fontSize(8).fillColor("#fff");
-    for (const col of columnas) {
-      doc.text(col.titulo, cx + 4, y + 5, { width: col.ancho - 8, align: col.align ?? "left" });
-      cx += col.ancho;
-    }
-    doc.font("Helvetica").fillColor("#0f172a");
-    return y + altoFila;
-  }
-
-  let y = dibujarEncabezado(doc.y);
-  filas.forEach((fila, i) => {
-    if (y + altoFila > doc.page.height - doc.page.margins.bottom) {
-      doc.addPage();
-      y = dibujarEncabezado(doc.page.margins.top);
-    }
-    if (i % 2 === 1) doc.rect(x, y, anchoTotal, altoFila).fill("#f1f5f9");
-    doc.fillColor("#0f172a").font("Helvetica").fontSize(8);
-    let cx = x;
-    for (const col of columnas) {
-      doc.text(fila[col.clave] ?? "", cx + 4, y + 5, { width: col.ancho - 8, align: col.align ?? "left" });
-      cx += col.ancho;
-    }
-    y += altoFila;
-  });
-  if (filas.length === 0) {
-    doc.font("Helvetica").fontSize(9).fillColor("#64748b").text("Sin registros.", x, y + 8);
-  }
-  doc.y = y + 10;
-}
 
 const ESTADO_FACTURACION_LABELS_PDF: Record<string, string> = {
   sin_medidor: "Sin medidor",
@@ -601,15 +382,7 @@ async function consumoAgrupadoPorPeriodo(
     include: { medidor: { include: { suscriptor: { include: { barrioCat: true, estratoCat: true } } } } },
   });
 
-  const grupos = new Map<string, { usuarios: number; consumo: number }>();
-  for (const l of lecturas) {
-    const clave = claveFn(l.medidor.suscriptor!);
-    const acc = grupos.get(clave) ?? { usuarios: 0, consumo: 0 };
-    acc.usuarios += 1;
-    acc.consumo += Number(l.consumo);
-    grupos.set(clave, acc);
-  }
-  return grupos;
+  return agregarPorClave(lecturas, (l) => claveFn(l.medidor.suscriptor!));
 }
 
 // Consumo total por ruta en un periodo dado

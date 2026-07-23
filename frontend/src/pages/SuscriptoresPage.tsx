@@ -30,7 +30,7 @@ import ImportExcelModal from "../components/ImportExcelModal";
 import ListCard from "../components/ListCard";
 import { useConfirm, useErrorHandler } from "../components/ConfirmModal";
 import { useEsMovil } from "../lib/useEsMovil";
-import { SkeletonTabla } from "../components/Skeleton";
+import { SkeletonTabla, SkeletonLista } from "../components/Skeleton";
 import BusquedaInput from "../components/BusquedaInput";
 import { useFilasAutoajustadas } from "../lib/useFilasAutoajustadas";
 import ThOrdenable, { Orden, alternarOrden } from "../components/ThOrdenable";
@@ -345,10 +345,22 @@ function ListadoTab() {
       </div>
 
       <div ref={contenedorRef} />
-      {cargando ? (
-        <SkeletonTabla columnas={7} filas={porPagina} />
+      {cargando && suscriptores.length === 0 ? (
+        <>
+          <div className="hidden md:block">
+            <SkeletonTabla columnas={7} filas={porPagina} />
+          </div>
+          <div className="md:hidden">
+            <SkeletonLista filas={Math.min(porPagina, 5)} />
+          </div>
+        </>
       ) : (
         <>
+          {/* Al cambiar de página o filtro con datos ya en pantalla, se atenúa la tabla en vez de
+              reemplazarla por el skeleton — evita el parpadeo de "pantalla en blanco" repetido. */}
+          <div
+            className={`transition-opacity duration-150 ${cargando ? "pointer-events-none opacity-40" : "opacity-100"}`}
+          >
           <div className="hidden md:block overflow-x-auto rounded-xl border border-brand-200 bg-white shadow-sm animate-content-in dark:border-slate-800 dark:bg-slate-900">
             <table className="w-full text-sm">
               <thead>
@@ -464,6 +476,7 @@ function ListadoTab() {
               </ListCard>
             ))}
             {suscriptores.length === 0 && <EmptyState mensaje="Sin resultados." />}
+          </div>
           </div>
 
           <div className="mt-3 flex flex-wrap items-center justify-between gap-3 sm:mt-4">

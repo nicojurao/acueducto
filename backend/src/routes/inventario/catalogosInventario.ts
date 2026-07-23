@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { Prisma } from "@prisma/client";
-import { prisma } from "../lib/prisma.js";
-import { requirePermiso } from "../middleware/auth.js";
+import { prisma } from "../../lib/prisma.js";
+import { requirePermiso } from "../../middleware/auth.js";
 
 export const categoriasInventarioRouter = Router();
 export const ubicacionesInventarioRouter = Router();

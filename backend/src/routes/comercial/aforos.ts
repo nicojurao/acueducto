@@ -1,16 +1,16 @@
 import { Router } from "express";
 import multer from "multer";
 import PDFDocument from "pdfkit";
-import { prisma } from "../lib/prisma.js";
-import { guardarArchivo, borrarArchivo, leerBuffer } from "../lib/storage.js";
+import { prisma } from "../../lib/prisma.js";
+import { guardarArchivo, borrarArchivo, leerBuffer } from "../../lib/storage.js";
 import {
   encabezadoPdf,
   COLOR_PDF as COLOR,
   tituloSeccionPdf as tituloSeccion,
   saltoDePaginaSiHaceFaltaPdf as saltoDePaginaSiHaceFalta,
   tarjetaDatosPdf as tarjetaDatos,
-} from "../lib/pdfBranding.js";
-import { requirePermiso } from "../middleware/auth.js";
+} from "../../lib/pdfBranding.js";
+import { requirePermiso } from "../../middleware/auth.js";
 
 export const puntosAforoRouter = Router();
 export const aforosRouter = Router();

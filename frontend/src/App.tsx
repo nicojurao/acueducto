@@ -3,6 +3,7 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { Menu, Loader2, CloudOff } from "lucide-react";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { ThemeProvider } from "./contexts/ThemeContext";
+import { ToastProvider } from "./contexts/ToastContext";
 import RutaProtegida from "./components/RutaProtegida";
 import Sidebar from "./components/Sidebar";
 import LoginPage from "./pages/LoginPage";
@@ -168,9 +169,11 @@ export default function App() {
   return (
     <BrowserRouter>
       <ThemeProvider>
-        <AuthProvider>
-          <Enrutador />
-        </AuthProvider>
+        <ToastProvider>
+          <AuthProvider>
+            <Enrutador />
+          </AuthProvider>
+        </ToastProvider>
       </ThemeProvider>
     </BrowserRouter>
   );

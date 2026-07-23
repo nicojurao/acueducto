@@ -1,7 +1,7 @@
 import { Router } from "express";
 import multer from "multer";
-import { prisma } from "../lib/prisma.js";
-import { guardarArchivo, borrarArchivo } from "../lib/storage.js";
+import { prisma } from "../../lib/prisma.js";
+import { guardarArchivo, borrarArchivo } from "../../lib/storage.js";
 
 export const actasRouter = Router();
 

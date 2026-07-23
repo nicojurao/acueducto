@@ -1,69 +1,13 @@
 import { Router } from "express";
 import multer from "multer";
 import PDFDocument from "pdfkit";
-import { prisma } from "../lib/prisma.js";
-import { guardarArchivo, borrarArchivo } from "../lib/storage.js";
-import { requirePermiso } from "../middleware/auth.js";
-import { encabezadoPdf, COLOR_MARCA } from "../lib/pdfBranding.js";
-import { crearInformeExcel, enviarExcel } from "../lib/excelBranding.js";
-import { registrarCambios, camposItemInventario } from "../lib/historial.js";
-
-// Tabla con encabezado sombreado en el color de marca (#00487f) y filas alternadas, con salto
-// de página automático — usada por los tres PDF de inventario (ítems, préstamos, movimientos).
-// El banner institucional (logo + título) solo va en la primera página, vía encabezadoPdf().
-type ColumnaPdf = { titulo: string; clave: string; ancho: number; align?: "left" | "right" };
-
-const ALTO_FILA_MIN = 18;
-
-// Alto necesario para que el texto más largo de la fila (ej. un nombre de ítem con varias
-// líneas) no se encime con la fila siguiente — sin esto, cualquier texto que envuelva a más
-// de una línea quedaba dibujado a la misma altura que las demás columnas.
-function altoNecesarioFila(doc: PDFKit.PDFDocument, columnas: ColumnaPdf[], fila: Record<string, string>): number {
-  doc.font("Helvetica").fontSize(8);
-  const alturas = columnas.map((col) => doc.heightOfString(fila[col.clave] ?? "", { width: col.ancho - 8 }));
-  return Math.max(ALTO_FILA_MIN, Math.max(...alturas) + 10);
-}
-
-function tablaInventarioPdf(doc: PDFKit.PDFDocument, columnas: ColumnaPdf[], filas: Record<string, string>[]) {
-  const x = doc.page.margins.left;
-  const anchoTotal = columnas.reduce((a, c) => a + c.ancho, 0);
-
-  function dibujarEncabezado(y: number) {
-    doc.rect(x, y, anchoTotal, ALTO_FILA_MIN).fill(COLOR_MARCA);
-    let cx = x;
-    doc.font("Helvetica-Bold").fontSize(8).fillColor("#fff");
-    for (const col of columnas) {
-      doc.text(col.titulo, cx + 4, y + 5, { width: col.ancho - 8, align: col.align ?? "left" });
-      cx += col.ancho;
-    }
-    doc.font("Helvetica").fillColor("#0f172a");
-    return y + ALTO_FILA_MIN;
-  }
-
-  let y = dibujarEncabezado(doc.y);
-
-  filas.forEach((fila, i) => {
-    const altoFila = altoNecesarioFila(doc, columnas, fila);
-    if (y + altoFila > doc.page.height - doc.page.margins.bottom) {
-      doc.addPage();
-      y = dibujarEncabezado(doc.page.margins.top);
-    }
-    if (i % 2 === 1) doc.rect(x, y, anchoTotal, altoFila).fill("#f1f5f9");
-    doc.fillColor("#0f172a").font("Helvetica").fontSize(8);
-    let cx = x;
-    for (const col of columnas) {
-      doc.text(fila[col.clave] ?? "", cx + 4, y + 5, { width: col.ancho - 8, align: col.align ?? "left" });
-      cx += col.ancho;
-    }
-    y += altoFila;
-  });
-
-  if (filas.length === 0) {
-    doc.font("Helvetica").fontSize(9).fillColor("#64748b").text("Sin registros.", x, y + 8);
-  }
-
-  doc.y = y + 10;
-}
+import { prisma } from "../../lib/prisma.js";
+import { guardarArchivo, borrarArchivo } from "../../lib/storage.js";
+import { requirePermiso } from "../../middleware/auth.js";
+import { encabezadoPdf, tablaPdf as tablaInventarioPdf } from "../../lib/pdfBranding.js";
+import { crearInformeExcel, enviarExcel } from "../../lib/excelBranding.js";
+import { registrarCambios, camposItemInventario } from "../../lib/historial.js";
+import { fechaLegibleColombia } from "../../lib/fechaColombia.js";
 
 function enviarPdf(res: import("express").Response, nombreArchivo: string) {
   res.setHeader("Content-Type", "application/pdf");
@@ -257,7 +201,7 @@ itemsInventarioRouter.get("/excel", async (req, res) => {
   const buffer = await crearInformeExcel(
     "Inventario",
     "Inventario general",
-    `Ítems · ${filas.length} registro${filas.length === 1 ? "" : "s"} · ${new Date().toLocaleDateString("es-CO")}`,
+    `Ítems · ${filas.length} registro${filas.length === 1 ? "" : "s"} · ${fechaLegibleColombia()}`,
     [
       { titulo: "NOMBRE", clave: "nombre", ancho: 28 },
       { titulo: "CÓDIGO", clave: "codigo", ancho: 14 },
@@ -313,7 +257,7 @@ itemsInventarioRouter.get("/pdf", async (req, res) => {
   enviarPdf(res, "inventario_items.pdf");
   const doc = new PDFDocument({ margin: 40, size: "A4", layout: "landscape" });
   doc.pipe(res);
-  encabezadoPdf(doc, "Inventario general", `Ítems · ${items.length} registro${items.length === 1 ? "" : "s"} · ${new Date().toLocaleDateString("es-CO")}`);
+  encabezadoPdf(doc, "Inventario general", `Ítems · ${items.length} registro${items.length === 1 ? "" : "s"} · ${fechaLegibleColombia()}`);
 
   tablaInventarioPdf(
     doc,
@@ -522,7 +466,7 @@ prestamosInventarioRouter.get("/excel", async (req, res) => {
   const buffer = await crearInformeExcel(
     "Préstamos",
     "Inventario general",
-    `Préstamos · ${filas.length} registro${filas.length === 1 ? "" : "s"} · ${new Date().toLocaleDateString("es-CO")}`,
+    `Préstamos · ${filas.length} registro${filas.length === 1 ? "" : "s"} · ${fechaLegibleColombia()}`,
     [
       { titulo: "ÍTEM", clave: "item", ancho: 26 },
       { titulo: "CANTIDAD", clave: "cantidad", ancho: 11 },
@@ -555,7 +499,7 @@ prestamosInventarioRouter.get("/pdf", async (req, res) => {
   enviarPdf(res, "inventario_prestamos.pdf");
   const doc = new PDFDocument({ margin: 40, size: "A4" });
   doc.pipe(res);
-  encabezadoPdf(doc, "Inventario general", `Préstamos · ${prestamos.length} registro${prestamos.length === 1 ? "" : "s"} · ${new Date().toLocaleDateString("es-CO")}`);
+  encabezadoPdf(doc, "Inventario general", `Préstamos · ${prestamos.length} registro${prestamos.length === 1 ? "" : "s"} · ${fechaLegibleColombia()}`);
 
   tablaInventarioPdf(
     doc,
@@ -721,7 +665,7 @@ movimientosInventarioRouter.get("/excel", async (req, res) => {
   const buffer = await crearInformeExcel(
     "Movimientos",
     "Inventario general",
-    `Entradas y salidas · ${filas.length} registro${filas.length === 1 ? "" : "s"} · ${new Date().toLocaleDateString("es-CO")}`,
+    `Entradas y salidas · ${filas.length} registro${filas.length === 1 ? "" : "s"} · ${fechaLegibleColombia()}`,
     [
       { titulo: "FECHA", clave: "fecha", ancho: 14 },
       { titulo: "TIPO", clave: "tipo", ancho: 12 },
@@ -752,7 +696,7 @@ movimientosInventarioRouter.get("/pdf", async (req, res) => {
   enviarPdf(res, "inventario_movimientos.pdf");
   const doc = new PDFDocument({ margin: 40, size: "A4" });
   doc.pipe(res);
-  encabezadoPdf(doc, "Inventario general", `Entradas y salidas · ${movimientos.length} registro${movimientos.length === 1 ? "" : "s"} · ${new Date().toLocaleDateString("es-CO")}`);
+  encabezadoPdf(doc, "Inventario general", `Entradas y salidas · ${movimientos.length} registro${movimientos.length === 1 ? "" : "s"} · ${fechaLegibleColombia()}`);
 
   tablaInventarioPdf(
     doc,

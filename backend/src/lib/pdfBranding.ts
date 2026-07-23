@@ -56,6 +56,65 @@ export function tarjetaDatosPdf(doc: PDFKit.PDFDocument, pares: [string, string]
   doc.y = y0 + alto + 10;
 }
 
+// Tabla con encabezado sombreado en el color de marca y filas alternadas, con salto de página
+// automático — usada por los PDF de inventario (ítems, préstamos, movimientos) y por el informe
+// de consumo de suscriptor. Vivía duplicada en cada router (con una versión más simple copiada
+// en reportes.ts, sin el alto de fila dinámico) — centralizada acá para que ambas dejen de
+// poder desincronizarse.
+export type ColumnaPdf = { titulo: string; clave: string; ancho: number; align?: "left" | "right" };
+
+const ALTO_FILA_MIN = 18;
+
+// Alto necesario para que el texto más largo de la fila (ej. un nombre de ítem con varias
+// líneas) no se encime con la fila siguiente — sin esto, cualquier texto que envuelva a más
+// de una línea quedaba dibujado a la misma altura que las demás columnas.
+function altoNecesarioFila(doc: PDFKit.PDFDocument, columnas: ColumnaPdf[], fila: Record<string, string>): number {
+  doc.font("Helvetica").fontSize(8);
+  const alturas = columnas.map((col) => doc.heightOfString(fila[col.clave] ?? "", { width: col.ancho - 8 }));
+  return Math.max(ALTO_FILA_MIN, Math.max(...alturas) + 10);
+}
+
+export function tablaPdf(doc: PDFKit.PDFDocument, columnas: ColumnaPdf[], filas: Record<string, string>[]) {
+  const x = doc.page.margins.left;
+  const anchoTotal = columnas.reduce((a, c) => a + c.ancho, 0);
+
+  function dibujarEncabezado(y: number) {
+    doc.rect(x, y, anchoTotal, ALTO_FILA_MIN).fill(COLOR_MARCA);
+    let cx = x;
+    doc.font("Helvetica-Bold").fontSize(8).fillColor("#fff");
+    for (const col of columnas) {
+      doc.text(col.titulo, cx + 4, y + 5, { width: col.ancho - 8, align: col.align ?? "left" });
+      cx += col.ancho;
+    }
+    doc.font("Helvetica").fillColor("#0f172a");
+    return y + ALTO_FILA_MIN;
+  }
+
+  let y = dibujarEncabezado(doc.y);
+
+  filas.forEach((fila, i) => {
+    const altoFila = altoNecesarioFila(doc, columnas, fila);
+    if (y + altoFila > doc.page.height - doc.page.margins.bottom) {
+      doc.addPage();
+      y = dibujarEncabezado(doc.page.margins.top);
+    }
+    if (i % 2 === 1) doc.rect(x, y, anchoTotal, altoFila).fill("#f1f5f9");
+    doc.fillColor("#0f172a").font("Helvetica").fontSize(8);
+    let cx = x;
+    for (const col of columnas) {
+      doc.text(fila[col.clave] ?? "", cx + 4, y + 5, { width: col.ancho - 8, align: col.align ?? "left" });
+      cx += col.ancho;
+    }
+    y += altoFila;
+  });
+
+  if (filas.length === 0) {
+    doc.font("Helvetica").fontSize(9).fillColor("#64748b").text("Sin registros.", x, y + 8);
+  }
+
+  doc.y = y + 10;
+}
+
 // Banda de encabezado con el logo de la empresa, usada por todos los reportes en PDF (actas,
 // aforos). Centralizado acá para que un cambio de logo/color no haya que repetirlo por reporte.
 export function encabezadoPdf(doc: PDFKit.PDFDocument, titulo: string, subtitulo: string) {

@@ -1,10 +1,10 @@
 import { Router } from "express";
 import multer from "multer";
-import { prisma } from "../lib/prisma.js";
-import { requirePermiso } from "../middleware/auth.js";
-import { crearPlantillaImportExport, enviarExcel } from "../lib/excelBranding.js";
-import { registrarCambios, camposSuscriptor } from "../lib/historial.js";
-import { leerLibroDesdeBuffer, hojaAFilas } from "../lib/xlsxCompat.js";
+import { prisma } from "../../lib/prisma.js";
+import { requirePermiso } from "../../middleware/auth.js";
+import { crearPlantillaImportExport, enviarExcel } from "../../lib/excelBranding.js";
+import { registrarCambios, camposSuscriptor } from "../../lib/historial.js";
+import { leerLibroDesdeBuffer, hojaAFilas } from "../../lib/xlsxCompat.js";
 
 export const suscriptoresRouter = Router();
 const upload = multer({ storage: multer.memoryStorage() });

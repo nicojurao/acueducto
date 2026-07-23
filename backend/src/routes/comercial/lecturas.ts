@@ -1,8 +1,9 @@
 import { Router } from "express";
 import multer from "multer";
-import { prisma } from "../lib/prisma.js";
-import { guardarArchivo, borrarArchivo } from "../lib/storage.js";
-import { registrarCambioLectura } from "../lib/historial.js";
+import { prisma } from "../../lib/prisma.js";
+import { guardarArchivo, borrarArchivo } from "../../lib/storage.js";
+import { registrarCambioLectura } from "../../lib/historial.js";
+import { primerDiaMes } from "../../lib/periodo.js";
 
 export const lecturasRouter = Router();
 
@@ -17,11 +18,6 @@ const uploadLectura = multer({
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => cb(null, file.mimetype.startsWith("image/")),
 });
-
-function primerDiaMes(periodo: string): Date {
-  const [y, m] = periodo.split("-").map(Number);
-  return new Date(Date.UTC(y, m - 1, 1));
-}
 
 // Recalcula el consumo de la PRÓXIMA lectura ya registrada de un medidor (si existe) después de
 // crear, editar o borrar una lectura de un periodo anterior a esa. Necesario porque acá se suele
@@ -179,6 +175,9 @@ lecturasRouter.get("/resumen", async (req, res) => {
     activo: true,
     suscriptorId: { not: null },
     OR: [{ fechaInstalacion: null }, { fechaInstalacion: { lt: corteInstalacion } }],
+    // Mismo criterio que GET / (línea 71): un suscriptor "inactivo" (medidor dañado) no cuenta
+    // en el avance del periodo, igual que ya no cuenta en la lista de pendientes.
+    suscriptor: { estadoFacturacion: { not: "inactivo" } },
   };
   const [total, tomadas] = await Promise.all([
     prisma.medidor.count({ where }),

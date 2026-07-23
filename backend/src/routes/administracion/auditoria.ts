@@ -1,7 +1,8 @@
 import { Router } from "express";
 import ExcelJS from "exceljs";
-import { prisma } from "../lib/prisma.js";
-import { COLOR_MARCA_ARGB, enviarExcel } from "../lib/excelBranding.js";
+import { prisma } from "../../lib/prisma.js";
+import { COLOR_MARCA_ARGB, enviarExcel } from "../../lib/excelBranding.js";
+import { fechaArchivoColombia } from "../../lib/fechaColombia.js";
 
 export const auditoriaRouter = Router();
 
@@ -212,7 +213,7 @@ auditoriaRouter.get("/export", async (_req, res) => {
   });
 
   const buffer = Buffer.from(await wb.xlsx.writeBuffer());
-  enviarExcel(res, buffer, `auditoria-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  enviarExcel(res, buffer, `auditoria-${fechaArchivoColombia()}.xlsx`);
 });
 
 // Cambios (HistorialCambio) hechos por el mismo usuario entre este login y el siguiente login

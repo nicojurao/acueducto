@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { prisma } from "../lib/prisma.js";
-import { PERMISOS } from "../lib/permisos.js";
+import { prisma } from "../../lib/prisma.js";
+import { PERMISOS } from "../../lib/permisos.js";
 
 export const rolesRouter = Router();
 

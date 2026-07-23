@@ -575,9 +575,19 @@ function InventarioTab() {
       </div>
 
       <div ref={contenedorRef} />
-      {cargando ? (
-        <SkeletonTabla columnas={8} filas={porPagina} />
+      {cargando && medidores.length === 0 ? (
+        <>
+          <div className="hidden md:block">
+            <SkeletonTabla columnas={8} filas={porPagina} />
+          </div>
+          <div className="md:hidden">
+            <SkeletonLista filas={Math.min(porPagina, 5)} />
+          </div>
+        </>
       ) : (
+        <div
+          className={`transition-opacity duration-150 ${cargando ? "pointer-events-none opacity-40" : "opacity-100"}`}
+        >
         <div className="hidden md:block overflow-x-auto rounded-xl border border-brand-200 bg-white shadow-sm animate-content-in dark:border-slate-800 dark:bg-slate-900">
           <table className="w-full text-sm">
             <thead>
@@ -663,9 +673,7 @@ function InventarioTab() {
             </tbody>
           </table>
         </div>
-      )}
 
-      {!cargando && (
         <div className="space-y-2 md:hidden">
           {medidores.map((m) => (
             <ListCard key={m.id}>
@@ -712,6 +720,7 @@ function InventarioTab() {
             </ListCard>
           ))}
           {medidores.length === 0 && <EmptyState mensaje="Sin resultados." />}
+        </div>
         </div>
       )}
 

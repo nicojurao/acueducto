@@ -1,6 +1,8 @@
 import { Router } from "express";
-import { prisma } from "../lib/prisma.js";
-import { ESTADOS_FACTURACION as ESTADOS_FACTURACION_CLAVES } from "../lib/snapshotPeriodo.js";
+import { prisma } from "../../lib/prisma.js";
+import { ESTADOS_FACTURACION as ESTADOS_FACTURACION_CLAVES } from "../../lib/snapshotPeriodo.js";
+import { primerDiaMes, periodoFacturableActual } from "../../lib/periodo.js";
+import { totalConsumo } from "../../lib/consumoAgregado.js";
 
 export const dashboardRouter = Router();
 
@@ -49,26 +51,6 @@ async function obtenerEstadoSuscriptores(periodo: string) {
   };
 }
 
-// Las lecturas del mes no empiezan a capturarse hasta el día 20 (mismo criterio que
-// mesFacturableActual() en reportes.ts y el periodo por defecto de ReportesPage.tsx). Antes de
-// esa fecha, el mes calendario en curso todavía no es el periodo facturable: KPIs, atípicos y
-// pendientes deben seguir mostrando el mes anterior.
-function periodoActualStr(): string {
-  const now = new Date();
-  let anio = now.getFullYear();
-  let mes = now.getDate() < 20 ? now.getMonth() : now.getMonth() + 1;
-  if (mes === 0) {
-    mes = 12;
-    anio -= 1;
-  }
-  return `${anio}-${String(mes).padStart(2, "0")}`;
-}
-
-function primerDiaMes(periodo: string): Date {
-  const [y, m] = periodo.split("-").map(Number);
-  return new Date(Date.UTC(y, m - 1, 1));
-}
-
 function mesAnterior(fecha: Date): Date {
   return new Date(Date.UTC(fecha.getUTCFullYear(), fecha.getUTCMonth() - 1, 1));
 }
@@ -79,10 +61,7 @@ function mismoMesAnioAnterior(fecha: Date): Date {
 
 async function sumaConsumoPeriodo(fecha: Date): Promise<{ consumo: number; usuarios: number }> {
   const lecturas = await prisma.lectura.findMany({ where: { periodo: fecha } });
-  return {
-    consumo: lecturas.reduce((acc, l) => acc + Number(l.consumo), 0),
-    usuarios: lecturas.length,
-  };
+  return totalConsumo(lecturas);
 }
 
 // hayDatosAnterior distingue "no hay lecturas ese mes" (null, no se puede comparar) de
@@ -94,7 +73,7 @@ function variacionPct(actual: number, anterior: number, hayDatosAnterior: boolea
 }
 
 dashboardRouter.get("/kpis", async (req, res) => {
-  const periodo = String(req.query.periodo ?? periodoActualStr());
+  const periodo = String(req.query.periodo ?? periodoFacturableActual());
   const fecha = primerDiaMes(periodo);
 
   // "Suscriptores activos" es sobre el PREDIO (estadoPredio), no sobre si ya tienen medidor —
@@ -115,6 +94,8 @@ dashboardRouter.get("/kpis", async (req, res) => {
     suscriptorId: { not: null },
     OR: [{ fechaInstalacion: null }, { fechaInstalacion: { lt: corteInstalacion } }],
     lecturas: { none: { periodo: fecha } },
+    // Un suscriptor "inactivo" (medidor dañado) tampoco cuenta como pendiente aquí.
+    suscriptor: { estadoFacturacion: { not: "inactivo" as const } },
   };
 
   const [estado, actual, anterior, anioAnterior, lecturasPendientes] = await Promise.all([
@@ -143,7 +124,7 @@ dashboardRouter.get("/kpis", async (req, res) => {
 });
 
 dashboardRouter.get("/atipicos", async (req, res) => {
-  const periodo = String(req.query.periodo ?? periodoActualStr());
+  const periodo = String(req.query.periodo ?? periodoFacturableActual());
   const fecha = primerDiaMes(periodo);
   const desdeHistorico = new Date(Date.UTC(fecha.getUTCFullYear(), fecha.getUTCMonth() - 6, 1));
 
@@ -205,7 +186,7 @@ dashboardRouter.get("/atipicos", async (req, res) => {
 });
 
 dashboardRouter.get("/top-consumidores", async (req, res) => {
-  const periodo = String(req.query.periodo ?? periodoActualStr());
+  const periodo = String(req.query.periodo ?? periodoFacturableActual());
   const limit = Number(req.query.limit ?? 10);
   const { barrio, estrato } = req.query;
   const fecha = primerDiaMes(periodo);
@@ -284,7 +265,7 @@ dashboardRouter.get("/tendencia-multianio", async (_req, res) => {
 // del periodo (ver obtenerEstadoSuscriptores) para que un mes ya cerrado no cambie con el estado
 // de hoy; sin ?periodo, se asume el periodo facturable vigente (en vivo).
 dashboardRouter.get("/estados-facturacion", async (req, res) => {
-  const periodo = String(req.query.periodo ?? periodoActualStr());
+  const periodo = String(req.query.periodo ?? periodoFacturableActual());
   const estado = await obtenerEstadoSuscriptores(periodo);
   const cantidades: Record<string, number> = {
     sin_medidor: estado.sinMedidor,

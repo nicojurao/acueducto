@@ -107,3 +107,42 @@ body {
     animation: none;
   }
 }
+
+/* Feedback instantáneo en botones de acción: el "press" se pinta en CSS puro, sin esperar a que
+   React reaccione al clic, para que nunca se sienta que el botón "no hizo nada" y el usuario
+   termine haciendo doble clic. */
+.btn-accion {
+  transition: transform 80ms ease-out;
+}
+.btn-accion:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+}
+@keyframes toast-out {
+  to {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+}
+.animate-toast-in {
+  animation: toast-in 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.animate-toast-out {
+  animation: toast-out 0.15s ease-in forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn-accion {
+    transition: none;
+  }
+  .animate-toast-in,
+  .animate-toast-out {
+    animation: none;
+  }
+}

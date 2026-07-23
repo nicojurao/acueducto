@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { Prisma } from "@prisma/client";
-import { prisma } from "../lib/prisma.js";
+import { prisma } from "../../lib/prisma.js";
 
 export const marcasRouter = Router();
 export const modelosRouter = Router();

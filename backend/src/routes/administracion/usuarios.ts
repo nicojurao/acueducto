@@ -1,9 +1,9 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
 import multer from "multer";
-import { prisma } from "../lib/prisma.js";
-import { guardarArchivo, borrarArchivo } from "../lib/storage.js";
-import { registrarCambioContrasena, registrarCambios, camposUsuario } from "../lib/historial.js";
+import { prisma } from "../../lib/prisma.js";
+import { guardarArchivo, borrarArchivo } from "../../lib/storage.js";
+import { registrarCambioContrasena, registrarCambios, camposUsuario } from "../../lib/historial.js";
 
 export const usuariosRouter = Router();
 

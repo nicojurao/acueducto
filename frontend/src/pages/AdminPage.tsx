@@ -17,6 +17,21 @@ import UsuariosPage from "./UsuariosPage";
 import AuditoriaPage from "./AuditoriaPage";
 import RolesPage from "./RolesPage";
 import HistorialPage from "./HistorialPage";
+import { useToast } from "../contexts/ToastContext";
+import { useMensajeProgresivo } from "../lib/useMensajeProgresivo";
+
+const MENSAJES_BACKUP_BD = [
+  "Conectando con la base de datos…",
+  "Empaquetando la información…",
+  "Comprimiendo el archivo…",
+  "Ya casi, preparando la descarga…",
+];
+const MENSAJES_BACKUP_MINIO = [
+  "Listando los archivos guardados…",
+  "Empaquetando fotos y actas…",
+  "Comprimiendo el archivo…",
+  "Ya casi, preparando la descarga…",
+];
 
 const GRID_STROKE = "#94a3b8";
 
@@ -81,7 +96,37 @@ function ResumenSistema() {
   } | null>(null);
   const [cargando, setCargando] = useState(true);
   const [descargando, setDescargando] = useState<"bd" | "minio" | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // El backup pasa por 2 fases reales, cada una con su propio progreso:
+  //  1) "comprimiendo": el backend arma el .zip/.sql.gz completo en un temporal en disco. El
+  //     total es un ESTIMADO (tamaño de la BD / suma de objetos en MinIO antes de comprimir), así
+  //     que el % se tapa en 99 hasta que de verdad termine.
+  //  2) "descargando": el archivo YA está completo y se conoce su tamaño EXACTO (Content-Length
+  //     real) — acá el % sí es preciso de 0 a 100.
+  const [fase, setFase] = useState<"comprimiendo" | "descargando" | null>(null);
+  const [bytesRecibidos, setBytesRecibidos] = useState(0);
+  const [bytesTotal, setBytesTotal] = useState<number | null>(null);
+  const { mostrar, mostrarError } = useToast();
+  const mensajeBd = useMensajeProgresivo(MENSAJES_BACKUP_BD, descargando === "bd" && bytesRecibidos === 0);
+  const mensajeMinio = useMensajeProgresivo(MENSAJES_BACKUP_MINIO, descargando === "minio" && bytesRecibidos === 0);
+  const porcentaje = bytesTotal
+    ? fase === "descargando"
+      ? Math.round((bytesRecibidos / bytesTotal) * 100)
+      : Math.min(99, Math.round((bytesRecibidos / bytesTotal) * 100))
+    : null;
+
+  function textoBoton(mensajeInicial: string, textoReposo: string, activo: boolean) {
+    if (!activo) return textoReposo;
+    if (bytesRecibidos === 0) return mensajeInicial;
+    const prefijo = fase === "descargando" ? "Descargando" : "Comprimiendo";
+    // En "descargando" el total es exacto (Content-Length real), así que vale la pena mostrar
+    // "X MB de Y MB" completo; en "comprimiendo" es solo un estimado, se deja más corto.
+    const cantidad =
+      fase === "descargando" && bytesTotal
+        ? `${formatBytes(String(bytesRecibidos))} de ${formatBytes(String(bytesTotal))}`
+        : formatBytes(String(bytesRecibidos));
+    const sufijo = porcentaje !== null ? ` (${porcentaje}%)` : "";
+    return `${prefijo}… ${cantidad}${sufijo}`;
+  }
 
   useEffect(() => {
     api.admin
@@ -92,14 +137,41 @@ function ResumenSistema() {
 
   async function descargar(tipo: "bd" | "minio") {
     setDescargando(tipo);
-    setError(null);
+    setFase("comprimiendo");
+    setBytesRecibidos(0);
+    setBytesTotal(null);
     try {
-      if (tipo === "bd") await api.admin.backupPostgres();
-      else await api.admin.backupMinio();
-    } catch {
-      setError("No se pudo generar el backup. Intenta de nuevo.");
+      const { id } = tipo === "bd" ? await api.admin.iniciarBackupPostgres() : await api.admin.iniciarBackupMinio();
+
+      // Polling del progreso de compresión hasta que el backend marque "listo" (o falle).
+      const idJob: string = id;
+      for (;;) {
+        const estado = await api.admin.estadoBackup(idJob);
+        setBytesRecibidos(estado.bytesProcesados);
+        setBytesTotal(estado.bytesTotalAprox || null);
+        if (estado.fase === "listo") break;
+        if (estado.fase === "error") throw new Error(estado.error ?? "No se pudo generar el backup");
+        await new Promise((r) => setTimeout(r, 700));
+      }
+
+      // Ya está completo en el servidor: ahora sí se conoce el tamaño exacto (Content-Length),
+      // así que esta fase reporta un % real, no un estimado.
+      setFase("descargando");
+      setBytesRecibidos(0);
+      setBytesTotal(null);
+      const nombre = tipo === "bd" ? "medidores.sql.gz" : "minio.zip";
+      await api.admin.descargarBackup(idJob, nombre, (bytes, total) => {
+        setBytesRecibidos(bytes);
+        if (total) setBytesTotal(total);
+      });
+      mostrar("Backup generado y descargado.", "exito");
+    } catch (err) {
+      mostrarError(err, "no se pudo generar el backup");
     } finally {
       setDescargando(null);
+      setFase(null);
+      setBytesRecibidos(0);
+      setBytesTotal(null);
     }
   }
 
@@ -199,24 +271,43 @@ function ResumenSistema() {
           Genera y descarga un respaldo al vuelo. El de la base de datos es un dump comprimido (.sql.gz); el de
           MinIO es un .zip con todos los archivos subidos (fotos, actas, etc.). Puede tardar un poco según el tamaño.
         </p>
-        {error && <p className="mb-2 text-xs text-red-600 dark:text-red-400">{error}</p>}
-        <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => descargar("bd")}
-            disabled={descargando !== null}
-            className="flex items-center gap-1.5 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-500 disabled:opacity-60"
-          >
-            {descargando === "bd" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-            {descargando === "bd" ? "Generando..." : "Descargar backup de la BD"}
-          </button>
-          <button
-            onClick={() => descargar("minio")}
-            disabled={descargando !== null}
-            className="flex items-center gap-1.5 rounded-lg border border-brand-200 px-4 py-2 text-sm font-medium text-brand-700 hover:bg-brand-50 disabled:opacity-60 dark:border-slate-700 dark:text-brand-400 dark:hover:bg-slate-800"
-          >
-            {descargando === "minio" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-            {descargando === "minio" ? "Generando..." : "Descargar backup de MinIO"}
-          </button>
+        <div className="flex flex-wrap gap-4">
+          <div>
+            <button
+              onClick={() => descargar("bd")}
+              disabled={descargando !== null}
+              className="btn-accion flex items-center gap-1.5 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-500 disabled:opacity-60"
+            >
+              {descargando === "bd" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              {textoBoton(mensajeBd, "Descargar backup de la BD", descargando === "bd")}
+            </button>
+            {descargando === "bd" && bytesRecibidos > 0 && (
+              <div className="mt-1.5 h-1 w-40 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+                <div
+                  className="h-full rounded-full bg-brand-500 transition-all duration-200"
+                  style={{ width: `${porcentaje ?? 30}%` }}
+                />
+              </div>
+            )}
+          </div>
+          <div>
+            <button
+              onClick={() => descargar("minio")}
+              disabled={descargando !== null}
+              className="btn-accion flex items-center gap-1.5 rounded-lg border border-brand-200 px-4 py-2 text-sm font-medium text-brand-700 hover:bg-brand-50 disabled:opacity-60 dark:border-slate-700 dark:text-brand-400 dark:hover:bg-slate-800"
+            >
+              {descargando === "minio" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              {textoBoton(mensajeMinio, "Descargar backup de MinIO", descargando === "minio")}
+            </button>
+            {descargando === "minio" && bytesRecibidos > 0 && (
+              <div className="mt-1.5 h-1 w-40 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+                <div
+                  className="h-full rounded-full bg-brand-500 transition-all duration-200"
+                  style={{ width: `${porcentaje ?? 30}%` }}
+                />
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

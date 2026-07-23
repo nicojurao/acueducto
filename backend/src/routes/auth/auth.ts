@@ -2,13 +2,13 @@ import { Router } from "express";
 import bcrypt from "bcryptjs";
 import multer from "multer";
 import rateLimit from "express-rate-limit";
-import { prisma } from "../lib/prisma.js";
-import { firmarToken, firmarTokenMedia, requireAuth, nuevoJti } from "../middleware/auth.js";
-import { guardarArchivo, borrarArchivo } from "../lib/storage.js";
-import { resumenDispositivo } from "../lib/userAgent.js";
-import { geolocalizarIp } from "../lib/geoip.js";
-import { registrarCambioContrasena, registrarCambios, camposUsuario } from "../lib/historial.js";
-import { ipCliente } from "../lib/ip.js";
+import { prisma } from "../../lib/prisma.js";
+import { firmarToken, firmarTokenMedia, requireAuth, nuevoJti } from "../../middleware/auth.js";
+import { guardarArchivo, borrarArchivo } from "../../lib/storage.js";
+import { resumenDispositivo } from "../../lib/userAgent.js";
+import { geolocalizarIp } from "../../lib/geoip.js";
+import { registrarCambioContrasena, registrarCambios, camposUsuario } from "../../lib/historial.js";
+import { ipCliente } from "../../lib/ip.js";
 
 export const authRouter = Router();
 

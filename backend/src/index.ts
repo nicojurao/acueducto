@@ -10,33 +10,39 @@ import cors from "cors";
 import helmet from "helmet";
 import pinoHttp from "pino-http";
 import { logger } from "./lib/logger.js";
-import { suscriptoresRouter } from "./routes/suscriptores.js";
-import { medidoresRouter } from "./routes/medidores.js";
-import { lecturasRouter } from "./routes/lecturas.js";
-import { reportesRouter } from "./routes/reportes.js";
-import { dashboardRouter } from "./routes/dashboard.js";
-import { marcasRouter, modelosRouter, diametrosRouter, lotesRouter, variantesRouter } from "./routes/catalogos.js";
-import { actasRouter } from "./routes/actas.js";
-import { authRouter } from "./routes/auth.js";
-import { usuariosRouter } from "./routes/usuarios.js";
-import { rolesRouter } from "./routes/roles.js";
-import { barriosRouter } from "./routes/barrios.js";
-import { estratosRouter } from "./routes/estratos.js";
-import { puntosAforoRouter, aforosRouter, aforosKpisRouter } from "./routes/aforos.js";
+import { suscriptoresRouter } from "./routes/comercial/suscriptores.js";
+import { medidoresRouter } from "./routes/comercial/medidores.js";
+import { lecturasRouter } from "./routes/comercial/lecturas.js";
+import { reportesRouter } from "./routes/comercial/reportes.js";
+import { dashboardRouter } from "./routes/comercial/dashboard.js";
+import {
+  marcasRouter,
+  modelosRouter,
+  diametrosRouter,
+  lotesRouter,
+  variantesRouter,
+} from "./routes/comercial/catalogos.js";
+import { actasRouter } from "./routes/comercial/actas.js";
+import { authRouter } from "./routes/auth/auth.js";
+import { usuariosRouter } from "./routes/administracion/usuarios.js";
+import { rolesRouter } from "./routes/administracion/roles.js";
+import { barriosRouter } from "./routes/comercial/barrios.js";
+import { estratosRouter } from "./routes/comercial/estratos.js";
+import { puntosAforoRouter, aforosRouter, aforosKpisRouter } from "./routes/comercial/aforos.js";
 import {
   itemsInventarioRouter,
   prestamosInventarioRouter,
   movimientosInventarioRouter,
   inventarioKpisRouter,
-} from "./routes/inventario.js";
+} from "./routes/inventario/inventario.js";
 import {
   categoriasInventarioRouter,
   ubicacionesInventarioRouter,
   proveedoresInventarioRouter,
-} from "./routes/catalogosInventario.js";
-import { historialRouter } from "./routes/historial.js";
-import { auditoriaRouter } from "./routes/auditoria.js";
-import { adminRouter } from "./routes/admin.js";
+} from "./routes/inventario/catalogosInventario.js";
+import { historialRouter } from "./routes/administracion/historial.js";
+import { auditoriaRouter } from "./routes/administracion/auditoria.js";
+import { adminRouter } from "./routes/administracion/admin.js";
 import { requireAuth, requireAuthQuery, requirePermiso, requirePermisoCatalogos, requirePermisoVerAvanzado } from "./middleware/auth.js";
 import { limiteApi } from "./middleware/rateLimit.js";
 import { leerArchivo } from "./lib/storage.js";
@@ -70,6 +76,11 @@ app.use(
       if (!origen || origenesPermitidos.includes(origen)) return callback(null, true);
       callback(new Error("Origen no permitido por CORS"));
     },
+    // Sin esto, un fetch cross-origin no puede LEER headers de respuesta que no sean los
+    // "simples" (Content-Type, etc.) aunque el request en sí esté permitido — el navegador los
+    // oculta a JS por defecto. X-Total-Bytes-Aprox es el estimado de tamaño para la barra de
+    // progreso de los backups (ver routes/admin.ts).
+    exposedHeaders: ["X-Total-Bytes-Aprox"],
   })
 );
 app.use(express.json());
