@@ -8,11 +8,13 @@ export * from "./core.js";
 export * from "./domains/auth.js";
 export * from "./domains/administracion.js";
 export * from "./domains/comercial.js";
+export * from "./domains/facturacion.js";
 export * from "./domains/inventario.js";
 
 import { authApi } from "./domains/auth.js";
 import { usuariosApi, rolesApi, historialApi, auditoriaApi, adminApi } from "./domains/administracion.js";
 import {
+  tercerosApi,
   suscriptoresApi,
   barriosApi,
   estratosApi,
@@ -30,6 +32,7 @@ import {
   dashboardApi,
 } from "./domains/comercial.js";
 import { inventarioApi } from "./domains/inventario.js";
+import { facturacionApi } from "./domains/facturacion.js";
 
 export const api = {
   auth: authApi,
@@ -54,4 +57,6 @@ export const api = {
   reportes: reportesApi,
   admin: adminApi,
   dashboard: dashboardApi,
+  facturacion: facturacionApi,
+  terceros: tercerosApi,
 };

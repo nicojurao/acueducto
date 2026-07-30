@@ -214,7 +214,7 @@ export default function AsignarMedidorModal({
                   />
                 </label>
                 <label className="flex flex-col gap-1 text-xs text-slate-600 dark:text-slate-300">
-                  Fecha certificación
+                  Fecha calibración
                   <input
                     type="date"
                     value={formMedidor.fechaCertificacion}

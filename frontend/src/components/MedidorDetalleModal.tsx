@@ -285,7 +285,7 @@ export default function MedidorDetalleModal({
                   />
                 </label>
                 <label className="block text-sm">
-                  <span className="mb-1 block text-slate-600 dark:text-slate-300">Fecha certificación</span>
+                  <span className="mb-1 block text-slate-600 dark:text-slate-300">Fecha calibración</span>
                   <input
                     type="date"
                     value={fechaCertificacion}

@@ -16,6 +16,7 @@ import {
   Droplets,
   Home,
   ShieldAlert,
+  Receipt,
 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
@@ -39,6 +40,12 @@ const medicion: Link[] = [
 const entradas: Entrada[] = [
   { to: "/", label: "Inicio", icon: Home },
   { label: "Medición", icon: Droplets, children: medicion },
+  {
+    to: "/facturacion",
+    label: "Facturación",
+    icon: Receipt,
+    permiso: ["facturacion_ver", "facturacion_avanzado", "pagos_registrar"],
+  },
   { to: "/aforos", label: "Aforos", icon: Waves, permiso: ["aforos_ver", "aforos_avanzado"] },
   { to: "/inventario", label: "Inventario general", icon: Warehouse, permiso: ["inventario_ver", "inventario_avanzado"] },
   { to: "/admin", label: "Panel de administración", icon: ShieldAlert, permiso: "admin_panel" },

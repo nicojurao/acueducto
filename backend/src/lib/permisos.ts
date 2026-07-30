@@ -46,6 +46,17 @@ export const PERMISOS = [
     nombre: "Inventario general (avanzado)",
     descripcion: "Crear, editar y eliminar ítems, préstamos, movimientos y catálogos del inventario general",
   },
+  { clave: "facturacion_ver", nombre: "Facturación", descripcion: "Ver facturas, tarifas y cartera" },
+  {
+    clave: "facturacion_avanzado",
+    nombre: "Facturación (avanzado)",
+    descripcion: "Generar facturación, editar tarifas, anular facturas y agregar conceptos",
+  },
+  {
+    clave: "pagos_registrar",
+    nombre: "Pagos (registrar)",
+    descripcion: "Registrar pagos y abonos de facturas en oficina",
+  },
   { clave: "catalogos", nombre: "Catálogos", descripcion: "Marcas, modelos y diámetros de medidores" },
   { clave: "dashboard", nombre: "Dashboard", descripcion: "KPIs, gráficas y consumos atípicos" },
   { clave: "reportes", nombre: "Reportes", descripcion: "Reportes de consumo y facturación" },

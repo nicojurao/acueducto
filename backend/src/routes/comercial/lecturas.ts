@@ -4,6 +4,7 @@ import { prisma } from "../../lib/prisma.js";
 import { guardarArchivo, borrarArchivo } from "../../lib/storage.js";
 import { registrarCambioLectura } from "../../lib/historial.js";
 import { primerDiaMes } from "../../lib/periodo.js";
+import { periodoEstaCerrado, MENSAJE_PERIODO_CERRADO } from "../../lib/periodoFacturacion.js";
 
 export const lecturasRouter = Router();
 
@@ -203,6 +204,7 @@ lecturasRouter.post("/", uploadLectura.single("foto"), async (req, res) => {
   }
 
   const fecha = primerDiaMes(periodo);
+  if (await periodoEstaCerrado(fecha)) return res.status(400).json({ error: MENSAJE_PERIODO_CERRADO });
 
   const lecturaAnterior = await prisma.lectura.findFirst({
     where: { medidorId, periodo: { lt: fecha } },
@@ -275,6 +277,7 @@ lecturasRouter.put("/:id", uploadLectura.single("foto"), async (req, res) => {
   const { valorLectura, observaciones, quitarFoto } = req.body;
   const lecturaExistente = await prisma.lectura.findUnique({ where: { id: Number(req.params.id) } });
   if (!lecturaExistente) return res.status(404).json({ error: "No encontrada" });
+  if (await periodoEstaCerrado(lecturaExistente.periodo)) return res.status(400).json({ error: MENSAJE_PERIODO_CERRADO });
 
   if (quitarFoto === "true" && req.usuario!.rol !== "admin") {
     return res.status(403).json({ error: "Solo un administrador puede quitar la foto de una lectura" });
@@ -323,6 +326,7 @@ lecturasRouter.put("/:id", uploadLectura.single("foto"), async (req, res) => {
 lecturasRouter.delete("/:id", async (req, res) => {
   const lectura = await prisma.lectura.findUnique({ where: { id: Number(req.params.id) } });
   if (!lectura) return res.status(404).json({ error: "No encontrada" });
+  if (await periodoEstaCerrado(lectura.periodo)) return res.status(400).json({ error: MENSAJE_PERIODO_CERRADO });
 
   await prisma.lectura.delete({ where: { id: lectura.id } });
 

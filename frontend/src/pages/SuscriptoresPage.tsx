@@ -19,6 +19,7 @@ import {
   Suscriptor,
   Barrio,
   Estrato,
+  Tercero,
   ESTADO_FACTURACION_LABELS,
   ESTADO_FACTURACION_COLORS,
   ESTADO_PREDIO_LABELS,
@@ -42,6 +43,7 @@ const TAMANOS_PAGINA = [5, 10, 25, 50, 100];
 
 const TABS = [
   { id: "listado", label: "Listado" },
+  { id: "terceros", label: "Terceros" },
   { id: "barrios", label: "Barrios y estratos" },
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
@@ -80,6 +82,7 @@ export default function SuscriptoresPage() {
       </div>
 
       {tab === "listado" && <ListadoTab />}
+      {tab === "terceros" && <TercerosTab />}
       {tab === "barrios" && usuario?.permisos?.includes("suscriptores_avanzado") && <BarriosEstratosTab />}
     </div>
   );
@@ -519,6 +522,322 @@ function ListadoTab() {
           }}
         />
       )}
+    </div>
+  );
+}
+
+// Terceros: la PERSONA titular (datos personales para facturación / futura facturación
+// electrónica). Un tercero puede tener varios suscriptores (predios); acá se completan y
+// corrigen sus datos y se ve qué predios tiene asociados.
+function TercerosTab() {
+  const { usuario } = useAuth();
+  const puedeEditar = usuario?.permisos?.includes("suscriptores_avanzado") ?? false;
+  const [terceros, setTerceros] = useState<Tercero[]>([]);
+  const [total, setTotal] = useState(0);
+  const [pagina, setPagina] = useState(1);
+  const [filtro, setFiltro] = useState("");
+  const [filtroDebounced, setFiltroDebounced] = useState("");
+  const [cargando, setCargando] = useState(true);
+  const [editando, setEditando] = useState<Tercero | null>(null);
+  const [creando, setCreando] = useState(false);
+  const porPagina = 10;
+
+  useEffect(() => {
+    const t = setTimeout(() => setFiltroDebounced(filtro), 300);
+    return () => clearTimeout(t);
+  }, [filtro]);
+  useEffect(() => {
+    setPagina(1);
+  }, [filtroDebounced]);
+
+  async function cargarTerceros() {
+    setCargando(true);
+    const r = await api.terceros.listPaginado(pagina, porPagina, { q: filtroDebounced || undefined });
+    setTerceros(r.data);
+    setTotal(r.total);
+    setCargando(false);
+  }
+  useEffect(() => {
+    cargarTerceros();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pagina, filtroDebounced]);
+
+  const totalPaginas = Math.max(1, Math.ceil(total / porPagina));
+
+  return (
+    <div>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <BusquedaInput placeholder="Buscar por nombre, documento o email..." value={filtro} onChange={setFiltro} className="w-full max-w-sm" />
+        {puedeEditar && (
+          <button
+            onClick={() => setCreando(true)}
+            className="btn-accion flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-500"
+          >
+            <Plus className="h-4 w-4" />
+            Nuevo tercero
+          </button>
+        )}
+      </div>
+
+      {cargando && terceros.length === 0 ? (
+        <SkeletonTabla columnas={6} filas={porPagina} />
+      ) : (
+        <div className={`transition-opacity duration-150 ${cargando ? "pointer-events-none opacity-40" : "opacity-100"}`}>
+          <div className="overflow-x-auto rounded-xl border border-brand-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-brand-100 bg-brand-50 text-left text-brand-800 dark:border-slate-800 dark:bg-slate-800/50 dark:text-slate-400">
+                  <th className="px-3 py-2 font-medium">Documento</th>
+                  <th className="px-3 py-2 font-medium">Nombre</th>
+                  <th className="px-3 py-2 font-medium">Email</th>
+                  <th className="px-3 py-2 font-medium">Teléfono</th>
+                  <th className="px-3 py-2 font-medium text-right">Suscriptores</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                {terceros.map((t) => (
+                  <tr
+                    key={t.id}
+                    onClick={() => setEditando(t)}
+                    className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/40"
+                  >
+                    <td className="px-3 py-2">
+                      {t.numeroDocumento?.startsWith("PEND-") ? (
+                        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">
+                          Pendiente
+                        </span>
+                      ) : (
+                        `${t.tipoDocumento} ${t.numeroDocumento ?? "—"}`
+                      )}
+                    </td>
+                    <td className="px-3 py-2">{t.nombre}</td>
+                    <td className="px-3 py-2">{t.email ?? "—"}</td>
+                    <td className="px-3 py-2">{t.telefono ?? "—"}</td>
+                    <td className="px-3 py-2 text-right">{t.suscriptores?.length ?? 0}</td>
+                  </tr>
+                ))}
+                {terceros.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-4 py-6">
+                      <EmptyState mensaje="Sin resultados." />
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <span className="text-xs text-slate-700 dark:text-slate-400">
+              {total === 0 ? "0 resultados" : `${(pagina - 1) * porPagina + 1}–${Math.min(pagina * porPagina, total)} de ${total}`}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setPagina((p) => Math.max(1, p - 1))}
+                disabled={pagina <= 1}
+                className="flex items-center gap-1 rounded-lg border border-brand-200 px-3 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-50 disabled:opacity-40 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+                Anterior
+              </button>
+              <span className="text-xs text-slate-700 dark:text-slate-400">
+                Página {pagina} de {totalPaginas}
+              </span>
+              <button
+                onClick={() => setPagina((p) => Math.min(totalPaginas, p + 1))}
+                disabled={pagina >= totalPaginas}
+                className="flex items-center gap-1 rounded-lg border border-brand-200 px-3 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-50 disabled:opacity-40 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+              >
+                Siguiente
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {(editando || creando) && (
+        <TerceroModal
+          tercero={editando}
+          puedeEditar={puedeEditar}
+          onClose={() => {
+            setEditando(null);
+            setCreando(false);
+          }}
+          onGuardado={async () => {
+            setEditando(null);
+            setCreando(false);
+            await cargarTerceros();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function TerceroModal({
+  tercero,
+  puedeEditar,
+  onClose,
+  onGuardado,
+}: {
+  tercero: Tercero | null;
+  puedeEditar: boolean;
+  onClose: () => void;
+  onGuardado: () => void;
+}) {
+  const [guardando, setGuardando] = useState(false);
+  const { error, run } = useErrorHandler();
+  const [form, setForm] = useState(() => ({
+    tipoDocumento: tercero?.tipoDocumento ?? "CC",
+    numeroDocumento: tercero?.numeroDocumento?.startsWith("PEND-") ? "" : (tercero?.numeroDocumento ?? ""),
+    nombre: tercero?.nombre ?? "",
+    email: tercero?.email ?? "",
+    telefono: tercero?.telefono ?? "",
+    direccion: tercero?.direccion ?? "",
+  }));
+
+  async function guardar() {
+    setGuardando(true);
+    try {
+      await run(async () => {
+        const data = {
+          tipoDocumento: form.tipoDocumento as Tercero["tipoDocumento"],
+          numeroDocumento: form.numeroDocumento || null,
+          nombre: form.nombre,
+          email: form.email || null,
+          telefono: form.telefono || null,
+          direccion: form.direccion || null,
+        };
+        if (tercero) await api.terceros.update(tercero.id, data);
+        else await api.terceros.create(data);
+        onGuardado();
+      });
+    } catch {
+      // el error ya quedó visible en el modal
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-4 animate-fade-in" onClick={onClose}>
+      <div
+        className="max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-xl bg-white p-5 shadow-xl animate-scale-in dark:bg-slate-900"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-lg font-bold">{tercero ? "Tercero" : "Nuevo tercero"}</h2>
+          <button onClick={onClose} className="text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {error && (
+          <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-400">
+            {error}
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 gap-3">
+          <label className="block text-sm">
+            <span className="mb-1 block text-slate-600 dark:text-slate-300">Tipo de documento</span>
+            <select
+              value={form.tipoDocumento}
+              onChange={(e) => setForm((f) => ({ ...f, tipoDocumento: e.target.value }))}
+              disabled={!puedeEditar}
+              className={`${inputClass} w-full`}
+            >
+              <option value="CC">CC — Cédula</option>
+              <option value="NIT">NIT</option>
+              <option value="CE">CE — Cédula extranjería</option>
+              <option value="TI">TI — Tarjeta identidad</option>
+              <option value="PP">PP — Pasaporte</option>
+            </select>
+          </label>
+          <label className="block text-sm">
+            <span className="mb-1 block text-slate-600 dark:text-slate-300">Número de documento</span>
+            <input
+              value={form.numeroDocumento}
+              onChange={(e) => setForm((f) => ({ ...f, numeroDocumento: e.target.value }))}
+              disabled={!puedeEditar}
+              className={`${inputClass} w-full`}
+            />
+          </label>
+          <label className="col-span-2 block text-sm">
+            <span className="mb-1 block text-slate-600 dark:text-slate-300">Nombre / razón social</span>
+            <input
+              value={form.nombre}
+              onChange={(e) => setForm((f) => ({ ...f, nombre: e.target.value }))}
+              disabled={!puedeEditar}
+              className={`${inputClass} w-full`}
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="mb-1 block text-slate-600 dark:text-slate-300">Email</span>
+            <input
+              type="email"
+              value={form.email}
+              onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+              disabled={!puedeEditar}
+              className={`${inputClass} w-full`}
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="mb-1 block text-slate-600 dark:text-slate-300">Teléfono</span>
+            <input
+              value={form.telefono}
+              onChange={(e) => setForm((f) => ({ ...f, telefono: e.target.value }))}
+              disabled={!puedeEditar}
+              className={`${inputClass} w-full`}
+            />
+          </label>
+          <label className="col-span-2 block text-sm">
+            <span className="mb-1 block text-slate-600 dark:text-slate-300">Dirección de notificación</span>
+            <input
+              value={form.direccion}
+              onChange={(e) => setForm((f) => ({ ...f, direccion: e.target.value }))}
+              disabled={!puedeEditar}
+              className={`${inputClass} w-full`}
+            />
+          </label>
+        </div>
+
+        {tercero?.suscriptores && tercero.suscriptores.length > 0 && (
+          <div className="mt-4">
+            <div className="mb-1 text-sm font-semibold text-slate-700 dark:text-slate-200">
+              Suscriptores (predios) de este tercero
+            </div>
+            <div className="divide-y divide-slate-100 overflow-hidden rounded-lg border border-slate-200 text-sm dark:divide-slate-800 dark:border-slate-800">
+              {tercero.suscriptores.map((s) => (
+                <div key={s.id} className="flex items-center justify-between px-3 py-1.5">
+                  <span>
+                    {s.codigo} · {s.nombre}
+                  </span>
+                  <span className="text-xs text-slate-500">Ruta {s.ruta ?? "—"}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {puedeEditar && (
+          <div className="mt-4 flex justify-end gap-2">
+            <button
+              onClick={onClose}
+              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={guardar}
+              disabled={guardando || !form.nombre}
+              className="btn-accion rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-500 disabled:opacity-50"
+            >
+              {guardando ? "Guardando…" : "Guardar"}
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

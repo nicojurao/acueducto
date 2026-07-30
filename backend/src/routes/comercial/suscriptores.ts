@@ -225,16 +225,30 @@ async function sincronizarCondicionMedidor(suscriptorId: number, estadoFacturaci
   await registrarCambios("medidor", medidor.id, { condicion: medidor.condicion }, { condicion: actualizado.condicion }, usuarioId);
 }
 
+// Un cotitular no tiene un Medidor propio (Medidor.suscriptorId apunta siempre al titular) pero
+// SÍ se le mide y factura consumo real a través del medidor COMPARTIDO — así que para efectos de
+// "¿este suscriptor tiene medición activa?" cuenta igual que si fuera su propio medidor. Sin
+// esto, un cotitular queda atascado en "sin_medidor" para siempre aunque comparta lectura real
+// con el titular (ver Cotitular).
+async function tieneMedicionActiva(suscriptorId: number): Promise<boolean> {
+  const [propio, comoCotitular] = await Promise.all([
+    prisma.medidor.count({ where: { suscriptorId, activo: true } }),
+    prisma.cotitular.count({ where: { suscriptorId, medidor: { activo: true } } }),
+  ]);
+  return propio + comoCotitular > 0;
+}
+
 // Reglas de coherencia compartidas entre el PUT general y el PUT acotado de estado de
 // facturación: "sin_medidor" implica que no tiene medidor activo, y los estados que requieren
-// medición ("instalado_prueba"/"facturando") implican que sí lo tiene.
+// medición ("instalado_prueba"/"facturando") implican que sí lo tiene (propio o compartido como
+// cotitular).
 async function validarCoherenciaEstado(
   suscriptorId: number,
   estadoFacturacion: string | undefined,
   estadoPredio: string | undefined
 ): Promise<string | null> {
   if (estadoPredio === undefined && estadoFacturacion === undefined) return null;
-  const tieneMedidorActivo = (await prisma.medidor.count({ where: { suscriptorId, activo: true } })) > 0;
+  const tieneMedidorActivo = await tieneMedicionActiva(suscriptorId);
 
   if (estadoPredio === "inactivo" && tieneMedidorActivo) {
     return "No se puede marcar el predio como inactivo: primero hay que quitarle el medidor asignado.";
@@ -283,15 +297,39 @@ suscriptoresRouter.put("/:id", soloAvanzado, async (req, res) => {
     longitud,
     estadoFacturacion,
     estadoPredio,
+    tieneAcueducto,
+    tieneAlcantarillado,
+    consumoPredeterminadoM3,
+    consumoPredeterminadoAlcantarilladoM3,
+    numeroCuentaContrato,
+    zonaIgac,
+    sectorIgac,
+    manzanaVeredaIgac,
+    numeroPredioIgac,
+    condicionPropiedadPredioIgac,
   } = req.body;
 
   if (estadoPredio !== undefined && !["activo", "inactivo"].includes(estadoPredio)) {
     return res.status(400).json({ error: "estadoPredio inválido" });
   }
 
+  // El consumo predeterminado (acueducto o alcantarillado) solo tiene sentido para un
+  // suscriptor SIN lectura real (sin_medidor / instalado_prueba): si ya factura por medición,
+  // su consumo lo da la lectura del medidor, no un valor fijo — no se le deja escribir uno.
+  if (consumoPredeterminadoM3 !== undefined || consumoPredeterminadoAlcantarilladoM3 !== undefined) {
+    const estadoActual =
+      estadoFacturacion ??
+      (await prisma.suscriptor.findUnique({ where: { id: Number(req.params.id) }, select: { estadoFacturacion: true } }))
+        ?.estadoFacturacion;
+    if (estadoActual === "facturando") {
+      return res.status(400).json({
+        error: "Este suscriptor factura por medición: su consumo lo da la lectura del medidor, no se le puede fijar un consumo predeterminado.",
+      });
+    }
+  }
+
   if (estadoPredio === "inactivo" || estadoFacturacion !== undefined) {
-    const tieneMedidorActivo =
-      (await prisma.medidor.count({ where: { suscriptorId: Number(req.params.id), activo: true } })) > 0;
+    const tieneMedidorActivo = await tieneMedicionActiva(Number(req.params.id));
 
     if (estadoPredio === "inactivo" && tieneMedidorActivo) {
       return res.status(400).json({
@@ -343,6 +381,17 @@ suscriptoresRouter.put("/:id", soloAvanzado, async (req, res) => {
       longitud,
       estadoFacturacion,
       estadoPredio,
+      tieneAcueducto: tieneAcueducto === undefined ? undefined : Boolean(tieneAcueducto),
+      tieneAlcantarillado: tieneAlcantarillado === undefined ? undefined : Boolean(tieneAlcantarillado),
+      consumoPredeterminadoM3: consumoPredeterminadoM3 === undefined ? undefined : Number(consumoPredeterminadoM3),
+      consumoPredeterminadoAlcantarilladoM3:
+        consumoPredeterminadoAlcantarilladoM3 === undefined ? undefined : Number(consumoPredeterminadoAlcantarilladoM3),
+      numeroCuentaContrato,
+      zonaIgac,
+      sectorIgac,
+      manzanaVeredaIgac,
+      numeroPredioIgac,
+      condicionPropiedadPredioIgac,
     },
     include: { barrioCat: true, estratoCat: true },
   });

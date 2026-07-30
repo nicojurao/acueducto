@@ -23,6 +23,8 @@ import {
   variantesRouter,
 } from "./routes/comercial/catalogos.js";
 import { actasRouter } from "./routes/comercial/actas.js";
+import { facturacionRouter } from "./routes/comercial/facturacion.js";
+import { tercerosRouter } from "./routes/comercial/terceros.js";
 import { authRouter } from "./routes/auth/auth.js";
 import { usuariosRouter } from "./routes/administracion/usuarios.js";
 import { rolesRouter } from "./routes/administracion/roles.js";
@@ -131,6 +133,9 @@ app.use("/api/medidores", requirePermiso("medidores_ver", "medidores_avanzado"),
 app.use("/api/lecturas", requirePermiso("lecturas"), lecturasRouter);
 app.use("/api/reportes", reportesRouter);
 app.use("/api/dashboard", requirePermiso("dashboard"), dashboardRouter);
+// Permisos por ruta ADENTRO del router (ver/avanzado/pagos difieren por endpoint).
+app.use("/api/facturacion", facturacionRouter);
+app.use("/api/terceros", requirePermiso("suscriptores_ver", "suscriptores_avanzado", "facturacion_ver", "facturacion_avanzado"), tercerosRouter);
 app.use("/api/marcas", requirePermisoCatalogos, marcasRouter);
 app.use("/api/modelos", requirePermisoCatalogos, modelosRouter);
 app.use("/api/diametros", requirePermisoCatalogos, diametrosRouter);

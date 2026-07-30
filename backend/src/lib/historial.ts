@@ -149,7 +149,7 @@ export function camposMedidor(m: {
     Lote: m.lote ? `${m.lote.serialInicial}-${m.lote.serialFinal}` : null,
     "Fecha de instalación": m.fechaInstalacion,
     "Fecha de fabricación": m.fechaFabricacion,
-    "Fecha de certificación": m.fechaCertificacion,
+    "Fecha de calibración": m.fechaCertificacion,
     Clase: m.clase,
     "N° certificado": m.certificado,
     "Lectura inicial": m.lecturaInicial,

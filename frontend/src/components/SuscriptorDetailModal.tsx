@@ -172,6 +172,11 @@ export default function SuscriptorDetailModal({
     estratoId: "",
     direccion: "",
     direccionComercial: "",
+    numeroCuentaContrato: "",
+    zonaIgac: "",
+    sectorIgac: "",
+    manzanaVeredaIgac: "",
+    numeroPredioIgac: "",
   });
 
   function abrirEdicionInfo() {
@@ -184,6 +189,11 @@ export default function SuscriptorDetailModal({
       estratoId: suscriptor.estratoCat ? String(suscriptor.estratoCat.id) : "",
       direccion: suscriptor.direccion ?? "",
       direccionComercial: suscriptor.direccionComercial ?? "",
+      numeroCuentaContrato: suscriptor.numeroCuentaContrato ?? "",
+      zonaIgac: suscriptor.zonaIgac ?? "",
+      sectorIgac: suscriptor.sectorIgac ?? "",
+      manzanaVeredaIgac: suscriptor.manzanaVeredaIgac ?? "",
+      numeroPredioIgac: suscriptor.numeroPredioIgac ?? "",
     });
     api.suscriptores.barrios().then(setBarriosCatalogo);
     api.estratos.list().then(setEstratosCatalogo);
@@ -206,6 +216,11 @@ export default function SuscriptorDetailModal({
         estratoId: formInfo.estratoId ? Number(formInfo.estratoId) : null,
         direccion: formInfo.direccion || null,
         direccionComercial: formInfo.direccionComercial || null,
+        numeroCuentaContrato: formInfo.numeroCuentaContrato || null,
+        zonaIgac: formInfo.zonaIgac || null,
+        sectorIgac: formInfo.sectorIgac || null,
+        manzanaVeredaIgac: formInfo.manzanaVeredaIgac || null,
+        numeroPredioIgac: formInfo.numeroPredioIgac || null,
       });
       setEditandoInfo(false);
       cargarDetalle();
@@ -551,6 +566,28 @@ export default function SuscriptorDetailModal({
 
   const [guardandoPredio, setGuardandoPredio] = useState(false);
   const [errorPredio, setErrorPredio] = useState<string | null>(null);
+  const [consumoPredeterminado, setConsumoPredeterminado] = useState("0");
+  const [consumoPredeterminadoAlc, setConsumoPredeterminadoAlc] = useState("0");
+  useEffect(() => {
+    if (suscriptor) {
+      setConsumoPredeterminado(String(suscriptor.consumoPredeterminadoM3 ?? 0));
+      setConsumoPredeterminadoAlc(String(suscriptor.consumoPredeterminadoAlcantarilladoM3 ?? 0));
+    }
+  }, [suscriptor?.id, suscriptor?.consumoPredeterminadoM3, suscriptor?.consumoPredeterminadoAlcantarilladoM3]);
+  async function guardarConsumoPredeterminado() {
+    if (!suscriptor) return;
+    const valor = Number(consumoPredeterminado) || 0;
+    if (valor === Number(suscriptor.consumoPredeterminadoM3 ?? 0)) return;
+    await api.suscriptores.update(suscriptor.id, { consumoPredeterminadoM3: valor });
+    await cargarDetalle();
+  }
+  async function guardarConsumoPredeterminadoAlc() {
+    if (!suscriptor) return;
+    const valor = Number(consumoPredeterminadoAlc) || 0;
+    if (valor === Number(suscriptor.consumoPredeterminadoAlcantarilladoM3 ?? 0)) return;
+    await api.suscriptores.update(suscriptor.id, { consumoPredeterminadoAlcantarilladoM3: valor });
+    await cargarDetalle();
+  }
   async function cambiarEstadoPredio(nuevo: string) {
     setGuardandoPredio(true);
     setErrorPredio(null);
@@ -675,6 +712,99 @@ export default function SuscriptorDetailModal({
                 )}
                 {errorPredio && <p className="mt-1 max-w-xs text-xs text-red-600 dark:text-red-400">{errorPredio}</p>}
               </div>
+              <div>
+                <div className="text-xs uppercase text-slate-700 dark:text-slate-400">Uso (SUI)</div>
+                {/* No es un campo que se elija a mano: se deriva siempre del estrato, para que
+                    nunca quede desincronizado (estratos 1-6 = residencial, el resto = no residencial). */}
+                <span className="mt-1 inline-block rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                  {/^[1-6]$/.test(suscriptor.estratoCat?.codigo ?? "") ? "Residencial" : "No residencial"}
+                </span>
+              </div>
+              <div>
+                <div className="text-xs uppercase text-slate-700 dark:text-slate-400">Servicios</div>
+                <div className="mt-1 flex gap-3 text-xs">
+                  <label className="flex items-center gap-1.5">
+                    <input
+                      type="checkbox"
+                      checked={suscriptor.tieneAcueducto ?? true}
+                      disabled={!puedeEditar}
+                      onChange={async (e) => {
+                        await api.suscriptores.update(suscriptor.id, { tieneAcueducto: e.target.checked });
+                        await cargarDetalle();
+                      }}
+                      className="h-3.5 w-3.5 rounded border-slate-300"
+                    />
+                    Acueducto
+                  </label>
+                  <label className="flex items-center gap-1.5">
+                    <input
+                      type="checkbox"
+                      checked={suscriptor.tieneAlcantarillado ?? true}
+                      disabled={!puedeEditar}
+                      onChange={async (e) => {
+                        await api.suscriptores.update(suscriptor.id, { tieneAlcantarillado: e.target.checked });
+                        await cargarDetalle();
+                      }}
+                      className="h-3.5 w-3.5 rounded border-slate-300"
+                    />
+                    Alcantarillado
+                  </label>
+                </div>
+              </div>
+              <div>
+                <div className="text-xs uppercase text-slate-700 dark:text-slate-400">
+                  Consumo predeterminado (sin medidor)
+                </div>
+                {/* Solo aplica mientras no factura por medición real: si ya tiene lectura de
+                    medidor, su consumo lo da la lectura, no un valor fijo — no se deja editar.
+                    Acueducto y alcantarillado son independientes porque a veces son empresas
+                    distintas, cada una con su propio promedio de referencia. */}
+                {suscriptor.estadoFacturacion === "facturando" ? (
+                  <span
+                    className="mt-1 inline-block text-xs text-slate-400 dark:text-slate-500"
+                    title="Factura por medición: su consumo lo da la lectura del medidor"
+                  >
+                    N/A (factura por lectura real)
+                  </span>
+                ) : (
+                  <div className="mt-1 flex flex-wrap gap-3">
+                    <label className="flex items-center gap-1 text-xs">
+                      <span className="text-slate-500 dark:text-slate-400">Acueducto</span>
+                      {puedeEditar ? (
+                        <input
+                          type="number"
+                          min={0}
+                          value={consumoPredeterminado}
+                          onChange={(e) => setConsumoPredeterminado(e.target.value)}
+                          onBlur={guardarConsumoPredeterminado}
+                          className="w-16 rounded-lg border border-slate-300 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800"
+                        />
+                      ) : (
+                        <span className="font-medium text-slate-700 dark:text-slate-300">{suscriptor.consumoPredeterminadoM3 ?? 0}</span>
+                      )}
+                      <span className="text-slate-400">m³/mes</span>
+                    </label>
+                    <label className="flex items-center gap-1 text-xs">
+                      <span className="text-slate-500 dark:text-slate-400">Alcantarillado</span>
+                      {puedeEditar ? (
+                        <input
+                          type="number"
+                          min={0}
+                          value={consumoPredeterminadoAlc}
+                          onChange={(e) => setConsumoPredeterminadoAlc(e.target.value)}
+                          onBlur={guardarConsumoPredeterminadoAlc}
+                          className="w-16 rounded-lg border border-slate-300 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800"
+                        />
+                      ) : (
+                        <span className="font-medium text-slate-700 dark:text-slate-300">
+                          {suscriptor.consumoPredeterminadoAlcantarilladoM3 ?? 0}
+                        </span>
+                      )}
+                      <span className="text-slate-400">m³/mes</span>
+                    </label>
+                  </div>
+                )}
+              </div>
             </div>
 
             {editandoInfo && puedeEditar ? (
@@ -751,6 +881,54 @@ export default function SuscriptorDetailModal({
                       className={inputClass}
                     />
                   </label>
+                </div>
+
+                <div className="mt-3 border-t border-slate-200 pt-3 dark:border-slate-800">
+                  <div className="mb-2 text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
+                    Identificación catastral (reporte SUI)
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                    <label className="flex flex-col gap-1 text-xs font-medium text-slate-700">
+                      N° cuenta/contrato
+                      <input
+                        value={formInfo.numeroCuentaContrato}
+                        onChange={(e) => setFormInfo({ ...formInfo, numeroCuentaContrato: e.target.value })}
+                        className={inputClass}
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1 text-xs font-medium text-slate-700">
+                      Zona IGAC
+                      <input
+                        value={formInfo.zonaIgac}
+                        onChange={(e) => setFormInfo({ ...formInfo, zonaIgac: e.target.value })}
+                        className={inputClass}
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1 text-xs font-medium text-slate-700">
+                      Sector IGAC
+                      <input
+                        value={formInfo.sectorIgac}
+                        onChange={(e) => setFormInfo({ ...formInfo, sectorIgac: e.target.value })}
+                        className={inputClass}
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1 text-xs font-medium text-slate-700">
+                      Manzana/vereda IGAC
+                      <input
+                        value={formInfo.manzanaVeredaIgac}
+                        onChange={(e) => setFormInfo({ ...formInfo, manzanaVeredaIgac: e.target.value })}
+                        className={inputClass}
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1 text-xs font-medium text-slate-700">
+                      N° predio IGAC
+                      <input
+                        value={formInfo.numeroPredioIgac}
+                        onChange={(e) => setFormInfo({ ...formInfo, numeroPredioIgac: e.target.value })}
+                        className={inputClass}
+                      />
+                    </label>
+                  </div>
                 </div>
                 <div className="mt-3 flex justify-end gap-2">
                   <button
@@ -1020,7 +1198,7 @@ export default function SuscriptorDetailModal({
                         <div className="break-words">{fmtFecha(m.fechaFabricacion)}</div>
                       </div>
                       <div className="min-w-0">
-                        <div className="text-xs text-slate-700 dark:text-slate-400">Fecha de certificación</div>
+                        <div className="text-xs text-slate-700 dark:text-slate-400">Fecha de calibración</div>
                         <div className="break-words">{fmtFecha(m.fechaCertificacion)}</div>
                       </div>
                       <div className="min-w-0">

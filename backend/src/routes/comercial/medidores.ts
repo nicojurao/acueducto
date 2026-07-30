@@ -4,7 +4,7 @@ import { prisma } from "../../lib/prisma.js";
 import { requirePermiso } from "../../middleware/auth.js";
 import { crearPlantillaImportExport, enviarExcel } from "../../lib/excelBranding.js";
 import { guardarArchivo, borrarArchivo } from "../../lib/storage.js";
-import { registrarCambios, camposMedidor } from "../../lib/historial.js";
+import { registrarCambios, camposMedidor, camposSuscriptor } from "../../lib/historial.js";
 import { leerLibroDesdeBuffer, hojaAFilas } from "../../lib/xlsxCompat.js";
 
 export const medidoresRouter = Router();
@@ -100,7 +100,7 @@ medidoresRouter.get("/export", soloAvanzado, async (req, res) => {
       { titulo: "FECHA INSTALACION", clave: "fechaInstalacion", ancho: 16 },
       { titulo: "INSTALADO POR", clave: "instaladoPor", ancho: 20 },
       { titulo: "FECHA FABRICACION", clave: "fechaFabricacion", ancho: 16 },
-      { titulo: "FECHA CERTIFICACION", clave: "fechaCertificacion", ancho: 18 },
+      { titulo: "FECHA CALIBRACION", clave: "fechaCertificacion", ancho: 18 },
       { titulo: "CERTIFICADO MEDIDOR", clave: "certificado", ancho: 20 },
       { titulo: "NUID COTITULARES", clave: "nuidCotitulares", ancho: 26 },
     ],
@@ -343,7 +343,7 @@ medidoresRouter.post("/import/validar", soloAvanzado, upload.single("archivo"), 
     }
     const fechaCertificacionRaw = row[iFechaCertificacion];
     if (fechaCertificacionRaw && !parsearFecha(fechaCertificacionRaw)) {
-      problemas.push(`La fecha de certificación "${fechaCertificacionRaw}" no es una fecha válida`);
+      problemas.push(`La fecha de calibración "${fechaCertificacionRaw}" no es una fecha válida`);
     }
 
     for (const nuidCot of parsearNuidsCotitulares(valor(row, iCotitulares))) {
@@ -556,7 +556,7 @@ medidoresRouter.post("/import", soloAvanzado, upload.single("archivo"), async (r
       observaciones.push(`Fecha de fabricación "${row[iFechaFabricacion]}" no es válida: no se asignó`);
     }
     if (row[iFechaCertificacion] && !fechaCertificacion) {
-      observaciones.push(`Fecha de certificación "${row[iFechaCertificacion]}" no es válida: no se asignó`);
+      observaciones.push(`Fecha de calibración "${row[iFechaCertificacion]}" no es válida: no se asignó`);
     }
     const instaladoPor = valor(row, iInstalador);
 
@@ -833,10 +833,13 @@ medidoresRouter.post("/:id/cotitulares", soloAvanzado, async (req, res) => {
   if (!nuid || !String(nuid).trim()) return res.status(400).json({ error: "El NUID es requerido" });
   const codigo = String(nuid).trim();
 
-  const medidor = await prisma.medidor.findUnique({ where: { id: medidorId } });
+  const medidor = await prisma.medidor.findUnique({ where: { id: medidorId }, include: { suscriptor: true } });
   if (!medidor) return res.status(404).json({ error: "Medidor no encontrado" });
 
-  const suscriptor = await prisma.suscriptor.findUnique({ where: { codigo } });
+  const suscriptor = await prisma.suscriptor.findUnique({
+    where: { codigo },
+    include: { barrioCat: true, estratoCat: true },
+  });
   if (!suscriptor) return res.status(400).json({ error: `No existe ningún suscriptor con NUID "${codigo}"` });
 
   if (suscriptor.id === medidor.suscriptorId) {
@@ -853,6 +856,30 @@ medidoresRouter.post("/:id/cotitulares", soloAvanzado, async (req, res) => {
       data: { medidorId, suscriptorId: suscriptor.id },
       include: { suscriptor: true },
     });
+
+    // El cotitular comparte lectura real con el titular: si el titular ya está "facturando" (o
+    // "instalado_prueba"), el cotitular queda con ESE MISMO estado desde ya, no "sin_medidor" —
+    // ya se le está midiendo y facturando consumo por ese medidor compartido, aunque no tenga un
+    // Medidor propio (ver tieneMedicionActiva en suscriptores.ts, misma idea del otro lado).
+    if (
+      medidor.suscriptor &&
+      ["instalado_prueba", "facturando"].includes(medidor.suscriptor.estadoFacturacion) &&
+      suscriptor.estadoFacturacion !== medidor.suscriptor.estadoFacturacion
+    ) {
+      const actualizado = await prisma.suscriptor.update({
+        where: { id: suscriptor.id },
+        data: { estadoFacturacion: medidor.suscriptor.estadoFacturacion },
+        include: { barrioCat: true, estratoCat: true },
+      });
+      await registrarCambios(
+        "suscriptor",
+        suscriptor.id,
+        camposSuscriptor(suscriptor),
+        camposSuscriptor(actualizado),
+        req.usuario?.id
+      );
+    }
+
     res.status(201).json(cotitular);
   } catch (err: any) {
     if (err?.code === "P2002") {

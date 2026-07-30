@@ -13,8 +13,8 @@ export default defineConfig({
       registerType: "autoUpdate",
       injectRegister: "auto",
       manifest: {
-        name: "Acueducto — Gestión de Medidores",
-        short_name: "Medidores",
+        name: "Fluvi — Gestión de Acueducto",
+        short_name: "Fluvi",
         theme_color: "#00487f",
         background_color: "#0f172a",
         display: "standalone",

@@ -79,6 +79,16 @@ export interface Suscriptor {
   longitud?: number | null;
   estadoFacturacion: "sin_medidor" | "instalado_prueba" | "facturando" | "inactivo";
   estadoPredio: "activo" | "inactivo";
+  tieneAcueducto?: boolean;
+  tieneAlcantarillado?: boolean;
+  consumoPredeterminadoM3?: number;
+  consumoPredeterminadoAlcantarilladoM3?: number;
+  numeroCuentaContrato?: string | null;
+  zonaIgac?: string | null;
+  sectorIgac?: string | null;
+  manzanaVeredaIgac?: string | null;
+  numeroPredioIgac?: string | null;
+  condicionPropiedadPredioIgac?: string | null;
   medidores?: Medidor[];
   cotitularDe?: {
     medidor: { id: number; suscriptor: Suscriptor; cotitulares: { suscriptorId: number }[] };
@@ -250,6 +260,35 @@ export interface Barrio {
   nombre: string;
   suscriptores: number;
 }
+
+export interface Tercero {
+  id: number;
+  tipoDocumento: "CC" | "NIT" | "CE" | "TI" | "PP";
+  numeroDocumento: string | null;
+  nombre: string;
+  email: string | null;
+  telefono: string | null;
+  direccion: string | null;
+  observaciones: string | null;
+  suscriptores?: { id: number; codigo: string; nombre: string; ruta: string | null; estadoFacturacion?: string }[];
+}
+
+export const tercerosApi = {
+  listPaginado: (page: number, limit: number, filtros?: { q?: string; pendientes?: boolean }) => {
+    const qs = new URLSearchParams({ page: String(page), limit: String(limit) });
+    if (filtros?.q) qs.set("q", filtros.q);
+    if (filtros?.pendientes) qs.set("pendientes", "1");
+    return request<{ data: Tercero[]; total: number; page: number; limit: number }>(`/api/terceros?${qs}`);
+  },
+  get: (id: number) => request<Tercero>(`/api/terceros/${id}`),
+  create: (data: Partial<Tercero> & { nombre: string }) =>
+    request<Tercero>("/api/terceros", { method: "POST", body: JSON.stringify(data) }),
+  update: (id: number, data: Partial<Tercero>) =>
+    request<Tercero>(`/api/terceros/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  reasignarSuscriptor: (terceroId: number, suscriptorId: number) =>
+    request<unknown>(`/api/terceros/${terceroId}/suscriptores/${suscriptorId}`, { method: "PUT" }),
+  remove: (id: number) => request<void>(`/api/terceros/${id}`, { method: "DELETE" }),
+};
 
 export const suscriptoresApi = {
   list: () => request<Suscriptor[]>("/api/suscriptores"),

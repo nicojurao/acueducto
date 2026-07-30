@@ -26,6 +26,7 @@ const MapaPage = lazy(() => import("./pages/MapaPage"));
 const AforosPage = lazy(() => import("./pages/AforosPage"));
 const InventarioPage = lazy(() => import("./pages/InventarioPage"));
 const AdminPage = lazy(() => import("./pages/AdminPage"));
+const FacturacionPage = lazy(() => import("./pages/FacturacionPage"));
 
 function CargandoPagina() {
   return (
@@ -102,6 +103,14 @@ function AppShell() {
               element={
                 <RutaProtegida permiso="lecturas">
                   <LecturasPage />
+                </RutaProtegida>
+              }
+            />
+            <Route
+              path="/facturacion"
+              element={
+                <RutaProtegida permiso={["facturacion_ver", "facturacion_avanzado", "pagos_registrar"]}>
+                  <FacturacionPage />
                 </RutaProtegida>
               }
             />

@@ -34,12 +34,42 @@ model Suscriptor {
   // "activo" | "inactivo". Un predio inactivo (lote baldío, demolido, etc.) no puede tener
   // medidor asignado — se valida en las rutas de suscriptores/actas, no solo en la UI.
   estadoPredio        String    @default("activo")
+  // Servicios contratados: si uno esta apagado, ese concepto NO se factura a este suscriptor.
+  tieneAcueducto      Boolean   @default(true)
+  tieneAlcantarillado Boolean   @default(true)
+  // Consumo (m3) que se le factura mientras no tenga medidor (estado sin_medidor o
+  // instalado_prueba) o si el periodo no tuvo lectura real. Es POR SUSCRIPTOR (no de la
+  // tarifa): cada predio puede tener un consumo predeterminado distinto segun lo que decida
+  // la empresa (ej. tamano del predio, historico previo, etc).
+  consumoPredeterminadoM3 Decimal @db.Decimal(12, 2) @default(0)
+  // Consumo predeterminado PROPIO para alcantarillado (independiente del de acueducto): el
+  // alcantarillado a veces lo presta otra empresa, con su propio promedio de referencia
+  // distinto al nuestro. Solo se usa cuando no hay lectura real (ahi ambos servicios comparten
+  // el mismo consumo medido, porque es la misma agua).
+  consumoPredeterminadoAlcantarilladoM3 Decimal @db.Decimal(12, 2) @default(0)
+
+  // Identificación catastral IGAC + número de cuenta/contrato, requeridos por el reporte SUI
+  // (Formato 279 de facturación). Todos opcionales porque hoy no se tienen para el histórico
+  // completo — se van completando predio por predio.
+  numeroCuentaContrato       String?
+  zonaIgac                   String?
+  sectorIgac                 String?
+  manzanaVeredaIgac          String?
+  numeroPredioIgac           String?
+  // Código SUI de condición de propiedad del predio: "00" propietario, "01" poseedor,
+  // "02" tenedor a cualquier titulo, "03" arrendatario. "000" (el que trae el histórico
+  // importado) significa "no reportado".
+  condicionPropiedadPredioIgac String? @default("000")
 
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
   medidores           Medidor[]
   cotitularDe         Cotitular?
+  facturas            Factura[]
+  omisionesFacturacion FacturacionOmitida[]
+  terceroId           Int?
+  tercero             Tercero?  @relation(fields: [terceroId], references: [id])
   actas               ActaInstalacion[]
 
   @@index([barrioId])
@@ -64,6 +94,7 @@ model Estrato {
   etiqueta     String
   createdAt    DateTime     @default(now())
   suscriptores Suscriptor[]
+  tarifas      TarifaEstrato[]
 }
 
 model MarcaMedidor {
@@ -262,6 +293,8 @@ model Usuario {
   actasInstaladas ActaInstalacion[]
   cambiosRealizados HistorialCambio[]
   sesiones        InicioSesion[]
+  pagosRegistrados Pago[]
+  periodosCerrados PeriodoFacturacion[]
 }
 
 // Un renglón por cada login exitoso, para auditoría. Cada login trae un "jti" propio (id
@@ -549,4 +582,174 @@ model NovedadLectura {
   createdAt DateTime @default(now())
 
   @@unique([medidorId, periodo])
+}
+
+// ===================== FACTURACIÓN Y CARTERA (módulo comercial) =====================
+
+// Tarifa vigente según la metodología de la Resolución CRA 825 de 2017 (prestadores de hasta
+// 5.000 suscriptores): cargo fijo = CMA; cargo por consumo por m³ = CMO + CMI + CMT. Cada
+// registro es una vigencia (vigenciaDesde = primer día del mes desde el que aplica); al generar
+// la facturación de un periodo se usa la tarifa con la vigencia más reciente <= ese periodo.
+// Los rangos de consumo (básico/complementario/suntuario) son configurables — para Mocoa
+// (clima cálido, <1.000 msnm) la norma define básico 0-16 m³ y complementario hasta 32.
+model Tarifa {
+  id                      Int      @id @default(autoincrement())
+  vigenciaDesde           DateTime // primer día del mes
+  cma                     Decimal  @db.Decimal(12, 2) // cargo fijo mensual $/suscriptor
+  cmo                     Decimal  @db.Decimal(12, 2) // $/m3
+  cmi                     Decimal  @db.Decimal(12, 2) // $/m3
+  cmt                     Decimal  @db.Decimal(12, 2) // $/m3
+  rangoBasicoHastaM3      Int      @default(16)
+  rangoComplementarioHastaM3 Int   @default(32)
+  // Alcantarillado: misma estructura tarifaria que acueducto (cargo fijo = CMA propio; valor
+  // m3 = CMO+CMI+CMT propios). Todos null = no se cobra alcantarillado en esta vigencia.
+  alcCma                  Decimal? @db.Decimal(12, 2)
+  alcCmo                  Decimal? @db.Decimal(12, 2)
+  alcCmi                  Decimal? @db.Decimal(12, 2)
+  alcCmt                  Decimal? @db.Decimal(12, 2)
+  aseoCargoFijo           Decimal? @db.Decimal(12, 2)
+  // % de interés de mora MENSUAL sobre el saldo vencido de una factura, parametrizable por
+  // vigencia (0 = no se cobra mora todavía, valor por defecto). Se usa para reportar
+  // "intereses por mora" en el SUI y, a futuro, para poder cobrarla — hoy solo se calcula
+  // para mostrar/reportar, no se agrega automáticamente como concepto de la factura.
+  tasaMoraMensual         Decimal  @db.Decimal(6, 3) @default(0)
+  observaciones           String?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+  estratos                TarifaEstrato[]
+  facturas                Factura[]
+
+  @@unique([vigenciaDesde])
+}
+
+// % de subsidio o contribución por estrato para una vigencia de tarifa. Negativo = subsidio
+// (ej. -50 para estrato 1), positivo = contribución (ej. +50 comercial), 0 = tarifa plena.
+// Según la norma, el subsidio aplica SOLO sobre el cargo fijo y el consumo básico; la
+// contribución aplica sobre todo el servicio.
+model TarifaEstrato {
+  id         Int     @id @default(autoincrement())
+  tarifaId   Int
+  tarifa     Tarifa  @relation(fields: [tarifaId], references: [id], onDelete: Cascade)
+  estratoId  Int
+  estrato    Estrato @relation(fields: [estratoId], references: [id])
+  porcentaje Decimal @db.Decimal(6, 2) @default(0)
+
+  @@unique([tarifaId, estratoId])
+}
+
+model Factura {
+  id               Int       @id @default(autoincrement())
+  numero           Int       @unique // consecutivo de facturación
+  suscriptorId     Int
+  suscriptor       Suscriptor @relation(fields: [suscriptorId], references: [id])
+  periodo          DateTime  // primer día del mes facturado
+  tarifaId         Int
+  tarifa           Tarifa    @relation(fields: [tarifaId], references: [id])
+  consumoM3        Decimal   @db.Decimal(12, 2)
+  // Consumo de alcantarillado facturado — normalmente IGUAL a consumoM3 (misma agua medida),
+  // salvo cuando no hay lectura real: ahi cada servicio puede usar su propio predeterminado
+  // (acueducto y alcantarillado a veces son empresas distintas con promedios distintos).
+  consumoAlcantarilladoM3 Decimal @db.Decimal(12, 2) @default(0)
+  // Snapshots al momento de facturar (el suscriptor puede cambiar de estrato/estado después,
+  // pero la factura emitida no debe cambiar retroactivamente):
+  estratoCodigo    String?
+  estadoFacturacion String
+  sinMedidor       Boolean   @default(false) // true si el consumo fue el predeterminado, no lectura real
+  subtotal         Decimal   @db.Decimal(12, 2) // antes de subsidio/contribución
+  // % de subsidio (negativo) o contribución (positivo) aplicado, tal cual estaba en la tarifa
+  // al facturar — se guarda el porcentaje ADEMÁS del resultado en pesos, para auditoría.
+  porcentajeAplicado Decimal @db.Decimal(6, 2) @default(0)
+  ajusteEstrato    Decimal   @db.Decimal(12, 2) @default(0) // subsidio (negativo) o contribución (positivo)
+  total            Decimal   @db.Decimal(12, 2)
+  estado           String    @default("pendiente") // "pendiente" | "pagada" | "anulada"
+  fechaEmision     DateTime  @default(now())
+  fechaVencimiento DateTime?
+  observaciones    String?
+  conceptos        FacturaConcepto[]
+  pagos            Pago[]
+
+  @@unique([suscriptorId, periodo])
+  @@index([periodo])
+  @@index([estado])
+}
+
+// Renglones de la factura. Los generados por el motor llevan tipo estándar; los manuales
+// (reconexión, matrícula, mora, acuerdo de pago, descuento) llevan tipo "manual".
+model FacturaConcepto {
+  id            Int     @id @default(autoincrement())
+  facturaId     Int
+  factura       Factura @relation(fields: [facturaId], references: [id], onDelete: Cascade)
+  tipo          String  // cargo_fijo | consumo_basico | consumo_complementario | consumo_suntuario | alcantarillado_fijo | alcantarillado_consumo | aseo | ajuste_estrato | manual
+  descripcion   String
+  cantidad      Decimal? @db.Decimal(12, 2) // m3 para conceptos de consumo
+  valorUnitario Decimal? @db.Decimal(12, 2)
+  valor         Decimal  @db.Decimal(12, 2) // puede ser negativo (subsidio, descuento)
+}
+
+model Pago {
+  id             Int      @id @default(autoincrement())
+  facturaId      Int
+  factura        Factura  @relation(fields: [facturaId], references: [id])
+  valor          Decimal  @db.Decimal(12, 2)
+  medio          String   @default("efectivo") // "efectivo" | "consignacion" | "otro"
+  fecha          DateTime @default(now())
+  observaciones  String?
+  registradoPorId Int?
+  registradoPor  Usuario? @relation(fields: [registradoPorId], references: [id], onDelete: SetNull)
+
+  @@index([facturaId])
+  @@index([fecha])
+}
+
+// Tercero: la PERSONA (natural o jurídica) titular de uno o más suscriptores. El suscriptor es
+// en realidad el predio/servicio (número predial, barrio, estrato); los datos personales para
+// la facturación (y a futuro la facturación electrónica DIAN) viven acá. Una misma persona con
+// varios predios = un tercero con varios suscriptores. Los creados por la migración inicial a
+// partir de suscriptores SIN identificación llevan numeroDocumento "PEND-<suscriptorId>" como
+// marcador de "pendiente de completar".
+model Tercero {
+  id              Int      @id @default(autoincrement())
+  tipoDocumento   String   @default("CC") // CC | NIT | CE | TI | PP
+  numeroDocumento String?  @unique
+  nombre          String
+  email           String?
+  telefono        String?
+  direccion       String?
+  observaciones   String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  suscriptores    Suscriptor[]
+}
+
+// Ciclo de facturación: cada periodo (mes) se genera entre los últimos días del mes y los
+// primeros del siguiente, y una vez revisado se CIERRA — un periodo cerrado congela sus
+// facturas (no anular, no conceptos nuevos) y sus lecturas (no editar/crear/borrar). Los pagos
+// SÍ se siguen recibiendo siempre. Un permiso avanzado puede reabrirlo en caso excepcional,
+// quedando registro de quién.
+model PeriodoFacturacion {
+  id              Int       @id @default(autoincrement())
+  periodo         DateTime  @unique // primer día del mes
+  estado          String    @default("abierto") // "abierto" | "cerrado"
+  fechaGeneracion DateTime?
+  fechaCierre     DateTime?
+  cerradoPorId    Int?
+  cerradoPor      Usuario?  @relation(fields: [cerradoPorId], references: [id], onDelete: SetNull)
+  observaciones   String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+// Registro de suscriptores OMITIDOS en la generación de un periodo (inactivos, predio
+// inactivo, sin servicios activos): el periodo queda documentado con el motivo, en vez de
+// que el suscriptor simplemente "no aparezca" en la facturación.
+model FacturacionOmitida {
+  id           Int        @id @default(autoincrement())
+  periodo      DateTime   // primer día del mes
+  suscriptorId Int
+  suscriptor   Suscriptor @relation(fields: [suscriptorId], references: [id])
+  motivo       String     // "estado_inactivo" | "predio_inactivo" | "sin_servicios"
+  createdAt    DateTime   @default(now())
+
+  @@unique([suscriptorId, periodo])
+  @@index([periodo])
 }
