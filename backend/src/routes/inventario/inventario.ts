@@ -55,6 +55,10 @@ const includeCatalogos = {
   proveedor: true,
   ingresadoPor: { select: { id: true, nombre: true } },
 };
+// El listado (tabla paginada y el combobox de "asignar préstamo") solo muestra categoría y
+// ubicación — proveedor e ingresadoPor solo se ven en el detalle/edición de un ítem puntual, así
+// que no vale la pena traerlos en cada fila del listado.
+const includeCatalogosListado = { categoriaCat: true, ubicacionCat: true };
 
 // Disponible = cantidad total del ítem - lo que está prestado sin devolver todavía.
 async function disponibilidad(itemId: number, cantidadTotal: number): Promise<number> {
@@ -123,7 +127,7 @@ itemsInventarioRouter.get("/", async (req, res) => {
     // filtrar/paginar directo en SQL — se trae todo lo que tenga stockMinimo, se calcula y se
     // pagina en memoria. El volumen de este módulo (cientos de ítems) lo hace viable.
     if (stockBajo === "true") {
-      const todos = await prisma.itemInventario.findMany({ where, include: includeCatalogos, orderBy });
+      const todos = await prisma.itemInventario.findMany({ where, include: includeCatalogosListado, orderBy });
       const conDatos = (await conDisponible(todos)).filter((i) => i.stockBajo);
       const total = conDatos.length;
       const data = conDatos.slice((pageNum - 1) * limitNum, pageNum * limitNum);
@@ -132,14 +136,14 @@ itemsInventarioRouter.get("/", async (req, res) => {
 
     const [items, total] = await Promise.all([
       prisma.itemInventario.findMany({
-        where, include: includeCatalogos, orderBy, skip: (pageNum - 1) * limitNum, take: limitNum,
+        where, include: includeCatalogosListado, orderBy, skip: (pageNum - 1) * limitNum, take: limitNum,
       }),
       prisma.itemInventario.count({ where }),
     ]);
     return res.json({ data: await conDisponible(items), total, page: pageNum, limit: limitNum });
   }
 
-  const items = await prisma.itemInventario.findMany({ where, include: includeCatalogos, orderBy: { nombre: "asc" } });
+  const items = await prisma.itemInventario.findMany({ where, include: includeCatalogosListado, orderBy: { nombre: "asc" } });
   res.json(await conDisponible(items));
 });
 
@@ -411,9 +415,11 @@ itemsInventarioRouter.delete("/:id", soloAvanzado, async (req, res) => {
 
 // Préstamos: historial y activos. Filtros opcionales por itemId, usuarioId, "activos=true"
 // (solo los que no tienen fechaDevolucion) y "vencidos=true" (sin devolver y con
-// fechaEsperadaDevolucion ya pasada).
+// fechaEsperadaDevolucion ya pasada). Paginado en el servidor — a diferencia del resto de listas
+// grandes de la app (Facturas, Pagos, Suscriptores...), este endpoint traía TODO el historial de
+// siempre en cada carga; con años de préstamos/devoluciones ya no era liviano.
 prestamosInventarioRouter.get("/", async (req, res) => {
-  const { itemId, usuarioId, activos, vencidos } = req.query;
+  const { itemId, usuarioId, activos, vencidos, page, limit } = req.query;
   const filtros: any[] = [];
   if (itemId) filtros.push({ itemId: Number(itemId) });
   if (usuarioId) filtros.push({ usuarioId: Number(usuarioId) });
@@ -422,13 +428,20 @@ prestamosInventarioRouter.get("/", async (req, res) => {
     filtros.push({ fechaDevolucion: null }, { fechaEsperadaDevolucion: { lt: new Date() } });
   }
   const where = filtros.length ? { AND: filtros } : {};
+  const pageNum = Math.max(1, Number(page) || 1);
+  const limitNum = Math.max(1, Number(limit) || 20);
 
-  const prestamos = await prisma.prestamoInventario.findMany({
-    where,
-    include: { item: true, usuario: { select: { id: true, nombre: true } } },
-    orderBy: { fechaEntrega: "desc" },
-  });
-  res.json(prestamos);
+  const [prestamos, total] = await Promise.all([
+    prisma.prestamoInventario.findMany({
+      where,
+      include: { item: true, usuario: { select: { id: true, nombre: true } } },
+      orderBy: { fechaEntrega: "desc" },
+      skip: (pageNum - 1) * limitNum,
+      take: limitNum,
+    }),
+    prisma.prestamoInventario.count({ where }),
+  ]);
+  res.json({ data: prestamos, total, page: pageNum, limit: limitNum });
 });
 
 // "Vencido" = sigue sin devolver y ya pasó la fecha esperada de devolución (si se registró una).
@@ -623,20 +636,28 @@ prestamosInventarioRouter.delete("/:id", soloAvanzado, async (req, res) => {
 
 // Entradas (compra, reposición) y salidas (consumo, ej. tubos usados en una instalación) de
 // stock. A diferencia de un préstamo, una salida no se devuelve: ajusta directamente la
-// cantidad total del ítem. Filtros opcionales por itemId y tipo.
+// cantidad total del ítem. Filtros opcionales por itemId y tipo. Paginado en el servidor, mismo
+// motivo que /prestamos: el historial completo de movimientos crece sin tope con el uso diario.
 movimientosInventarioRouter.get("/", async (req, res) => {
-  const { itemId, tipo } = req.query;
+  const { itemId, tipo, page, limit } = req.query;
   const filtros: any[] = [];
   if (itemId) filtros.push({ itemId: Number(itemId) });
   if (tipo) filtros.push({ tipo: String(tipo) });
   const where = filtros.length ? { AND: filtros } : {};
+  const pageNum = Math.max(1, Number(page) || 1);
+  const limitNum = Math.max(1, Number(limit) || 20);
 
-  const movimientos = await prisma.movimientoInventario.findMany({
-    where,
-    include: { item: true, usuario: { select: { id: true, nombre: true } } },
-    orderBy: { createdAt: "desc" },
-  });
-  res.json(movimientos);
+  const [movimientos, total] = await Promise.all([
+    prisma.movimientoInventario.findMany({
+      where,
+      include: { item: true, usuario: { select: { id: true, nombre: true } } },
+      orderBy: { createdAt: "desc" },
+      skip: (pageNum - 1) * limitNum,
+      take: limitNum,
+    }),
+    prisma.movimientoInventario.count({ where }),
+  ]);
+  res.json({ data: movimientos, total, page: pageNum, limit: limitNum });
 });
 
 movimientosInventarioRouter.get("/excel", async (req, res) => {

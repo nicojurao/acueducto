@@ -186,12 +186,12 @@ export const inventarioApi = {
     return descargarArchivo(`/api/inventario/items/pdf?${qs}`, "inventario_items.pdf", true);
   },
   prestamos: {
-    list: (filtros?: { itemId?: number; usuarioId?: number; activos?: boolean }) => {
-      const qs = new URLSearchParams();
+    listPaginado: (page: number, limit: number, filtros?: { itemId?: number; usuarioId?: number; activos?: boolean }) => {
+      const qs = new URLSearchParams({ page: String(page), limit: String(limit) });
       if (filtros?.itemId) qs.set("itemId", String(filtros.itemId));
       if (filtros?.usuarioId) qs.set("usuarioId", String(filtros.usuarioId));
       if (filtros?.activos) qs.set("activos", "true");
-      return request<PrestamoInventario[]>(`/api/inventario/prestamos?${qs}`);
+      return request<{ data: PrestamoInventario[]; total: number; page: number; limit: number }>(`/api/inventario/prestamos?${qs}`);
     },
     crear: (data: { itemId: number; usuarioId: number; cantidad?: number; observaciones?: string }) =>
       request<PrestamoInventario>("/api/inventario/prestamos", { method: "POST", body: JSON.stringify(data) }),
@@ -211,11 +211,11 @@ export const inventarioApi = {
     },
   },
   movimientos: {
-    list: (filtros?: { itemId?: number; tipo?: "entrada" | "salida" }) => {
-      const qs = new URLSearchParams();
+    listPaginado: (page: number, limit: number, filtros?: { itemId?: number; tipo?: "entrada" | "salida" }) => {
+      const qs = new URLSearchParams({ page: String(page), limit: String(limit) });
       if (filtros?.itemId) qs.set("itemId", String(filtros.itemId));
       if (filtros?.tipo) qs.set("tipo", filtros.tipo);
-      return request<MovimientoInventario[]>(`/api/inventario/movimientos?${qs}`);
+      return request<{ data: MovimientoInventario[]; total: number; page: number; limit: number }>(`/api/inventario/movimientos?${qs}`);
     },
     crear: (data: { itemId: number; tipo: "entrada" | "salida"; cantidad: number; motivo?: string; observaciones?: string }) =>
       request<MovimientoInventario>("/api/inventario/movimientos", { method: "POST", body: JSON.stringify(data) }),

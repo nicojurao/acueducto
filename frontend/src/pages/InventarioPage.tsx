@@ -49,6 +49,12 @@ import BusquedaInput from "../components/BusquedaInput";
 import ThOrdenable, { Orden, alternarOrden } from "../components/ThOrdenable";
 import { inputClass } from "../lib/ui";
 import EmptyState from "../components/EmptyState";
+import {
+  leerSnapshot,
+  listarItemsInventarioOffline,
+  listarPrestamosInventarioOffline,
+  listarMovimientosInventarioOffline,
+} from "../lib/offlineSnapshot";
 
 const GRID_STROKE = "#475569";
 
@@ -202,6 +208,26 @@ function ItemsTab({
       });
       setFilas(resultado.data);
       setTotal(resultado.total);
+      setSeleccionados(new Set());
+    } catch {
+      // Sin conexión: se reconstruye desde el snapshot del "Modo de salida" (sin el orden por
+      // columna — es un detalle menor frente a poder ver el inventario completo sin señal).
+      const snapshot = await leerSnapshot();
+      if (snapshot) {
+        const resultado = listarItemsInventarioOffline(snapshot, {
+          pagina,
+          porPagina,
+          q: busquedaDebounced || undefined,
+          categoria: categoriaFiltro ? Number(categoriaFiltro) : undefined,
+          ubicacion: ubicacionFiltro ? Number(ubicacionFiltro) : undefined,
+          proveedor: proveedorFiltro ? Number(proveedorFiltro) : undefined,
+        });
+        setFilas(resultado.data);
+        setTotal(resultado.total);
+      } else {
+        setFilas([]);
+        setTotal(0);
+      }
       setSeleccionados(new Set());
     } finally {
       setCargando(false);
@@ -575,6 +601,9 @@ function PrestamosTab() {
   const [cantidad, setCantidad] = useState("1");
   const [observaciones, setObservaciones] = useState("");
   const [fechaEsperadaDevolucion, setFechaEsperadaDevolucion] = useState("");
+  const [pagina, setPagina] = useState(1);
+  const [total, setTotal] = useState(0);
+  const porPagina = 20;
   const { pedirConfirmacion, modal } = useConfirm();
   const { error, run } = useErrorHandler();
   const { error: errorModal, run: runModal, limpiar: limpiarModal } = useErrorHandler();
@@ -582,16 +611,30 @@ function PrestamosTab() {
   async function cargar() {
     setCargando(true);
     try {
-      setPrestamos(await api.inventario.prestamos.list({ activos: soloActivos || undefined }));
+      const r = await api.inventario.prestamos.listPaginado(pagina, porPagina, { activos: soloActivos || undefined });
+      setPrestamos(r.data);
+      setTotal(r.total);
+    } catch {
+      const snapshot = await leerSnapshot();
+      if (snapshot) {
+        const r = listarPrestamosInventarioOffline(snapshot, { pagina, porPagina, activos: soloActivos });
+        setPrestamos(r.data);
+        setTotal(r.total);
+      } else {
+        setPrestamos([]);
+        setTotal(0);
+      }
     } finally {
       setCargando(false);
     }
   }
 
+  useEffect(() => setPagina(1), [soloActivos]);
+
   useEffect(() => {
     cargar();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [soloActivos]);
+  }, [pagina, soloActivos]);
 
   function abrirAsignar() {
     api.inventario.list().then(setItems);
@@ -779,6 +822,32 @@ function PrestamosTab() {
         </div>
       )}
 
+      {!cargando && total > 0 && (
+        <div className="mt-3 flex items-center justify-between text-sm text-slate-700 dark:text-slate-400">
+          <span>
+            {total} préstamo{total === 1 ? "" : "s"} · página {pagina} de {Math.max(1, Math.ceil(total / porPagina))}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setPagina((p) => Math.max(1, p - 1))}
+              disabled={pagina <= 1}
+              className="flex items-center gap-1 rounded-lg border border-brand-200 px-2.5 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:hover:bg-slate-800"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+              Anterior
+            </button>
+            <button
+              onClick={() => setPagina((p) => Math.min(Math.max(1, Math.ceil(total / porPagina)), p + 1))}
+              disabled={pagina >= Math.ceil(total / porPagina)}
+              className="flex items-center gap-1 rounded-lg border border-brand-200 px-2.5 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:hover:bg-slate-800"
+            >
+              Siguiente
+              <ChevronRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {asignando && (
         <div className={`fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-4 ${saliendoAsignar ? "animate-fade-out" : "animate-fade-in"}`}>
           <div className={`w-full max-w-sm rounded-xl bg-white p-5 shadow-xl dark:bg-slate-900 ${saliendoAsignar ? "animate-scale-out" : "animate-scale-in"}`}>
@@ -890,20 +959,37 @@ function MovimientosTab({ ubicaciones }: { ubicaciones: UbicacionInventario[] })
   const { error, run } = useErrorHandler();
   const { error: errorModal, run: runModal, limpiar: limpiarModal } = useErrorHandler();
   const { error: errorTransferir, run: runTransferir, limpiar: limpiarTransferir } = useErrorHandler();
+  const [pagina, setPagina] = useState(1);
+  const [total, setTotal] = useState(0);
+  const porPagina = 20;
 
   async function cargar() {
     setCargando(true);
     try {
-      setMovimientos(await api.inventario.movimientos.list({ tipo: tipoFiltro || undefined }));
+      const r = await api.inventario.movimientos.listPaginado(pagina, porPagina, { tipo: (tipoFiltro || undefined) as "entrada" | "salida" | undefined });
+      setMovimientos(r.data);
+      setTotal(r.total);
+    } catch {
+      const snapshot = await leerSnapshot();
+      if (snapshot) {
+        const r = listarMovimientosInventarioOffline(snapshot, { pagina, porPagina, tipo: tipoFiltro || undefined });
+        setMovimientos(r.data);
+        setTotal(r.total);
+      } else {
+        setMovimientos([]);
+        setTotal(0);
+      }
     } finally {
       setCargando(false);
     }
   }
 
+  useEffect(() => setPagina(1), [tipoFiltro]);
+
   useEffect(() => {
     cargar();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tipoFiltro]);
+  }, [pagina, tipoFiltro]);
 
   function abrirRegistrar(tipo: "entrada" | "salida") {
     api.inventario.list().then(setItems);
@@ -1075,6 +1161,32 @@ function MovimientosTab({ ubicaciones }: { ubicaciones: UbicacionInventario[] })
               )}
             </div>
           ))}
+        </div>
+      )}
+
+      {!cargando && total > 0 && (
+        <div className="mt-3 flex items-center justify-between text-sm text-slate-700 dark:text-slate-400">
+          <span>
+            {total} movimiento{total === 1 ? "" : "s"} · página {pagina} de {Math.max(1, Math.ceil(total / porPagina))}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setPagina((p) => Math.max(1, p - 1))}
+              disabled={pagina <= 1}
+              className="flex items-center gap-1 rounded-lg border border-brand-200 px-2.5 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:hover:bg-slate-800"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+              Anterior
+            </button>
+            <button
+              onClick={() => setPagina((p) => Math.min(Math.max(1, Math.ceil(total / porPagina)), p + 1))}
+              disabled={pagina >= Math.ceil(total / porPagina)}
+              className="flex items-center gap-1 rounded-lg border border-brand-200 px-2.5 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:hover:bg-slate-800"
+            >
+              Siguiente
+              <ChevronRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
       )}
 
@@ -1584,10 +1696,23 @@ export default function InventarioPage() {
     setTab("items");
   }
 
-  function recargarCatalogos() {
-    api.inventario.categorias.list().then(setCategorias);
-    api.inventario.ubicaciones.list().then(setUbicaciones);
-    api.inventario.proveedores.list().then(setProveedores);
+  async function recargarCatalogos() {
+    try {
+      const [c, u, p] = await Promise.all([
+        api.inventario.categorias.list(),
+        api.inventario.ubicaciones.list(),
+        api.inventario.proveedores.list(),
+      ]);
+      setCategorias(c);
+      setUbicaciones(u);
+      setProveedores(p);
+    } catch {
+      const snapshot = await leerSnapshot();
+      if (!snapshot) return;
+      setCategorias(snapshot.categoriasInventario);
+      setUbicaciones(snapshot.ubicacionesInventario);
+      setProveedores(snapshot.proveedoresInventario);
+    }
   }
 
   useEffect(() => {

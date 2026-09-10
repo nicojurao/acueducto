@@ -25,8 +25,8 @@ function fmtFecha(iso: string | null): string {
 function Campo({ etiqueta, valor }: { etiqueta: string; valor: string }) {
   return (
     <div className="min-w-0">
-      <div className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">{etiqueta}</div>
-      <div className="break-words text-sm font-medium text-slate-800 dark:text-slate-100">{valor}</div>
+      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">{etiqueta}</div>
+      <div className="break-words text-sm text-slate-800 dark:text-slate-100">{valor}</div>
     </div>
   );
 }
@@ -49,7 +49,7 @@ export default function ItemInventarioDetalleModal({
 
   return (
     <div className={`fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-4 ${saliendo ? "animate-fade-out" : "animate-fade-in"}`}>
-      <div className={`max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-xl dark:bg-slate-900 ${saliendo ? "animate-scale-out" : "animate-scale-in"}`}>
+      <div className={`max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-xl dark:bg-slate-900 sm:max-w-lg lg:max-w-2xl ${saliendo ? "animate-scale-out" : "animate-scale-in"}`}>
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-bold">{item.nombre}</h2>
           <button onClick={cerrar} className="rounded-lg p-1 hover:bg-slate-100 dark:hover:bg-slate-800">
@@ -110,7 +110,9 @@ export default function ItemInventarioDetalleModal({
           <p className="mb-4 text-sm text-slate-600 dark:text-slate-400">{item.descripcion}</p>
         )}
 
-        <div className="grid grid-cols-2 gap-x-4 gap-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/40">
+        {/* flex-wrap: cada campo pesa lo que necesita su contenido, sin huecos de columna cuando
+            un valor es corto (ej. "Cantidad"). */}
+        <div className="flex flex-wrap gap-x-6 gap-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-800/40">
           <Campo etiqueta="Categoría" valor={item.categoriaCat?.nombre ?? "-"} />
           <Campo etiqueta="Ubicación" valor={item.ubicacionCat?.nombre ?? "-"} />
           <Campo etiqueta="Cantidad" valor={`${item.cantidad} ${abreviada}`} />
