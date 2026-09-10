@@ -27,6 +27,8 @@ import { useAuth } from "../contexts/AuthContext";
 import { useCierreAnimado } from "../lib/useCierreAnimado";
 import { inputClass } from "../lib/ui";
 import { fmtFecha } from "../lib/fecha";
+import { guardarEnCache, leerDeCache } from "../lib/cacheOffline";
+import { leerSnapshot, construirHistoricoSuscriptor } from "../lib/offlineSnapshot";
 
 const GRID_STROKE = "#475569";
 
@@ -83,9 +85,16 @@ export default function SuscriptorDetailModal({
     }
   }
   const [cargando, setCargando] = useState(true);
+  // Cuándo se guardó localmente la copia de "datos básicos" que se está mostrando — solo se pone
+  // un valor acá cuando el fetch real falló y se usó esa copia de respaldo (ver cargarDetalle).
+  // Mientras tenga valor, el modal queda en modo solo lectura: no tiene sentido dejar editar sobre
+  // datos que pueden estar desactualizados y que además no se podrían guardar sin conexión.
+  const [datosGuardadosEn, setDatosGuardadosEn] = useState<string | null>(null);
+  const modoSoloLectura = datosGuardadosEn !== null;
   const [editandoUbicacion, setEditandoUbicacion] = useState(false);
   const [guardandoUbicacion, setGuardandoUbicacion] = useState(false);
   const [mapaAbierto, setMapaAbierto] = useState(false);
+  const [verPrincipalId, setVerPrincipalId] = useState<number | null>(null);
 
   const [asignando, setAsignando] = useState(false);
   const [editandoActaId, setEditandoActaId] = useState<number | null>(null);
@@ -125,19 +134,24 @@ export default function SuscriptorDetailModal({
       ? [...instaladores, instaladorExtra]
       : instaladores;
   const { usuario } = useAuth();
-  const puedeEditar = usuario?.permisos?.includes("suscriptores_avanzado") ?? false;
+  // Todos estos "puede..." se apagan en modoSoloLectura (datos de respaldo offline, ver
+  // cargarDetalle): no tiene sentido dejar abrir un formulario de edición sobre datos que pueden
+  // estar desactualizados y que, sin conexión, tampoco se podrían guardar.
+  const puedeEditar = !modoSoloLectura && (usuario?.permisos?.includes("suscriptores_avanzado") ?? false);
   // El estado de facturación se puede cambiar con un permiso propio, más acotado que
   // "suscriptores_avanzado" (ej. rol Asistente Coordinador Operativo).
-  const puedeEditarEstado = puedeEditar || (usuario?.permisos?.includes("suscriptores_estado_facturacion") ?? false);
+  const puedeEditarEstado =
+    !modoSoloLectura && (puedeEditar || (usuario?.permisos?.includes("suscriptores_estado_facturacion") ?? false));
   // Asignar/reemplazar/editar/quitar un medidor de un suscriptor NO es "editar datos del
   // suscriptor" — es crear/editar/borrar un acta (ver actas.ts), así que se gatea con
   // "actas_avanzado" en vez de "suscriptores_avanzado". Sin esto, un rol como Asistente
   // Coordinador Operativo (medidores_avanzado + actas_avanzado, pero sin suscriptores_avanzado)
   // veía el botón "+ Asignar medidor" oculto aunque sí tuviera permiso de sobra para usarlo.
-  const puedeAsignarMedidor = puedeEditar || (usuario?.permisos?.includes("actas_avanzado") ?? false);
+  const puedeAsignarMedidor = !modoSoloLectura && (puedeEditar || (usuario?.permisos?.includes("actas_avanzado") ?? false));
   // Cotitulares (POST/DELETE /api/medidores/:id/cotitulares) exigen "medidores_avanzado" en el
   // backend, no "suscriptores_avanzado" ni "actas_avanzado".
-  const puedeGestionarCotitulares = puedeEditar || (usuario?.permisos?.includes("medidores_avanzado") ?? false);
+  const puedeGestionarCotitulares =
+    !modoSoloLectura && (puedeEditar || (usuario?.permisos?.includes("medidores_avanzado") ?? false));
 
   const [medidorCotitularAbierto, setMedidorCotitularAbierto] = useState<number | null>(null);
   const [nuevoCotitularNuid, setNuevoCotitularNuid] = useState("");
@@ -172,11 +186,8 @@ export default function SuscriptorDetailModal({
     estratoId: "",
     direccion: "",
     direccionComercial: "",
-    numeroCuentaContrato: "",
-    zonaIgac: "",
-    sectorIgac: "",
-    manzanaVeredaIgac: "",
-    numeroPredioIgac: "",
+    numeroPredialNacional20: "",
+    numeroPredialNacional: "",
   });
 
   function abrirEdicionInfo() {
@@ -189,11 +200,8 @@ export default function SuscriptorDetailModal({
       estratoId: suscriptor.estratoCat ? String(suscriptor.estratoCat.id) : "",
       direccion: suscriptor.direccion ?? "",
       direccionComercial: suscriptor.direccionComercial ?? "",
-      numeroCuentaContrato: suscriptor.numeroCuentaContrato ?? "",
-      zonaIgac: suscriptor.zonaIgac ?? "",
-      sectorIgac: suscriptor.sectorIgac ?? "",
-      manzanaVeredaIgac: suscriptor.manzanaVeredaIgac ?? "",
-      numeroPredioIgac: suscriptor.numeroPredioIgac ?? "",
+      numeroPredialNacional20: suscriptor.numeroPredialNacional20 ?? "",
+      numeroPredialNacional: suscriptor.numeroPredialNacional ?? "",
     });
     api.suscriptores.barrios().then(setBarriosCatalogo);
     api.estratos.list().then(setEstratosCatalogo);
@@ -216,11 +224,8 @@ export default function SuscriptorDetailModal({
         estratoId: formInfo.estratoId ? Number(formInfo.estratoId) : null,
         direccion: formInfo.direccion || null,
         direccionComercial: formInfo.direccionComercial || null,
-        numeroCuentaContrato: formInfo.numeroCuentaContrato || null,
-        zonaIgac: formInfo.zonaIgac || null,
-        sectorIgac: formInfo.sectorIgac || null,
-        manzanaVeredaIgac: formInfo.manzanaVeredaIgac || null,
-        numeroPredioIgac: formInfo.numeroPredioIgac || null,
+        numeroPredialNacional20: formInfo.numeroPredialNacional20 || null,
+        numeroPredialNacional: formInfo.numeroPredialNacional || null,
       });
       setEditandoInfo(false);
       cargarDetalle();
@@ -236,18 +241,48 @@ export default function SuscriptorDetailModal({
   // tenía permiso de ver). Así, la ficha carga igual con lo que sí se pueda traer.
   function cargarDetalle() {
     setCargando(true);
+    const claveCache = `suscriptor_detalle_${suscriptorId}`;
     api.suscriptores
       .get(suscriptorId)
       .then((s) => {
+        guardarEnCache(claveCache, { suscriptor: s, guardadoEn: new Date().toISOString() });
         setSuscriptor(s);
+        setDatosGuardadosEn(null);
         setCargando(false);
       })
-      .catch(() => setCargando(false));
+      .catch(async () => {
+        // Sin conexión: se muestran los "datos básicos" (lo que trae GET /suscriptores/:id) tal
+        // como quedaron guardados la última vez que se abrió esta ficha con internet, en modo
+        // solo lectura (ver modoSoloLectura) — mejor eso que dejar el modal en blanco.
+        const cache = leerDeCache<{ suscriptor: Suscriptor; guardadoEn: string }>(claveCache);
+        if (cache) {
+          setSuscriptor(cache.suscriptor);
+          setDatosGuardadosEn(cache.guardadoEn);
+          setCargando(false);
+          return;
+        }
+        // Nunca se abrió esta ficha puntual con internet en este dispositivo — último recurso: si
+        // se activó "Modo de salida" antes de salir, el snapshot completo en IndexedDB trae la
+        // ficha de TODOS los suscriptores, no solo los que se hayan visitado a mano.
+        const snapshot = await leerSnapshot();
+        const desdeSnapshot = snapshot?.suscriptores.find((s) => s.id === suscriptorId) ?? null;
+        if (desdeSnapshot) {
+          setSuscriptor(desdeSnapshot);
+          setDatosGuardadosEn(snapshot!.generadoEn);
+        }
+        setCargando(false);
+      });
 
     api.reportes
       .consumoSuscriptor(suscriptorId)
       .then(setHistorico)
-      .catch(() => setHistorico([]));
+      .catch(async () => {
+        // Sin conexión: se reconstruye con el mismo algoritmo que usa el backend (ventanas de
+        // acta por medidor, reparto entre cotitulares, meses sin lectura) sobre el snapshot
+        // completo del "Modo de salida" — ver construirHistoricoSuscriptor.
+        const snapshot = await leerSnapshot();
+        setHistorico(snapshot ? construirHistoricoSuscriptor(snapshot, suscriptorId) : []);
+      });
 
     api.actas
       .listBySuscriptor(suscriptorId)
@@ -539,9 +574,6 @@ export default function SuscriptorDetailModal({
           observaciones: formActa.observaciones || undefined,
           fotos,
         });
-        await api.medidores.update(Number(formActa.medidorId), {
-          lecturaInicial: formActa.lecturaInicial !== "" ? Number(formActa.lecturaInicial) : null,
-        });
       }
       cerrarFormulario();
       cargarDetalle();
@@ -625,7 +657,7 @@ export default function SuscriptorDetailModal({
       onClick={cerrar}
     >
       <div
-        className={`flex max-h-[90dvh] w-full max-w-2xl flex-col rounded-xl bg-white shadow-xl dark:bg-slate-900 ${saliendo ? "animate-scale-out" : "animate-scale-in"}`}
+        className={`flex max-h-[90dvh] w-full max-w-2xl flex-col rounded-xl bg-white shadow-xl dark:bg-slate-900 lg:max-w-4xl xl:max-w-5xl ${saliendo ? "animate-scale-out" : "animate-scale-in"}`}
         style={{ marginTop: "env(safe-area-inset-top)", marginBottom: "env(safe-area-inset-bottom)" }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -637,12 +669,50 @@ export default function SuscriptorDetailModal({
           </button>
         </div>
 
+        {modoSoloLectura && datosGuardadosEn && (
+          <div className="shrink-0 border-b border-amber-200 bg-amber-50 px-5 py-2 text-xs font-medium text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-400">
+            Sin conexión — mostrando datos guardados el{" "}
+            {new Date(datosGuardadosEn).toLocaleString("es-CO", {
+              day: "2-digit",
+              month: "2-digit",
+              year: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+            . La edición está deshabilitada mientras no haya conexión.
+          </div>
+        )}
+
         {!cargando && suscriptor && (
           <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-5">
-            <div className="flex flex-wrap gap-4">
+            <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Información general</h3>
+                {(puedeEditar || puedeEditarEstado) &&
+                  (editandoInfo
+                    ? !puedeEditar && (
+                        <button
+                          type="button"
+                          onClick={() => setEditandoInfo(false)}
+                          className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                        >
+                          Listo
+                        </button>
+                      )
+                    : (
+                        <button
+                          onClick={abrirEdicionInfo}
+                          className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-brand-600 hover:underline dark:text-brand-400"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                          Editar información
+                        </button>
+                      ))}
+              </div>
+              <div className="flex flex-wrap gap-4">
               <div>
-                <div className="text-xs uppercase text-slate-700 dark:text-slate-400">Estado de facturación</div>
-                {puedeEditarEstado ? (
+                <div className="text-xs font-semibold uppercase text-slate-700 dark:text-slate-300">Estado de facturación</div>
+                {puedeEditarEstado && editandoInfo ? (
                   <select
                     value={suscriptor.estadoFacturacion}
                     disabled={guardandoEstado}
@@ -677,8 +747,8 @@ export default function SuscriptorDetailModal({
                 {errorEstado && <p className="mt-1 max-w-xs text-xs text-red-600 dark:text-red-400">{errorEstado}</p>}
               </div>
               <div>
-                <div className="text-xs uppercase text-slate-700 dark:text-slate-400">Estado del predio</div>
-                {puedeEditar ? (
+                <div className="text-xs font-semibold uppercase text-slate-700 dark:text-slate-300">Estado del predio</div>
+                {puedeEditar && editandoInfo ? (
                   <select
                     value={suscriptor.estadoPredio}
                     disabled={guardandoPredio}
@@ -713,7 +783,7 @@ export default function SuscriptorDetailModal({
                 {errorPredio && <p className="mt-1 max-w-xs text-xs text-red-600 dark:text-red-400">{errorPredio}</p>}
               </div>
               <div>
-                <div className="text-xs uppercase text-slate-700 dark:text-slate-400">Uso (SUI)</div>
+                <div className="text-xs font-semibold uppercase text-slate-700 dark:text-slate-300">Uso (SUI)</div>
                 {/* No es un campo que se elija a mano: se deriva siempre del estrato, para que
                     nunca quede desincronizado (estratos 1-6 = residencial, el resto = no residencial). */}
                 <span className="mt-1 inline-block rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300">
@@ -721,13 +791,13 @@ export default function SuscriptorDetailModal({
                 </span>
               </div>
               <div>
-                <div className="text-xs uppercase text-slate-700 dark:text-slate-400">Servicios</div>
+                <div className="text-xs font-semibold uppercase text-slate-700 dark:text-slate-300">Servicios</div>
                 <div className="mt-1 flex gap-3 text-xs">
                   <label className="flex items-center gap-1.5">
                     <input
                       type="checkbox"
                       checked={suscriptor.tieneAcueducto ?? true}
-                      disabled={!puedeEditar}
+                      disabled={!(puedeEditar && editandoInfo)}
                       onChange={async (e) => {
                         await api.suscriptores.update(suscriptor.id, { tieneAcueducto: e.target.checked });
                         await cargarDetalle();
@@ -740,7 +810,7 @@ export default function SuscriptorDetailModal({
                     <input
                       type="checkbox"
                       checked={suscriptor.tieneAlcantarillado ?? true}
-                      disabled={!puedeEditar}
+                      disabled={!(puedeEditar && editandoInfo)}
                       onChange={async (e) => {
                         await api.suscriptores.update(suscriptor.id, { tieneAlcantarillado: e.target.checked });
                         await cargarDetalle();
@@ -752,7 +822,7 @@ export default function SuscriptorDetailModal({
                 </div>
               </div>
               <div>
-                <div className="text-xs uppercase text-slate-700 dark:text-slate-400">
+                <div className="text-xs font-semibold uppercase text-slate-700 dark:text-slate-300">
                   Consumo predeterminado (sin medidor)
                 </div>
                 {/* Solo aplica mientras no factura por medición real: si ya tiene lectura de
@@ -770,33 +840,33 @@ export default function SuscriptorDetailModal({
                   <div className="mt-1 flex flex-wrap gap-3">
                     <label className="flex items-center gap-1 text-xs">
                       <span className="text-slate-500 dark:text-slate-400">Acueducto</span>
-                      {puedeEditar ? (
+                      {puedeEditar && editandoInfo ? (
                         <input
                           type="number"
                           min={0}
                           value={consumoPredeterminado}
                           onChange={(e) => setConsumoPredeterminado(e.target.value)}
                           onBlur={guardarConsumoPredeterminado}
-                          className="w-16 rounded-lg border border-slate-300 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800"
+                          className="w-16 rounded-lg border border-slate-300 px-2 py-1 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
                         />
                       ) : (
-                        <span className="font-medium text-slate-700 dark:text-slate-300">{suscriptor.consumoPredeterminadoM3 ?? 0}</span>
+                        <span className="text-slate-700 dark:text-slate-300">{suscriptor.consumoPredeterminadoM3 ?? 0}</span>
                       )}
                       <span className="text-slate-400">m³/mes</span>
                     </label>
                     <label className="flex items-center gap-1 text-xs">
                       <span className="text-slate-500 dark:text-slate-400">Alcantarillado</span>
-                      {puedeEditar ? (
+                      {puedeEditar && editandoInfo ? (
                         <input
                           type="number"
                           min={0}
                           value={consumoPredeterminadoAlc}
                           onChange={(e) => setConsumoPredeterminadoAlc(e.target.value)}
                           onBlur={guardarConsumoPredeterminadoAlc}
-                          className="w-16 rounded-lg border border-slate-300 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800"
+                          className="w-16 rounded-lg border border-slate-300 px-2 py-1 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
                         />
                       ) : (
-                        <span className="font-medium text-slate-700 dark:text-slate-300">
+                        <span className="text-slate-700 dark:text-slate-300">
                           {suscriptor.consumoPredeterminadoAlcantarilladoM3 ?? 0}
                         </span>
                       )}
@@ -805,21 +875,25 @@ export default function SuscriptorDetailModal({
                   </div>
                 )}
               </div>
-            </div>
+              </div>
 
-            {editandoInfo && puedeEditar ? (
-              <form onSubmit={onSubmitInfo} className="rounded-lg border border-slate-200 p-3 dark:border-slate-800">
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                  <label className="col-span-2 flex flex-col gap-1 text-xs font-medium text-slate-700 sm:col-span-3">
-                    Nombre
-                    <input
-                      value={formInfo.nombre}
-                      onChange={(e) => setFormInfo({ ...formInfo, nombre: e.target.value })}
-                      className={inputClass}
-                      required
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1 text-xs font-medium text-slate-700">
+              {editandoInfo && puedeEditar ? (
+              <form onSubmit={onSubmitInfo} className="mt-4 border-t border-slate-200 pt-4 dark:border-slate-800">
+                <label className="flex flex-col gap-1 text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Nombre
+                  <input
+                    value={formInfo.nombre}
+                    onChange={(e) => setFormInfo({ ...formInfo, nombre: e.target.value })}
+                    className={inputClass}
+                    required
+                  />
+                </label>
+                {/* UNA sola grilla de 4 columnas para campos cortos + direcciones (Dirección y
+                    Dirección comercial ocupan 2 cada una): así sus bordes quedan alineados con
+                    los de la fila de arriba en vez de ser dos grillas independientes que no
+                    comparten los mismos límites de columna. */}
+                <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <label className="flex flex-col gap-1 text-xs font-semibold text-slate-700 dark:text-slate-300">
                     Identificación
                     <input
                       value={formInfo.identificacion}
@@ -827,7 +901,7 @@ export default function SuscriptorDetailModal({
                       className={inputClass}
                     />
                   </label>
-                  <label className="flex flex-col gap-1 text-xs font-medium text-slate-700">
+                  <label className="flex flex-col gap-1 text-xs font-semibold text-slate-700 dark:text-slate-300">
                     Ruta
                     <input
                       value={formInfo.ruta}
@@ -835,7 +909,7 @@ export default function SuscriptorDetailModal({
                       className={inputClass}
                     />
                   </label>
-                  <label className="flex flex-col gap-1 text-xs font-medium text-slate-700">
+                  <label className="flex flex-col gap-1 text-xs font-semibold text-slate-700 dark:text-slate-300">
                     Barrio
                     <select
                       value={formInfo.barrioId}
@@ -850,7 +924,7 @@ export default function SuscriptorDetailModal({
                       ))}
                     </select>
                   </label>
-                  <label className="flex flex-col gap-1 text-xs font-medium text-slate-700">
+                  <label className="flex flex-col gap-1 text-xs font-semibold text-slate-700 dark:text-slate-300">
                     Estrato
                     <select
                       value={formInfo.estratoId}
@@ -865,7 +939,7 @@ export default function SuscriptorDetailModal({
                       ))}
                     </select>
                   </label>
-                  <label className="col-span-2 flex flex-col gap-1 text-xs font-medium text-slate-700 sm:col-span-3">
+                  <label className="col-span-2 flex flex-col gap-1 text-xs font-semibold text-slate-700 dark:text-slate-300">
                     Dirección
                     <input
                       value={formInfo.direccion}
@@ -873,7 +947,7 @@ export default function SuscriptorDetailModal({
                       className={inputClass}
                     />
                   </label>
-                  <label className="col-span-2 flex flex-col gap-1 text-xs font-medium text-slate-700 sm:col-span-3">
+                  <label className="col-span-2 flex flex-col gap-1 text-xs font-semibold text-slate-700 dark:text-slate-300">
                     Dirección comercial
                     <input
                       value={formInfo.direccionComercial}
@@ -887,44 +961,26 @@ export default function SuscriptorDetailModal({
                   <div className="mb-2 text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
                     Identificación catastral (reporte SUI)
                   </div>
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                    <label className="flex flex-col gap-1 text-xs font-medium text-slate-700">
-                      N° cuenta/contrato
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="flex flex-col gap-1 text-xs font-semibold text-slate-700 dark:text-slate-300">
+                      NPN 20 dígitos
                       <input
-                        value={formInfo.numeroCuentaContrato}
-                        onChange={(e) => setFormInfo({ ...formInfo, numeroCuentaContrato: e.target.value })}
+                        value={formInfo.numeroPredialNacional20}
+                        onChange={(e) => setFormInfo({ ...formInfo, numeroPredialNacional20: e.target.value })}
+                        maxLength={20}
+                        pattern="\d{20}"
+                        title="Debe tener exactamente 20 dígitos"
                         className={inputClass}
                       />
                     </label>
-                    <label className="flex flex-col gap-1 text-xs font-medium text-slate-700">
-                      Zona IGAC
+                    <label className="flex flex-col gap-1 text-xs font-semibold text-slate-700 dark:text-slate-300">
+                      NPN 30 dígitos
                       <input
-                        value={formInfo.zonaIgac}
-                        onChange={(e) => setFormInfo({ ...formInfo, zonaIgac: e.target.value })}
-                        className={inputClass}
-                      />
-                    </label>
-                    <label className="flex flex-col gap-1 text-xs font-medium text-slate-700">
-                      Sector IGAC
-                      <input
-                        value={formInfo.sectorIgac}
-                        onChange={(e) => setFormInfo({ ...formInfo, sectorIgac: e.target.value })}
-                        className={inputClass}
-                      />
-                    </label>
-                    <label className="flex flex-col gap-1 text-xs font-medium text-slate-700">
-                      Manzana/vereda IGAC
-                      <input
-                        value={formInfo.manzanaVeredaIgac}
-                        onChange={(e) => setFormInfo({ ...formInfo, manzanaVeredaIgac: e.target.value })}
-                        className={inputClass}
-                      />
-                    </label>
-                    <label className="flex flex-col gap-1 text-xs font-medium text-slate-700">
-                      N° predio IGAC
-                      <input
-                        value={formInfo.numeroPredioIgac}
-                        onChange={(e) => setFormInfo({ ...formInfo, numeroPredioIgac: e.target.value })}
+                        value={formInfo.numeroPredialNacional}
+                        onChange={(e) => setFormInfo({ ...formInfo, numeroPredialNacional: e.target.value })}
+                        maxLength={30}
+                        pattern="\d{30}"
+                        title="Debe tener exactamente 30 dígitos"
                         className={inputClass}
                       />
                     </label>
@@ -948,54 +1004,49 @@ export default function SuscriptorDetailModal({
                 </div>
               </form>
             ) : (
-              <div>
-                {puedeEditar && (
-                  <div className="mb-2 flex justify-end">
-                    <button
-                      onClick={abrirEdicionInfo}
-                      className="inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:underline dark:text-brand-400"
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                      Editar información
-                    </button>
+              <div className="mt-4 border-t border-slate-200 pt-4 dark:border-slate-800">
+                {/* flex-wrap en vez de grid: cada campo ocupa solo el ancho que necesita su
+                    contenido (con un mínimo razonable) y salta de línea solo cuando ya no cabe.
+                    Con una grilla de columnas fijas, un valor corto (ej. "1/2\"") deja un hueco
+                    vacío hasta el borde de su columna aunque el campo de al lado sí lo necesite;
+                    flex-wrap no tiene ese problema porque no reserva ancho de más. */}
+                <div className="flex flex-wrap gap-x-8 gap-y-4 text-sm">
+                  <div className="min-w-[90px]">
+                    <div className="text-xs font-semibold uppercase text-slate-700 dark:text-slate-300">NUID</div>
+                    <div className="break-words">{suscriptor.codigo}</div>
                   </div>
-                )}
-                <div className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-3">
-                  <div className="min-w-0">
-                    <div className="text-xs uppercase text-slate-700 dark:text-slate-400">NUID</div>
-                    <div className="break-words font-medium">{suscriptor.codigo}</div>
+                  <div className="min-w-[90px]">
+                    <div className="text-xs font-semibold uppercase text-slate-700 dark:text-slate-300">Ruta</div>
+                    <div className="break-words">{suscriptor.ruta ?? "-"}</div>
                   </div>
-                  <div className="min-w-0">
-                    <div className="text-xs uppercase text-slate-700 dark:text-slate-400">Ruta</div>
-                    <div className="break-words font-medium">{suscriptor.ruta ?? "-"}</div>
+                  <div className="min-w-[110px]">
+                    <div className="text-xs font-semibold uppercase text-slate-700 dark:text-slate-300">Identificación</div>
+                    <div className="break-words">{suscriptor.identificacion ?? "-"}</div>
                   </div>
-                  <div className="min-w-0">
-                    <div className="text-xs uppercase text-slate-700 dark:text-slate-400">Identificación</div>
-                    <div className="break-words font-medium">{suscriptor.identificacion ?? "-"}</div>
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-xs uppercase text-slate-700 dark:text-slate-400">Estrato</div>
-                    <div className="break-words font-medium">
+                  <div className="min-w-[110px]">
+                    <div className="text-xs font-semibold uppercase text-slate-700 dark:text-slate-300">Estrato</div>
+                    <div className="break-words">
                       {suscriptor.estratoCat ? `${suscriptor.estratoCat.codigo} — ${suscriptor.estratoCat.etiqueta}` : "-"}
                     </div>
                   </div>
-                  <div className="min-w-0">
-                    <div className="text-xs uppercase text-slate-700 dark:text-slate-400">Barrio</div>
-                    <div className="break-words font-medium">{suscriptor.barrioCat?.nombre ?? "-"}</div>
+                  <div className="min-w-[110px]">
+                    <div className="text-xs font-semibold uppercase text-slate-700 dark:text-slate-300">Barrio</div>
+                    <div className="break-words">{suscriptor.barrioCat?.nombre ?? "-"}</div>
                   </div>
-                  <div className="col-span-2 min-w-0 sm:col-span-3">
-                    <div className="text-xs uppercase text-slate-700 dark:text-slate-400">Dirección</div>
-                    <div className="break-words font-medium">{suscriptor.direccion ?? "-"}</div>
+                  <div className="min-w-[160px] flex-1 basis-[220px]">
+                    <div className="text-xs font-semibold uppercase text-slate-700 dark:text-slate-300">Dirección</div>
+                    <div className="break-words">{suscriptor.direccion ?? "-"}</div>
                   </div>
                   {suscriptor.direccionComercial && (
-                    <div className="col-span-2 min-w-0 sm:col-span-3">
-                      <div className="text-xs uppercase text-slate-700 dark:text-slate-400">Dirección comercial</div>
-                      <div className="break-words font-medium">{suscriptor.direccionComercial}</div>
+                    <div className="min-w-[160px] flex-1 basis-[220px]">
+                      <div className="text-xs font-semibold uppercase text-slate-700 dark:text-slate-300">Dirección comercial</div>
+                      <div className="break-words">{suscriptor.direccionComercial}</div>
                     </div>
                   )}
                 </div>
               </div>
-            )}
+              )}
+            </div>
 
             <div>
               <div className="flex items-center justify-between">
@@ -1079,9 +1130,26 @@ export default function SuscriptorDetailModal({
                   </p>
                   <p className="text-amber-700 dark:text-amber-400">
                     Este suscriptor comparte el medidor de{" "}
-                    <strong>{suscriptor.cotitularDe.medidor.suscriptor.nombre}</strong> junto con{" "}
-                    {suscriptor.cotitularDe.medidor.cotitulares.length} cotitular(es) más. El consumo mostrado abajo
-                    ya está dividido en {1 + suscriptor.cotitularDe.medidor.cotitulares.length} partes iguales.
+                    <button
+                      type="button"
+                      onClick={() => setVerPrincipalId(suscriptor.cotitularDe!.medidor.suscriptor.id)}
+                      className="font-bold underline decoration-dotted hover:text-amber-900 dark:hover:text-amber-200"
+                    >
+                      {suscriptor.cotitularDe.medidor.suscriptor.nombre} (NUID{" "}
+                      {suscriptor.cotitularDe.medidor.suscriptor.codigo})
+                    </button>
+                    {suscriptor.cotitularDe.medidor.cotitulares.length > 0 && (
+                      <>
+                        {" "}
+                        junto con{" "}
+                        {suscriptor.cotitularDe.medidor.cotitulares
+                          .filter((c) => c.suscriptorId !== suscriptor.id)
+                          .map((c) => `${c.suscriptor.nombre} (NUID ${c.suscriptor.codigo})`)
+                          .join(", ")}
+                      </>
+                    )}
+                    . El consumo mostrado abajo ya está dividido en{" "}
+                    {1 + suscriptor.cotitularDe.medidor.cotitulares.length} partes iguales.
                   </p>
                 </div>
               </div>
@@ -1168,41 +1236,44 @@ export default function SuscriptorDetailModal({
                         {m.activo ? "Instalado actualmente" : "Reemplazado"}
                       </span>
                     </div>
-                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                      <div className="min-w-0">
-                        <div className="text-xs text-slate-700 dark:text-slate-400">Tipo</div>
+                    {/* flex-wrap: cada campo pesa lo que necesita su contenido (mismo criterio
+                        que la sección de arriba) — un valor tan corto como el diámetro no deja
+                        un hueco de columna vacío. */}
+                    <div className="flex flex-wrap gap-x-6 gap-y-3 text-sm">
+                      <div className="min-w-[80px]">
+                        <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">Tipo</div>
                         <div className="break-words">{tipoLabel(m.tipo)}</div>
                       </div>
-                      <div className="min-w-0">
-                        <div className="text-xs text-slate-700 dark:text-slate-400">Marca</div>
+                      <div className="min-w-[90px]">
+                        <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">Marca</div>
                         <div className="break-words">{m.marcaCat?.nombre ?? "-"}</div>
                       </div>
-                      <div className="col-span-2 min-w-0 sm:col-span-2">
-                        <div className="text-xs text-slate-700 dark:text-slate-400">Modelo</div>
+                      <div className="min-w-[130px]">
+                        <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">Modelo</div>
                         <div className="break-words">{m.modeloCat?.nombre ?? "-"}</div>
                       </div>
-                      <div className="min-w-0">
-                        <div className="text-xs text-slate-700 dark:text-slate-400">Diámetro</div>
+                      <div className="min-w-[70px]">
+                        <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">Diámetro</div>
                         <div className="break-words">{m.diametroCat?.valor ?? "-"}</div>
                       </div>
-                      <div className="min-w-0">
-                        <div className="text-xs text-slate-700 dark:text-slate-400">Serial</div>
+                      <div className="min-w-[100px]">
+                        <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">Serial</div>
                         <div className="break-words">{m.serial ?? "-"}</div>
                       </div>
-                      <div className="min-w-0">
-                        <div className="text-xs text-slate-700 dark:text-slate-400">Fecha de instalación</div>
+                      <div className="min-w-[130px]">
+                        <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">Fecha de instalación</div>
                         <div className="break-words">{fmtFecha(m.fechaInstalacion)}</div>
                       </div>
-                      <div className="min-w-0">
-                        <div className="text-xs text-slate-700 dark:text-slate-400">Fecha de fabricación</div>
+                      <div className="min-w-[130px]">
+                        <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">Fecha de fabricación</div>
                         <div className="break-words">{fmtFecha(m.fechaFabricacion)}</div>
                       </div>
-                      <div className="min-w-0">
-                        <div className="text-xs text-slate-700 dark:text-slate-400">Fecha de calibración</div>
+                      <div className="min-w-[130px]">
+                        <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">Fecha de calibración</div>
                         <div className="break-words">{fmtFecha(m.fechaCertificacion)}</div>
                       </div>
-                      <div className="min-w-0">
-                        <div className="text-xs text-slate-700 dark:text-slate-400">N° certificado</div>
+                      <div className="min-w-[100px]">
+                        <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">N° certificado</div>
                         <div className="break-words">{m.certificado ?? "-"}</div>
                       </div>
                     </div>
@@ -1359,7 +1430,7 @@ export default function SuscriptorDetailModal({
                   Historial de consumo mensual (m³){suscriptor.cotitularDe && " — ya dividido"}
                 </h3>
                 {historicoFiltrado.some((h) => !h.sinLectura) && (
-                  <span className="text-xs text-slate-700 dark:text-slate-400">
+                  <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
                     Promedio:{" "}
                     <strong className="text-slate-700 dark:text-slate-200">
                       {(
@@ -1506,6 +1577,10 @@ export default function SuscriptorDetailModal({
           nIntegrantes={lecturaDetalle.nIntegrantes ?? null}
           onClose={() => setLecturaDetalle(null)}
         />
+      )}
+
+      {verPrincipalId && (
+        <SuscriptorDetailModal suscriptorId={verPrincipalId} onClose={() => setVerPrincipalId(null)} />
       )}
     </div>
   );

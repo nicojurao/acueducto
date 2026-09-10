@@ -37,3 +37,9 @@ export function fechaLegibleColombia(fecha: Date = new Date()): string {
   const p = partes(fecha);
   return `${p.day}/${p.month}/${p.year}`;
 }
+
+// "14:32" — para reportes que separan fecha y hora en columnas distintas (ej. trazabilidad PQR).
+export function horaLegibleColombia(fecha: Date = new Date()): string {
+  const p = partes(fecha);
+  return `${p.hour}:${p.minute}`;
+}

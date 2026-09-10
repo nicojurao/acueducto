@@ -1,4 +1,4 @@
-import { request, descargarArchivo } from "../core.js";
+import { request, requestMultipart, descargarArchivo } from "../core.js";
 
 export interface TarifaEstratoItem {
   id: number;
@@ -128,6 +128,58 @@ export interface PeriodoFacturacion {
   totalFacturado: number;
 }
 
+export interface PasoVerificacionPeriodo {
+  paso: string;
+  etiqueta: string;
+  ok: boolean;
+  detalle: string;
+}
+
+// ===== Plantillas de factura (editor visual de sobreimpresión sobre papel pre-impreso) =====
+
+export interface CampoDisponible {
+  clave: string;
+  etiqueta: string;
+  categoria: string;
+}
+
+export interface MarcadorPlantilla {
+  id: number;
+  plantillaId: number;
+  campo: string;
+  x: number;
+  y: number;
+  fontSize: number;
+  align: "left" | "center" | "right";
+  bold: boolean;
+  anchoCaja: number | null;
+}
+
+export interface MarcadorPlantillaInput {
+  campo: string;
+  x: number;
+  y: number;
+  fontSize?: number;
+  align?: "left" | "center" | "right";
+  bold?: boolean;
+  anchoCaja?: number | null;
+}
+
+export interface PlantillaFacturaResumen {
+  id: number;
+  nombre: string;
+  imagenGuiaUrl: string | null;
+  anchoPt: number;
+  altoPt: number;
+  createdAt: string;
+  updatedAt: string;
+  marcadores: number;
+}
+
+export interface PlantillaFactura extends Omit<PlantillaFacturaResumen, "marcadores"> {
+  marcadores: MarcadorPlantilla[];
+}
+
 export const facturacionApi = {
   periodos: {
     list: () => request<PeriodoFacturacion[]>("/api/facturacion/periodos"),
@@ -137,6 +189,8 @@ export const facturacionApi = {
       ),
     cerrar: (periodo: string) => request<PeriodoFacturacion>(`/api/facturacion/periodos/${periodo}/cerrar`, { method: "POST" }),
     reabrir: (periodo: string) => request<PeriodoFacturacion>(`/api/facturacion/periodos/${periodo}/reabrir`, { method: "POST" }),
+    verificacion: (periodo: string) =>
+      request<PasoVerificacionPeriodo[]>(`/api/facturacion/periodos/${periodo}/verificacion`),
   },
   tarifas: {
     list: () => request<Tarifa[]>("/api/facturacion/tarifas"),
@@ -186,19 +240,16 @@ export const facturacionApi = {
     get: (id: number) => request<FacturaDetalle>(`/api/facturacion/facturas/${id}`),
     anular: (id: number, motivo?: string) =>
       request<FacturaResumen>(`/api/facturacion/facturas/${id}/anular`, { method: "PUT", body: JSON.stringify({ motivo }) }),
-    agregarConcepto: (id: number, descripcion: string, valor: number) =>
-      request<FacturaResumen>(`/api/facturacion/facturas/${id}/conceptos`, {
-        method: "POST",
-        body: JSON.stringify({ descripcion, valor }),
-      }),
-    quitarConcepto: (id: number, conceptoId: number) =>
-      request<void>(`/api/facturacion/facturas/${id}/conceptos/${conceptoId}`, { method: "DELETE" }),
-    verPdf: (id: number, numero: number) => descargarArchivo(`/api/facturacion/facturas/${id}/pdf`, `factura-${numero}.pdf`, true),
+    verPdf: (id: number, numero: number, plantillaId?: number) => {
+      const qs = plantillaId ? `?plantillaId=${plantillaId}` : "";
+      return descargarArchivo(`/api/facturacion/facturas/${id}/pdf${qs}`, `factura-${numero}.pdf`, true);
+    },
   },
-  pdfLote: (periodo: string, filtros?: { barrioId?: number; ruta?: string }) => {
+  pdfLote: (periodo: string, filtros?: { barrioId?: number; ruta?: string; plantillaId?: number }) => {
     const qs = new URLSearchParams({ periodo });
     if (filtros?.barrioId) qs.set("barrioId", String(filtros.barrioId));
     if (filtros?.ruta) qs.set("ruta", filtros.ruta);
+    if (filtros?.plantillaId) qs.set("plantillaId", String(filtros.plantillaId));
     return descargarArchivo(`/api/facturacion/pdf-lote?${qs}`, `facturas_${periodo}.pdf`);
   },
   pagos: {
@@ -225,5 +276,27 @@ export const facturacionApi = {
       if (q) qs.set("q", q);
       return request<{ data: CarteraSuscriptor[]; total: number; page: number; limit: number }>(`/api/facturacion/cartera?${qs}`);
     },
+  },
+  plantillas: {
+    camposDisponibles: () => request<CampoDisponible[]>("/api/facturacion/plantillas/campos"),
+    list: () => request<PlantillaFacturaResumen[]>("/api/facturacion/plantillas"),
+    get: (id: number) => request<PlantillaFactura>(`/api/facturacion/plantillas/${id}`),
+    create: (nombre: string) =>
+      request<PlantillaFactura>("/api/facturacion/plantillas", { method: "POST", body: JSON.stringify({ nombre }) }),
+    update: (id: number, data: { nombre: string; anchoPt: number; altoPt: number }) =>
+      request<PlantillaFactura>(`/api/facturacion/plantillas/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+    remove: (id: number) => request<void>(`/api/facturacion/plantillas/${id}`, { method: "DELETE" }),
+    guardarMarcadores: (id: number, marcadores: MarcadorPlantillaInput[]) =>
+      request<PlantillaFactura>(`/api/facturacion/plantillas/${id}/marcadores`, {
+        method: "PUT",
+        body: JSON.stringify({ marcadores }),
+      }),
+    subirImagenGuia: (id: number, imagen: File) => {
+      const fd = new FormData();
+      fd.append("imagen", imagen);
+      return requestMultipart<PlantillaFactura>(`/api/facturacion/plantillas/${id}/imagen-guia`, fd, "POST");
+    },
+    quitarImagenGuia: (id: number) =>
+      request<PlantillaFactura>(`/api/facturacion/plantillas/${id}/imagen-guia`, { method: "DELETE" }),
   },
 };

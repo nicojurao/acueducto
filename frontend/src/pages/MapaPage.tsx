@@ -1,16 +1,19 @@
 import { useEffect, useState } from "react";
 import { Map } from "lucide-react";
-import { api, Suscriptor } from "../api/client";
+import { api } from "../api/client";
 import MapaPredios, { ModoCalor, PuntoConsumo } from "../components/MapaPredios";
 import SuscriptorDetailModal from "../components/SuscriptorDetailModal";
+import { leerSnapshot } from "../lib/offlineSnapshot";
 
 function periodoActualDefault(): string {
   const hoy = new Date();
   return `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, "0")}`;
 }
 
+type SuscriptorMapa = { id: number; codigo: string; nombre: string; latitud: number | null; longitud: number | null };
+
 export default function MapaPage() {
-  const [suscriptores, setSuscriptores] = useState<Suscriptor[]>([]);
+  const [suscriptores, setSuscriptores] = useState<SuscriptorMapa[]>([]);
   const [cargando, setCargando] = useState(true);
   const [detalleId, setDetalleId] = useState<number | null>(null);
   const [modoCalor, setModoCalor] = useState<ModoCalor>("ninguno");
@@ -18,7 +21,22 @@ export default function MapaPage() {
   const [puntosConsumo, setPuntosConsumo] = useState<PuntoConsumo[]>([]);
 
   async function cargar() {
-    setSuscriptores(await api.suscriptores.list());
+    try {
+      setSuscriptores(await api.suscriptores.mapa());
+    } catch {
+      // Sin conexión: se reconstruye desde el snapshot del "Modo de salida" (ya trae latitud/
+      // longitud de cada suscriptor).
+      const snapshot = await leerSnapshot();
+      setSuscriptores(
+        snapshot?.suscriptores.map((s) => ({
+          id: s.id,
+          codigo: s.codigo,
+          nombre: s.nombre,
+          latitud: s.latitud ?? null,
+          longitud: s.longitud ?? null,
+        })) ?? []
+      );
+    }
     setCargando(false);
   }
 

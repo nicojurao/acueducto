@@ -86,6 +86,7 @@ lecturasRouter.get("/", async (req, res) => {
 
   async function armarFila(medidor: {
     id: number;
+    serial: string | null;
     suscriptor: unknown;
     lecturaInicial: unknown;
     lecturas: unknown[];
@@ -97,6 +98,7 @@ lecturasRouter.get("/", async (req, res) => {
     });
     return {
       medidorId: medidor.id,
+      serial: medidor.serial ?? "",
       suscriptor: medidor.suscriptor,
       lecturaAnteriorValor: lecturaAnterior?.valorLectura ?? medidor.lecturaInicial,
       lectura: (medidor.lecturas as any[])[0] ?? null,

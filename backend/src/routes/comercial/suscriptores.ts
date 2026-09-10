@@ -91,44 +91,71 @@ suscriptoresRouter.get("/", async (req, res) => {
   }
 
   const where = filtros.length > 0 ? { AND: filtros } : undefined;
-  const include = { medidores: true, barrioCat: true, estratoCat: true };
+  // Ni el listado paginado ni MapaPage.tsx (el otro consumidor de este endpoint) usan
+  // suscriptor.medidores — traerlos acá era una carga completa e innecesaria del catálogo de
+  // medidores (con TODOS sus campos) multiplicada por cada uno de los 4000+ suscriptores, en
+  // cada página que se pedía. La ficha de un suscriptor puntual (GET /:id) sí los trae.
+  const include = { barrioCat: true, estratoCat: true };
 
   if (page) {
     const pageNum = Math.max(1, Number(page) || 1);
     const limitNum = Math.max(1, Number(limit) || 10);
     // Orden por clic en el encabezado de la tabla. "codigo" (NUID, el default) compara numérico
     // cuando ambos lados son números; el resto alfabético. Clave desconocida = cae al default.
-    const dir = String(req.query.dir) === "desc" ? -1 : 1;
+    const dirNum = String(req.query.dir) === "desc" ? -1 : 1;
+    const dirStr = dirNum === -1 ? "desc" : "asc";
     const sortKey = String(req.query.sort ?? "codigo");
 
-    const todos = await prisma.suscriptor.findMany({ where, include });
+    // "codigo" y "estrato" (NUID y código de estrato: "1".."6","11","12"...) son texto que hay
+    // que comparar NUMÉRICO, no alfabético ("10" < "2" alfabéticamente) — eso no lo puede hacer
+    // un ORDER BY de Postgres sin un cast por fila, así que para esos dos casos se resuelve el
+    // orden en memoria pero SOLO con un select liviano (id + la columna a ordenar, sin el resto
+    // de columnas ni relaciones): traer los 4000+ suscriptores COMPLETOS (con barrio/estrato) en
+    // cada página pedida —lo que hacía esta ruta antes— tardaba ~250ms por el volumen de datos
+    // hidratados aunque solo se fueran a mostrar 10; el select liviano tarda ~20-50ms, y de ahí
+    // solo se pide el detalle completo de los 10 ids de la página actual.
+    if (sortKey === "codigo" || sortKey === "estrato") {
+      const numerico = (a: string, b: string) => {
+        const na = Number(a);
+        const nb = Number(b);
+        if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
+        return a.localeCompare(b);
+      };
+      const liviano =
+        sortKey === "codigo"
+          ? await prisma.suscriptor.findMany({ where, select: { id: true, codigo: true } })
+          : await prisma.suscriptor.findMany({ where, select: { id: true, estratoCat: { select: { codigo: true } } } });
+      const claveLiviana = (s: (typeof liviano)[number]) =>
+        sortKey === "codigo" ? (s as { codigo: string }).codigo : (s as { estratoCat: { codigo: string } | null }).estratoCat?.codigo ?? "";
+      liviano.sort((a, b) => dirNum * numerico(claveLiviana(a), claveLiviana(b)));
 
-    type Fila = (typeof todos)[number];
-    const numerico = (a: string, b: string) => {
-      const na = Number(a);
-      const nb = Number(b);
-      if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
-      return a.localeCompare(b);
-    };
-    const CLAVES: Record<string, (s: Fila) => string> = {
-      codigo: (s) => s.codigo,
-      nombre: (s) => s.nombre,
-      ruta: (s) => s.ruta ?? "",
-      barrio: (s) => s.barrioCat?.nombre ?? "",
-      estrato: (s) => s.estratoCat?.codigo ?? "",
-      estadoPredio: (s) => s.estadoPredio,
-      estadoFacturacion: (s) => s.estadoFacturacion,
-    };
-    const clave = CLAVES[sortKey] ?? CLAVES.codigo;
-    todos.sort((a, b) => {
-      const va = clave(a);
-      const vb = clave(b);
-      const cmp = sortKey === "codigo" || sortKey === "estrato" ? numerico(va, vb) : va.localeCompare(vb);
-      return dir * cmp;
-    });
+      const total = liviano.length;
+      const idsPagina = liviano.slice((pageNum - 1) * limitNum, pageNum * limitNum).map((s) => s.id);
+      const filas = await prisma.suscriptor.findMany({ where: { id: { in: idsPagina } }, include });
+      const filaPorId = new Map(filas.map((f) => [f.id, f]));
+      const data = idsPagina.map((id) => filaPorId.get(id)!);
+      return res.json({ data, total, page: pageNum, limit: limitNum });
+    }
 
-    const total = todos.length;
-    const data = todos.slice((pageNum - 1) * limitNum, pageNum * limitNum);
+    // El resto de claves son columnas/relaciones de texto simple: orden y paginación reales en
+    // la base de datos, sin cargar nada de más.
+    const ORDER_BY: Record<string, object> = {
+      nombre: { nombre: dirStr },
+      ruta: { ruta: dirStr },
+      barrio: { barrioCat: { nombre: dirStr } },
+      estadoPredio: { estadoPredio: dirStr },
+      estadoFacturacion: { estadoFacturacion: dirStr },
+    };
+    const [total, data] = await Promise.all([
+      prisma.suscriptor.count({ where }),
+      prisma.suscriptor.findMany({
+        where,
+        include,
+        orderBy: ORDER_BY[sortKey] ?? { codigo: dirStr },
+        skip: (pageNum - 1) * limitNum,
+        take: limitNum,
+      }),
+    ]);
     return res.json({ data, total, page: pageNum, limit: limitNum });
   }
 
@@ -145,6 +172,18 @@ suscriptoresRouter.get("/", async (req, res) => {
 suscriptoresRouter.get("/barrios", async (_req, res) => {
   const barrios = await prisma.barrio.findMany({ orderBy: { nombre: "asc" } });
   res.json(barrios.map((b) => ({ id: b.id, nombre: b.nombre })));
+});
+
+// Puntos para el Mapa de predios: SOLO lo que se pinta en el marcador/popup (id, NUID, nombre,
+// coordenadas) — nada de barrio/estrato/relaciones. El listado completo (GET /) hidrata cada
+// suscriptor con todas sus columnas y encima incluye barrioCat/estratoCat, lo que para las 4000+
+// filas de esta app tarda ~300-400ms aunque el mapa solo necesite 5 campos; este select liviano
+// tarda ~20-40ms (mismo hallazgo que llevó a optimizar la paginación del listado).
+suscriptoresRouter.get("/mapa", async (_req, res) => {
+  const suscriptores = await prisma.suscriptor.findMany({
+    select: { id: true, codigo: true, nombre: true, latitud: true, longitud: true },
+  });
+  res.json(suscriptores);
 });
 
 // Descarga una plantilla .xlsx con los suscriptores ya cargados, en el mismo formato
@@ -164,8 +203,16 @@ suscriptoresRouter.get("/export", soloAvanzado, async (req, res) => {
 
   const suscriptores = await prisma.suscriptor.findMany({
     where: idsFiltro ? { id: { in: idsFiltro } } : undefined,
-    orderBy: { codigo: "asc" },
     include: { barrioCat: true, estratoCat: true },
+  });
+
+  // El NUID es texto en la BD; orderBy de Prisma compararía "10" < "2" como strings.
+  // Se ordena numéricamente en memoria (igual que el sort de la tabla de la UI).
+  suscriptores.sort((a, b) => {
+    const na = Number(a.codigo);
+    const nb = Number(b.codigo);
+    if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
+    return a.codigo.localeCompare(b.codigo);
   });
 
   const filas = suscriptores.map((s) => ({
@@ -178,6 +225,8 @@ suscriptoresRouter.get("/export", soloAvanzado, async (req, res) => {
     ruta: s.ruta ?? "",
     estrato: s.estratoCat?.etiqueta ?? "",
     estadoPredio: s.estadoPredio === "inactivo" ? "Inactivo" : "Activo",
+    npn20: s.numeroPredialNacional20 ?? "",
+    npn30: s.numeroPredialNacional ?? "",
   }));
 
   const buffer = await crearPlantillaImportExport(
@@ -192,6 +241,8 @@ suscriptoresRouter.get("/export", soloAvanzado, async (req, res) => {
       { titulo: "RUTA", clave: "ruta", ancho: 14 },
       { titulo: "ESTRATO", clave: "estrato", ancho: 14 },
       { titulo: "ESTADO PREDIO", clave: "estadoPredio", ancho: 14 },
+      { titulo: "NPN 20 DIGITOS", clave: "npn20", ancho: 22 },
+      { titulo: "NPN 30 DIGITOS", clave: "npn30", ancho: 34 },
     ],
     filas
   );
@@ -203,7 +254,7 @@ suscriptoresRouter.get("/:id", async (req, res) => {
     where: { id: Number(req.params.id) },
     include: {
       medidores: { include: { cotitulares: { include: { suscriptor: true } }, marcaCat: true, modeloCat: true, diametroCat: true, lote: true } },
-      cotitularDe: { include: { medidor: { include: { suscriptor: true, cotitulares: true } } } },
+      cotitularDe: { include: { medidor: { include: { suscriptor: true, cotitulares: { include: { suscriptor: true } } } } } },
       barrioCat: true,
       estratoCat: true,
     },
@@ -301,16 +352,25 @@ suscriptoresRouter.put("/:id", soloAvanzado, async (req, res) => {
     tieneAlcantarillado,
     consumoPredeterminadoM3,
     consumoPredeterminadoAlcantarilladoM3,
-    numeroCuentaContrato,
-    zonaIgac,
-    sectorIgac,
-    manzanaVeredaIgac,
-    numeroPredioIgac,
     condicionPropiedadPredioIgac,
+    numeroPredialNacional20,
+    numeroPredialNacional,
   } = req.body;
 
   if (estadoPredio !== undefined && !["activo", "inactivo"].includes(estadoPredio)) {
     return res.status(400).json({ error: "estadoPredio inválido" });
+  }
+
+  // El Número Predial Nacional del IGAC es un código de exactamente 30 dígitos desde 2014
+  // (reemplazó al código catastral anterior, de longitud variable por municipio). Se valida acá
+  // en vez de en la BD porque el histórico importado puede traer predios sin este dato todavía.
+  if (numeroPredialNacional && !/^\d{30}$/.test(String(numeroPredialNacional).trim())) {
+    return res.status(400).json({ error: "El Número Predial Nacional debe tener exactamente 30 dígitos" });
+  }
+  // Código catastral clásico (pre-2014), de 20 dígitos, vigente en paralelo al NPN de 30 en
+  // registros históricos — ver el comentario del campo en schema.prisma.
+  if (numeroPredialNacional20 && !/^\d{20}$/.test(String(numeroPredialNacional20).trim())) {
+    return res.status(400).json({ error: "El NPN de 20 dígitos debe tener exactamente 20 dígitos" });
   }
 
   // El consumo predeterminado (acueducto o alcantarillado) solo tiene sentido para un
@@ -386,12 +446,9 @@ suscriptoresRouter.put("/:id", soloAvanzado, async (req, res) => {
       consumoPredeterminadoM3: consumoPredeterminadoM3 === undefined ? undefined : Number(consumoPredeterminadoM3),
       consumoPredeterminadoAlcantarilladoM3:
         consumoPredeterminadoAlcantarilladoM3 === undefined ? undefined : Number(consumoPredeterminadoAlcantarilladoM3),
-      numeroCuentaContrato,
-      zonaIgac,
-      sectorIgac,
-      manzanaVeredaIgac,
-      numeroPredioIgac,
       condicionPropiedadPredioIgac,
+      numeroPredialNacional20: numeroPredialNacional20 === undefined ? undefined : String(numeroPredialNacional20).trim() || null,
+      numeroPredialNacional: numeroPredialNacional === undefined ? undefined : String(numeroPredialNacional).trim() || null,
     },
     include: { barrioCat: true, estratoCat: true },
   });
@@ -525,6 +582,8 @@ suscriptoresRouter.post("/import", soloAvanzado, upload.single("archivo"), async
   const iRuta = colIndexContains(headers, "RUTA");
   const iEstadoPredio = colIndexContains(headers, "ESTADO", "PREDIO");
   const iEstrato = colIndexContains(headers, "ESTRATO");
+  const iNpn20 = colIndexContains(headers, "NPN", "20");
+  const iNpn30 = colIndexContains(headers, "NPN", "30");
 
   if (iCodigo < 0) return res.status(400).json({ error: "El archivo no tiene columna de NUID" });
 
@@ -565,6 +624,19 @@ suscriptoresRouter.post("/import", soloAvanzado, upload.single("archivo"), async
   });
   const medidorActivoPorSuscriptor = new Map(medidoresActivos.map((m) => [m.suscriptorId, m._count._all]));
 
+  // Cada fila con identificación (cédula/NIT) se asocia a un Tercero: si ya existe uno con ese
+  // numeroDocumento se enlaza (así dos NUID de la misma persona —varios predios— quedan bajo el
+  // mismo Tercero), si no existe se crea uno nuevo. El mapa arranca con lo que ya hay en la BD y
+  // se completa sobre la marcha con lo creado en ESTA importación, para que dos filas seguidas
+  // con la misma cédula compartan el Tercero recién creado en vez de duplicarlo.
+  const identificaciones = [
+    ...new Set(filas.map((row) => valor(row, iIdentificacion)?.trim()).filter((v): v is string => !!v)),
+  ];
+  const tercerosExistentes = identificaciones.length
+    ? await prisma.tercero.findMany({ where: { numeroDocumento: { in: identificaciones } } })
+    : [];
+  const terceroPorDocumento = new Map(tercerosExistentes.map((t) => [t.numeroDocumento!, t.id]));
+
   const observacionesPorFila: string[] = [];
 
   for (const row of filas) {
@@ -584,11 +656,21 @@ suscriptoresRouter.post("/import", soloAvanzado, upload.single("archivo"), async
     const estratoArchivo = valor(row, iEstrato);
     const estadoPredioArchivo = valor(row, iEstadoPredio);
     const estadoPredio = normalizarEstadoPredio(estadoPredioArchivo);
+    const npn20Archivo = valor(row, iNpn20);
+    const npn30Archivo = valor(row, iNpn30);
 
     const observaciones: string[] = [];
     if (estadoPredioArchivo && !estadoPredio) {
       observaciones.push(`Estado predio "${estadoPredioArchivo}" no es válido (usa Activo/Inactivo o 1/0): no se cambió`);
     }
+    if (npn20Archivo && !/^\d{20}$/.test(npn20Archivo.trim())) {
+      observaciones.push(`NPN 20 dígitos "${npn20Archivo}" no tiene 20 dígitos: no se cambió`);
+    }
+    if (npn30Archivo && !/^\d{30}$/.test(npn30Archivo.trim())) {
+      observaciones.push(`NPN 30 dígitos "${npn30Archivo}" no tiene 30 dígitos: no se cambió`);
+    }
+    const numeroPredialNacional20 = npn20Archivo && /^\d{20}$/.test(npn20Archivo.trim()) ? npn20Archivo.trim() : undefined;
+    const numeroPredialNacional = npn30Archivo && /^\d{30}$/.test(npn30Archivo.trim()) ? npn30Archivo.trim() : undefined;
     let barrioId: number | undefined;
     if (barrioArchivo) {
       const barrioCat = barrioPorNorm.get(norm(barrioArchivo));
@@ -611,6 +693,26 @@ suscriptoresRouter.post("/import", soloAvanzado, upload.single("archivo"), async
 
     const existente = suscriptorPorCodigo.get(codigo);
 
+    // Resuelve el Tercero de esta fila por cédula/NIT, si trae una y todavía no tiene uno
+    // asignado — si el suscriptor ya existía y ya tenía un Tercero, ese vínculo NO se toca
+    // (podría ser un tercero distinto asignado a mano, ej. el predio quedó a nombre de otra
+    // persona). Reutiliza el mismo Tercero para dos filas seguidas con la misma cédula (varios
+    // predios de una misma persona) en vez de crear uno duplicado por cada NUID.
+    let terceroId: number | undefined;
+    if (identificacion && !existente?.terceroId) {
+      const yaAsignado = terceroPorDocumento.get(identificacion);
+      if (yaAsignado) {
+        terceroId = yaAsignado;
+      } else {
+        const nuevoTercero = await prisma.tercero.create({
+          data: { numeroDocumento: identificacion, nombre: nombre ?? existente?.nombre ?? `Suscriptor ${codigo}` },
+        });
+        terceroPorDocumento.set(identificacion, nuevoTercero.id);
+        terceroId = nuevoTercero.id;
+        observaciones.push(`Tercero nuevo creado (cédula/NIT ${identificacion})`);
+      }
+    }
+
     if (existente) {
       // Un predio inactivo no puede tener medidor: si la fila lo marca inactivo pero el
       // suscriptor ya tiene uno asignado, se ignora ese cambio puntual (el resto de la fila
@@ -632,6 +734,9 @@ suscriptoresRouter.post("/import", soloAvanzado, upload.single("archivo"), async
           ruta: ruta ?? undefined,
           estratoId: estratoId ?? undefined,
           estadoPredio: medidorActivo > 0 ? undefined : estadoPredio,
+          terceroId,
+          numeroPredialNacional20,
+          numeroPredialNacional,
         },
       });
       actualizados++;
@@ -653,6 +758,9 @@ suscriptoresRouter.post("/import", soloAvanzado, upload.single("archivo"), async
           ruta,
           estratoId: estratoId ?? null,
           estadoPredio: estadoPredio ?? "activo",
+          terceroId,
+          numeroPredialNacional20,
+          numeroPredialNacional,
         },
       });
       suscriptorPorCodigo.set(codigo, creado);

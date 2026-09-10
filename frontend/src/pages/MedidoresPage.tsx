@@ -34,6 +34,7 @@ import SuscriptorDetailModal from "../components/SuscriptorDetailModal";
 import ImportExcelModal from "../components/ImportExcelModal";
 import ListCard from "../components/ListCard";
 import { useConfirm, useErrorHandler } from "../components/ConfirmModal";
+import { useToast } from "../contexts/ToastContext";
 import { useEsMovil } from "../lib/useEsMovil";
 import { SkeletonTabla, SkeletonLista } from "../components/Skeleton";
 import { useCierreAnimado } from "../lib/useCierreAnimado";
@@ -43,6 +44,7 @@ import ThOrdenable, { Orden, alternarOrden } from "../components/ThOrdenable";
 import { inputClass } from "../lib/ui";
 import { fmtFecha } from "../lib/fecha";
 import EmptyState from "../components/EmptyState";
+import { leerSnapshot, listarMedidoresOffline } from "../lib/offlineSnapshot";
 
 const TIPO_LABELS: Record<string, string> = { volumetrico: "Volumétrico", velocidad: "Velocidad" };
 function tipoLabel(tipo: string | null): string {
@@ -75,7 +77,7 @@ export default function MedidoresPage() {
             className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium ${
               tab === t.id
                 ? "border-brand-500 text-brand-600"
-                : "border-transparent text-slate-700 hover:text-slate-700 dark:hover:text-slate-300"
+                : "border-transparent text-slate-700 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
             }`}
           >
             {t.label}
@@ -95,6 +97,13 @@ function InventarioTab() {
   const [searchParams] = useSearchParams();
   const [modalAgregarAbierto, setModalAgregarAbierto] = useState(false);
   const { saliendo: saliendoAgregar, cerrar: cerrarAgregar } = useCierreAnimado(() => setModalAgregarAbierto(false));
+  // Paso 1 pide solo el serial y lo valida contra el backend antes de dejar completar el resto —
+  // así no se rellenan los otros 7 campos para enterarse al final de que el serial ya existía.
+  const [pasoAgregar, setPasoAgregar] = useState<"serial" | "resto">("serial");
+  const [verificandoSerial, setVerificandoSerial] = useState(false);
+  const [serialError, setSerialError] = useState<string | null>(null);
+  const [creandoMedidor, setCreandoMedidor] = useState(false);
+  const { mostrarError } = useToast();
   const [importAbierto, setImportAbierto] = useState(false);
   const [medidores, setMedidores] = useState<Medidor[]>([]);
   const [total, setTotal] = useState(0);
@@ -121,13 +130,16 @@ function InventarioTab() {
   const [filtrosAbiertos, setFiltrosAbiertos] = useState(false);
   const [pagina, setPagina] = useState(1);
   const { contenedorRef, filas: filasAuto } = useFilasAutoajustadas(esMovil ? 132 : 44, { minimo: esMovil ? 3 : 6 });
-  const [porPagina, setPorPagina] = useState(() => (esMovil ? 5 : 10));
-  const [porPaginaManual, setPorPaginaManual] = useState(false);
-  useEffect(() => {
-    if (!porPaginaManual) setPorPagina(filasAuto);
-  }, [filasAuto, porPaginaManual]);
+  // Derivado en vez de sincronizado con un efecto aparte: ver el comentario en SuscriptoresPage
+  // (mismo patrón) — evita que el fetch inicial se dispare dos veces (una con un default fijo,
+  // otra cuando el efecto de sincronización alcanza a corregirlo al valor real).
+  const [porPaginaManual, setPorPaginaManual] = useState<number | null>(null);
+  const porPagina = porPaginaManual ?? filasAuto;
   const [orden, setOrden] = useState<Orden>({ campo: "serial", dir: "asc" });
   const [cargando, setCargando] = useState(true);
+  // Cuándo se generó el snapshot que se está mostrando — solo tiene valor si el fetch falló y se
+  // usó el "Modo de salida" (IndexedDB) como respaldo, ver cargar().
+  const [datosDesdeSnapshot, setDatosDesdeSnapshot] = useState<string | null>(null);
   const { error, run } = useErrorHandler();
   const { pedirConfirmacion, modal } = useConfirm();
   const [seleccionados, setSeleccionados] = useState<Set<number>>(new Set());
@@ -156,6 +168,7 @@ function InventarioTab() {
     fechaFabricacion: "",
     fechaCertificacion: "",
     certificado: "",
+    lecturaInicial: "",
   });
   const [nuevaActaCalibracion, setNuevaActaCalibracion] = useState<File | null>(null);
 
@@ -173,32 +186,57 @@ function InventarioTab() {
   async function cargar() {
     const idPeticion = ++peticionIdRef.current;
     setCargando(true);
-    const [resultado, ma, mo, lo, di] = await Promise.all([
-      api.medidores.listPaginado(pagina, porPagina, {
-        q: filtroDebounced,
-        estado: filtroEstado,
-        marca: filtroMarca,
-        condicion: filtroCondicion,
-        modeloId: filtroModelo ? Number(filtroModelo) : undefined,
-        diametroId: filtroDiametro ? Number(filtroDiametro) : undefined,
-        tipo: filtroTipo,
-        sort: orden.campo,
-        dir: orden.dir,
-      }),
-      api.marcas.list(),
-      api.modelos.list(),
-      api.lotes.list(),
-      api.diametros.list(),
-    ]);
-    if (idPeticion !== peticionIdRef.current) return;
-    setMedidores(resultado.data);
-    setTotal(resultado.total);
-    setMarcas(ma);
-    setModelos(mo);
-    setLotes(lo);
-    setDiametros(di);
-    setSeleccionados(new Set());
-    setCargando(false);
+    const filtros = {
+      q: filtroDebounced,
+      estado: filtroEstado,
+      marca: filtroMarca,
+      condicion: filtroCondicion,
+      modeloId: filtroModelo ? Number(filtroModelo) : undefined,
+      diametroId: filtroDiametro ? Number(filtroDiametro) : undefined,
+      tipo: filtroTipo,
+      sort: orden.campo,
+      dir: orden.dir,
+    };
+    try {
+      const [resultado, ma, mo, lo, di] = await Promise.all([
+        api.medidores.listPaginado(pagina, porPagina, filtros),
+        api.marcas.list(),
+        api.modelos.list(),
+        api.lotes.list(),
+        api.diametros.list(),
+      ]);
+      if (idPeticion !== peticionIdRef.current) return;
+      setMedidores(resultado.data);
+      setTotal(resultado.total);
+      setMarcas(ma);
+      setModelos(mo);
+      setLotes(lo);
+      setDiametros(di);
+      setSeleccionados(new Set());
+      setDatosDesdeSnapshot(null);
+      setCargando(false);
+    } catch {
+      // Sin conexión: si se activó "Modo de salida" antes de salir, se reconstruye TODO (listado
+      // + catálogos) desde el snapshot completo en IndexedDB en vez de dejar la tabla cargando
+      // para siempre.
+      const snapshot = await leerSnapshot();
+      if (idPeticion !== peticionIdRef.current) return;
+      if (snapshot) {
+        const resultado = listarMedidoresOffline(snapshot, { pagina, porPagina, ...filtros });
+        setMedidores(resultado.data);
+        setTotal(resultado.total);
+        setMarcas(snapshot.marcas);
+        setModelos(snapshot.modelos);
+        setLotes(snapshot.lotes);
+        setDiametros(snapshot.diametros);
+        setDatosDesdeSnapshot(snapshot.generadoEn);
+      } else {
+        setMedidores([]);
+        setTotal(0);
+      }
+      setSeleccionados(new Set());
+      setCargando(false);
+    }
   }
 
   useEffect(() => {
@@ -216,34 +254,74 @@ function InventarioTab() {
   );
   const diametrosDelModelo = modeloSeleccionado?.diametros ?? [];
 
+  async function verificarSerial(e: React.FormEvent) {
+    e.preventDefault();
+    const serial = nuevo.serial.trim();
+    if (!serial) return;
+    setVerificandoSerial(true);
+    setSerialError(null);
+    try {
+      const { disponible } = await api.medidores.serialDisponible(serial);
+      if (disponible) setPasoAgregar("resto");
+      else setSerialError(`Ya existe un medidor con el serial "${serial}".`);
+    } catch (err) {
+      mostrarError(err, "no se pudo verificar el serial");
+    } finally {
+      setVerificandoSerial(false);
+    }
+  }
+
   async function crearMedidor(e: React.FormEvent) {
     e.preventDefault();
-    if (!nuevo.serial || !nuevo.fechaFabricacion || !nuevo.fechaCertificacion) return;
-    const creado = await api.medidores.create({
-      serial: nuevo.serial,
-      marcaId: nuevo.marcaId ? Number(nuevo.marcaId) : undefined,
-      modeloId: nuevo.modeloId ? Number(nuevo.modeloId) : undefined,
-      diametroId: nuevo.diametroId ? Number(nuevo.diametroId) : undefined,
-      loteId: nuevo.loteId ? Number(nuevo.loteId) : undefined,
-      fechaFabricacion: nuevo.fechaFabricacion,
-      fechaCertificacion: nuevo.fechaCertificacion,
-      certificado: nuevo.certificado || undefined,
-    });
-    if (nuevaActaCalibracion) {
-      await api.medidores.subirActaCalibracion(creado.id, nuevaActaCalibracion);
+    if (
+      !nuevo.serial ||
+      !nuevo.marcaId ||
+      !nuevo.modeloId ||
+      !nuevo.diametroId ||
+      !nuevo.fechaFabricacion ||
+      !nuevo.fechaCertificacion ||
+      !nuevo.certificado ||
+      nuevo.lecturaInicial === ""
+    )
+      return;
+    setCreandoMedidor(true);
+    try {
+      const creado = await api.medidores.create({
+        serial: nuevo.serial,
+        marcaId: Number(nuevo.marcaId),
+        modeloId: Number(nuevo.modeloId),
+        diametroId: Number(nuevo.diametroId),
+        loteId: nuevo.loteId ? Number(nuevo.loteId) : undefined,
+        fechaFabricacion: nuevo.fechaFabricacion,
+        fechaCertificacion: nuevo.fechaCertificacion,
+        certificado: nuevo.certificado,
+        lecturaInicial: Number(nuevo.lecturaInicial),
+      });
+      if (nuevaActaCalibracion) {
+        await api.medidores.subirActaCalibracion(creado.id, nuevaActaCalibracion);
+      }
+      setNuevo({
+        serial: "",
+        marcaId: "",
+        modeloId: "",
+        diametroId: "",
+        loteId: "",
+        fechaFabricacion: "",
+        fechaCertificacion: "",
+        certificado: "",
+        lecturaInicial: "",
+      });
+      setNuevaActaCalibracion(null);
+      cerrarAgregar();
+      cargar();
+    } catch (err) {
+      // Si el serial pasó la verificación previa pero igual chocó al crear (dos personas
+      // agregando casi al mismo tiempo), se avisa y se manda de vuelta al paso del serial.
+      mostrarError(err, "no se pudo agregar el medidor");
+      setPasoAgregar("serial");
+    } finally {
+      setCreandoMedidor(false);
     }
-    setNuevo({
-      serial: "",
-      marcaId: "",
-      modeloId: "",
-      diametroId: "",
-      loteId: "",
-      fechaFabricacion: "",
-      fechaCertificacion: "",
-      certificado: "",
-    });
-    setNuevaActaCalibracion(null);
-    cargar();
   }
 
   useEffect(() => {
@@ -282,9 +360,26 @@ function InventarioTab() {
 
   return (
     <div>
+      {datosDesdeSnapshot && (
+        <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-400">
+          Sin conexión — mostrando datos del "Modo de salida" del{" "}
+          {new Date(datosDesdeSnapshot).toLocaleString("es-CO", {
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+          .
+        </div>
+      )}
       <div className="mb-3 flex flex-wrap items-center gap-2 sm:mb-4">
         <button
-          onClick={() => setModalAgregarAbierto(true)}
+          onClick={() => {
+            setPasoAgregar("serial");
+            setSerialError(null);
+            setModalAgregarAbierto(true);
+          }}
           className="flex items-center gap-1.5 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-500"
         >
           <Plus className="h-4 w-4" />
@@ -328,7 +423,7 @@ function InventarioTab() {
               <h3 className="text-base font-semibold text-slate-800 dark:text-slate-100">Agregar medidor al inventario</h3>
               <button
                 onClick={cerrarAgregar}
-                className="rounded-lg p-1 text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800"
+                className="rounded-lg p-1 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -336,27 +431,75 @@ function InventarioTab() {
             <p className="mb-3 text-xs text-slate-700 dark:text-slate-400">
               El medidor queda "en bodega". La asignación a un suscriptor se hace desde la ficha del suscriptor.
             </p>
-            <form
-              className="flex flex-col gap-3"
-              onSubmit={async (e) => {
-                await crearMedidor(e);
-                cerrarAgregar();
-              }}
-            >
+
+            {pasoAgregar === "serial" && (
+              <form className="flex flex-col gap-3" onSubmit={verificarSerial}>
+                <label className="flex flex-col gap-1 text-xs text-slate-600 dark:text-slate-300">
+                  Serial *
+                  <input
+                    autoFocus
+                    placeholder="Serial del medidor"
+                    value={nuevo.serial}
+                    onChange={(e) => {
+                      setNuevo({ ...nuevo, serial: e.target.value });
+                      setSerialError(null);
+                    }}
+                    className={inputClass}
+                    required
+                  />
+                </label>
+                {serialError && (
+                  <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-500/10 dark:text-red-400">
+                    {serialError}
+                  </p>
+                )}
+                <p className="text-xs text-slate-500 dark:text-slate-500">
+                  Primero se verifica que el serial no esté ya en uso, antes de pedir el resto de los datos.
+                </p>
+                <div className="mt-1 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      cerrarAgregar();
+                      setNuevaActaCalibracion(null);
+                    }}
+                    className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={verificandoSerial || !nuevo.serial.trim()}
+                    className="flex items-center justify-center gap-1.5 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-500 disabled:opacity-60"
+                  >
+                    {verificandoSerial ? "Verificando..." : "Continuar"}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {pasoAgregar === "resto" && (
+            <form className="flex flex-col gap-3" onSubmit={crearMedidor}>
+              <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm dark:bg-slate-800">
+                <span className="text-slate-700 dark:text-slate-300">
+                  Serial: <strong className="text-slate-900 dark:text-slate-100">{nuevo.serial}</strong>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setPasoAgregar("serial")}
+                  className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400"
+                >
+                  Cambiar
+                </button>
+              </div>
               <div className="grid grid-cols-2 gap-3">
-                <input
-                  placeholder="Serial *"
-                  value={nuevo.serial}
-                  onChange={(e) => setNuevo({ ...nuevo, serial: e.target.value })}
-                  className={inputClass}
-                  required
-                />
                 <select
                   value={nuevo.marcaId}
                   onChange={(e) => setNuevo({ ...nuevo, marcaId: e.target.value, modeloId: "", diametroId: "" })}
                   className={inputClass}
+                  required
                 >
-                  <option value="">Marca...</option>
+                  <option value="" disabled hidden>Marca... *</option>
                   {marcas.map((m) => (
                     <option key={m.id} value={m.id}>
                       {m.nombre}
@@ -368,8 +511,9 @@ function InventarioTab() {
                   onChange={(e) => setNuevo({ ...nuevo, modeloId: e.target.value, diametroId: "" })}
                   className={inputClass}
                   disabled={!nuevo.marcaId}
+                  required
                 >
-                  <option value="">Modelo...</option>
+                  <option value="" disabled hidden>Modelo... *</option>
                   {modelosDeMarca.map((mo) => (
                     <option key={mo.id} value={mo.id}>
                       {mo.nombre}
@@ -381,8 +525,9 @@ function InventarioTab() {
                   onChange={(e) => setNuevo({ ...nuevo, diametroId: e.target.value })}
                   className={inputClass}
                   disabled={!nuevo.modeloId}
+                  required
                 >
-                  <option value="">Diámetro...</option>
+                  <option value="" disabled hidden>Diámetro... *</option>
                   {diametrosDelModelo.map((d) => (
                     <option key={d.id} value={d.id}>
                       {d.valor}
@@ -438,11 +583,29 @@ function InventarioTab() {
                 </label>
               </div>
               <input
-                placeholder="N° certificado (opcional)"
+                placeholder="N° certificado *"
                 value={nuevo.certificado}
                 onChange={(e) => setNuevo({ ...nuevo, certificado: e.target.value })}
                 className={inputClass}
+                required
               />
+              <label className="flex flex-col gap-1 text-xs text-slate-600 dark:text-slate-300">
+                Lectura inicial (m³) *
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  placeholder="0"
+                  value={nuevo.lecturaInicial}
+                  onChange={(e) => setNuevo({ ...nuevo, lecturaInicial: e.target.value })}
+                  className={inputClass}
+                  required
+                />
+                <span className="text-[11px] font-normal text-slate-500 dark:text-slate-500">
+                  Valor de fábrica con el que arranca el medidor (0 si empieza en 0). Queda fijo desde que entra al
+                  inventario, no cuando se instala.
+                </span>
+              </label>
               <div>
                 <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">
                   Acta de calibración (escaneada, opcional)
@@ -457,23 +620,22 @@ function InventarioTab() {
               <div className="mt-1 flex justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => {
-                    cerrarAgregar();
-                    setNuevaActaCalibracion(null);
-                  }}
+                  onClick={() => setPasoAgregar("serial")}
                   className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
                 >
-                  Cancelar
+                  Atrás
                 </button>
                 <button
                   type="submit"
-                  className="flex items-center justify-center gap-1.5 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-500"
+                  disabled={creandoMedidor}
+                  className="flex items-center justify-center gap-1.5 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-500 disabled:opacity-60"
                 >
                   <Plus className="h-4 w-4" />
-                  Agregar al inventario
+                  {creandoMedidor ? "Agregando..." : "Agregar al inventario"}
                 </button>
               </div>
             </form>
+            )}
           </div>
         </div>
       )}
@@ -547,10 +709,7 @@ function InventarioTab() {
             Mostrar
             <select
               value={porPagina}
-              onChange={(e) => {
-                setPorPagina(Number(e.target.value));
-                setPorPaginaManual(true);
-              }}
+              onChange={(e) => setPorPaginaManual(Number(e.target.value))}
               className={inputClass}
             >
               {[...new Set([porPagina, 5, 10, 25, 50, 100])]
@@ -655,7 +814,7 @@ function InventarioTab() {
                         e.stopPropagation();
                         eliminarMedidor(m);
                       }}
-                      className="text-slate-600 hover:text-red-600"
+                      className="text-slate-600 dark:text-slate-400 hover:text-red-600"
                       title="Eliminar medidor"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -710,7 +869,7 @@ function InventarioTab() {
                   </div>
                   <button
                     onClick={() => eliminarMedidor(m)}
-                    className="text-slate-600 hover:text-red-600"
+                    className="text-slate-600 dark:text-slate-400 hover:text-red-600"
                     title="Eliminar medidor"
                   >
                     <Trash2 className="h-3.5 w-3.5" />
@@ -815,16 +974,27 @@ function CatalogoTab() {
   const { pedirConfirmacion, modal } = useConfirm();
 
   async function cargar() {
-    const [ma, d, lo, va] = await Promise.all([
-      api.marcas.list(),
-      api.diametros.list(),
-      api.lotes.list(),
-      api.variantes.list(),
-    ]);
-    setMarcas(ma);
-    setDiametros(d);
-    setLotes(lo);
-    setVariantes(va);
+    try {
+      const [ma, d, lo, va] = await Promise.all([
+        api.marcas.list(),
+        api.diametros.list(),
+        api.lotes.list(),
+        api.variantes.list(),
+      ]);
+      setMarcas(ma);
+      setDiametros(d);
+      setLotes(lo);
+      setVariantes(va);
+    } catch {
+      // Sin conexión: catálogo de solo lectura desde el snapshot (editarlo sin conexión no tiene
+      // sentido de todas formas, no hay dónde guardarlo).
+      const snapshot = await leerSnapshot();
+      if (!snapshot) return;
+      setMarcas(snapshot.marcas);
+      setDiametros(snapshot.diametros);
+      setLotes(snapshot.lotes);
+      setVariantes(snapshot.variantes);
+    }
   }
 
   useEffect(() => {
@@ -960,7 +1130,7 @@ function CatalogoTab() {
                     <td className="py-2 font-medium text-slate-700 dark:text-slate-200">{m.nombre}</td>
                     <td className="py-2 text-slate-700 dark:text-slate-400">{m.modelos ?? 0}</td>
                     <td className="py-2 text-right">
-                      <div className="flex justify-end gap-3 text-slate-600">
+                      <div className="flex justify-end gap-3 text-slate-600 dark:text-slate-400">
                         <button
                           onClick={() => abrirMarca(m)}
                           className="flex items-center gap-1 text-xs font-medium text-brand-600 hover:underline dark:text-brand-400"
@@ -1039,7 +1209,7 @@ function CatalogoTab() {
                         >
                           <Check className="h-4 w-4" />
                         </button>
-                        <button onClick={() => setEditandoDiametro(null)} className="text-slate-600 hover:text-slate-600">
+                        <button onClick={() => setEditandoDiametro(null)} className="text-slate-600 dark:text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
                           <X className="h-4 w-4" />
                         </button>
                       </div>
@@ -1049,7 +1219,7 @@ function CatalogoTab() {
                   <tr key={d.id}>
                     <td className="py-1.5">{d.valor}</td>
                     <td className="py-1.5 text-right">
-                      <span className="flex justify-end gap-2 text-slate-600">
+                      <span className="flex justify-end gap-2 text-slate-600 dark:text-slate-400">
                         <button onClick={() => setEditandoDiametro({ id: d.id, valor: d.valor })} className="hover:text-brand-600">
                           <Pencil className="h-3.5 w-3.5" />
                         </button>
@@ -1141,7 +1311,7 @@ function CatalogoTab() {
                       <button onClick={guardarEdicionLote} className="text-emerald-600 hover:text-emerald-500">
                         <Check className="h-4 w-4" />
                       </button>
-                      <button onClick={() => setEditandoLote(null)} className="text-slate-600 hover:text-slate-600">
+                      <button onClick={() => setEditandoLote(null)} className="text-slate-600 dark:text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
                         <X className="h-4 w-4" />
                       </button>
                     </div>
@@ -1154,7 +1324,7 @@ function CatalogoTab() {
                   </td>
                   <td className="py-2 text-slate-700 dark:text-slate-400">{l.medidores ?? 0}</td>
                   <td className="py-2 text-right">
-                    <span className="flex justify-end gap-2 text-slate-600">
+                    <span className="flex justify-end gap-2 text-slate-600 dark:text-slate-400">
                       <button
                         onClick={() => setEditandoLote({ id: l.id, serialInicial: l.serialInicial, serialFinal: l.serialFinal })}
                         className="hover:text-brand-600"
@@ -1265,7 +1435,7 @@ function CatalogoTab() {
                       <button onClick={guardarEdicionVariante} className="text-emerald-600 hover:text-emerald-500">
                         <Check className="h-4 w-4" />
                       </button>
-                      <button onClick={() => setEditandoVariante(null)} className="text-slate-600 hover:text-slate-600">
+                      <button onClick={() => setEditandoVariante(null)} className="text-slate-600 dark:text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
                         <X className="h-4 w-4" />
                       </button>
                     </div>
@@ -1277,7 +1447,7 @@ function CatalogoTab() {
                   <td className="py-1.5 text-slate-700 dark:text-slate-400">{v.etiqueta}</td>
                   <td className="py-1.5 text-slate-700 dark:text-slate-400">{tipoLabel(v.tipo)}</td>
                   <td className="py-1.5 text-right">
-                    <span className="flex justify-end gap-2 text-slate-600">
+                    <span className="flex justify-end gap-2 text-slate-600 dark:text-slate-400">
                       <button
                         onClick={() =>
                           setEditandoVariante({ id: v.id, codigo: v.codigo, etiqueta: v.etiqueta, tipo: v.tipo })
@@ -1346,6 +1516,18 @@ function MarcaModal({
   const { error, run } = useErrorHandler();
   const { pedirConfirmacion, modal: modalConfirmacion } = useConfirm();
   const { saliendo, cerrar } = useCierreAnimado(onCerrar);
+  // Una marca recién creada en este modal (no una ya existente que se está editando) no se
+  // puede cerrar sin haberle agregado al menos un modelo — si no, quedaría una marca "vacía"
+  // en el catálogo, inútil hasta que alguien vuelva a completarla.
+  const [marcaNuevaSinModelo, setMarcaNuevaSinModelo] = useState(false);
+  const [avisoCierre, setAvisoCierre] = useState<string | null>(null);
+  function intentarCerrar() {
+    if (marcaNuevaSinModelo && modelos.length === 0) {
+      setAvisoCierre('Agrega al menos un modelo antes de cerrar — si no, "' + nombreMarca + '" queda en el catálogo sin ningún modelo.');
+      return;
+    }
+    cerrar();
+  }
 
   const [modelos, setModelos] = useState<ModeloMedidor[]>([]);
   const [cargandoModelos, setCargandoModelos] = useState(false);
@@ -1388,6 +1570,7 @@ function MarcaModal({
         onCreada(actualizada);
       } else {
         const creada = await api.marcas.create(nombreMarca.trim());
+        setMarcaNuevaSinModelo(true);
         onCreada(creada);
       }
     });
@@ -1420,7 +1603,7 @@ function MarcaModal({
 
   async function guardarModelo(e: React.FormEvent) {
     e.preventDefault();
-    if (!marca || !formModelo.nombre.trim() || !formModelo.tipo) return;
+    if (!marca || !formModelo.nombre.trim() || !formModelo.tipo || formModelo.diametroIds.length === 0) return;
     await run(async () => {
       if (formModelo.id) {
         await api.modelos.update(formModelo.id, {
@@ -1444,6 +1627,7 @@ function MarcaModal({
         }
       }
       limpiarFormModelo();
+      setAvisoCierre(null);
       await cargarModelos(marca.id);
     });
   }
@@ -1464,7 +1648,7 @@ function MarcaModal({
       <div className={`flex max-h-[90vh] w-full max-w-2xl flex-col rounded-xl bg-white shadow-xl dark:bg-slate-900 ${saliendo ? "animate-scale-out" : "animate-scale-in"}`}>
         <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-slate-800">
           <h2 className="text-lg font-bold">{marca ? `Marca: ${marca.nombre}` : "Nueva marca"}</h2>
-          <button onClick={cerrar} className="rounded-lg p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800">
+          <button onClick={intentarCerrar} className="rounded-lg p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800">
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -1475,9 +1659,14 @@ function MarcaModal({
               {error}
             </div>
           )}
+          {avisoCierre && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+              {avisoCierre}
+            </div>
+          )}
 
           <form onSubmit={guardarNombre} className="flex items-end gap-2">
-            <label className="flex flex-1 flex-col gap-1 text-xs font-medium text-slate-700">
+            <label className="flex flex-1 flex-col gap-1 text-xs font-medium text-slate-700 dark:text-slate-300">
               Nombre de la marca
               <input
                 value={nombreMarca}
@@ -1512,18 +1701,18 @@ function MarcaModal({
                 onSubmit={guardarModelo}
                 className="mb-3 flex flex-col gap-2 rounded-lg border border-slate-200 p-3 dark:border-slate-800"
               >
-                <div className="flex flex-col gap-2 sm:flex-row">
+                <div className="flex flex-wrap gap-2">
                   <input
                     placeholder="Nombre de modelo"
                     value={formModelo.nombre}
                     onChange={(e) => setFormModelo({ ...formModelo, nombre: e.target.value })}
-                    className={`${inputClass} flex-1`}
+                    className={`${inputClass} min-w-0 flex-1 basis-40`}
                     required
                   />
                   <select
                     value={formModelo.tipo}
                     onChange={(e) => setFormModelo({ ...formModelo, tipo: e.target.value, varianteId: "" })}
-                    className={inputClass}
+                    className={`${inputClass} min-w-0 flex-1 basis-32`}
                     required
                   >
                     <option value="" disabled>
@@ -1535,7 +1724,7 @@ function MarcaModal({
                   <select
                     value={formModelo.varianteId}
                     onChange={(e) => setFormModelo({ ...formModelo, varianteId: e.target.value })}
-                    className={inputClass}
+                    className={`${inputClass} min-w-0 flex-1 basis-32`}
                     disabled={!formModelo.tipo}
                   >
                     <option value="">Variante...</option>
@@ -1549,16 +1738,16 @@ function MarcaModal({
                     placeholder="Clase de precisión (ej. B, R100)"
                     value={formModelo.clasePrecision}
                     onChange={(e) => setFormModelo({ ...formModelo, clasePrecision: e.target.value })}
-                    className={`${inputClass} sm:w-48`}
+                    className={`${inputClass} min-w-0 flex-1 basis-40`}
                   />
                 </div>
 
                 <div>
                   <p className="mb-1.5 text-xs font-medium text-slate-700 dark:text-slate-400">
-                    Diámetros disponibles para este modelo (marca los que apliquen)
+                    Diámetros disponibles para este modelo (marca al menos uno) *
                   </p>
                   {diametrosCatalogo.length === 0 ? (
-                    <p className="text-xs text-slate-600">
+                    <p className="text-xs text-slate-600 dark:text-slate-400">
                       Todavía no hay diámetros en el catálogo (panel de la derecha en la pantalla anterior).
                     </p>
                   ) : (
@@ -1608,7 +1797,7 @@ function MarcaModal({
               {cargandoModelos ? (
                 <p className="text-sm text-slate-700 dark:text-slate-400">Cargando modelos...</p>
               ) : modelos.length === 0 ? (
-                <p className="text-sm text-slate-600">
+                <p className="text-sm text-slate-600 dark:text-slate-400">
                   "{marca.nombre}" aún no tiene modelos. Usa el formulario de arriba para crear el
                   primero.
                 </p>
@@ -1641,7 +1830,7 @@ function MarcaModal({
                           )}
                         </td>
                         <td className="py-2 text-right">
-                          <div className="flex justify-end gap-2 text-slate-600">
+                          <div className="flex justify-end gap-2 text-slate-600 dark:text-slate-400">
                             <button onClick={() => editarModelo(mo)} className="hover:text-brand-600">
                               <Pencil className="h-3.5 w-3.5" />
                             </button>
@@ -1666,13 +1855,57 @@ function MarcaModal({
 function ActasTab() {
   const [actas, setActas] = useState<ActaInstalacion[]>([]);
   const [cargando, setCargando] = useState(true);
+  const [filtro, setFiltro] = useState("");
+  const [firmadaFiltro, setFirmadaFiltro] = useState("");
+  // Más viejas primero por defecto — es el orden que se necesita para revisar el histórico de
+  // instalaciones desde el principio, no lo último capturado.
+  const [orden, setOrden] = useState<Orden>({ campo: "fechaInstalacion", dir: "asc" });
 
   useEffect(() => {
-    api.actas.list().then((a) => {
-      setActas(a);
-      setCargando(false);
-    });
+    api.actas
+      .list()
+      .then((a) => {
+        setActas(a);
+        setCargando(false);
+      })
+      .catch(async () => {
+        // Sin conexión: se reconstruye desde el snapshot del "Modo de salida" (mismo include que
+        // GET /api/actas, ver backend/.../offline.ts).
+        const snapshot = await leerSnapshot();
+        setActas(snapshot?.actas ?? []);
+        setCargando(false);
+      });
   }, []);
+
+  const filtradas = actas
+    .filter((a) => {
+      if (firmadaFiltro === "firmada" && !a.actaFirmadaUrl) return false;
+      if (firmadaFiltro === "sin_firmar" && a.actaFirmadaUrl) return false;
+      if (!filtro.trim()) return true;
+      const texto = filtro.trim().toLowerCase();
+      return (
+        a.serial?.toLowerCase().includes(texto) ||
+        a.suscriptor?.codigo?.toLowerCase().includes(texto) ||
+        a.suscriptor?.nombre?.toLowerCase().includes(texto) ||
+        (a.usuario?.nombre ?? a.instaladoPor)?.toLowerCase().includes(texto)
+      );
+    })
+    .sort((a, b) => {
+      const dir = orden.dir === "asc" ? 1 : -1;
+      switch (orden.campo) {
+        case "suscriptor":
+          return dir * (a.suscriptor?.nombre ?? "").localeCompare(b.suscriptor?.nombre ?? "");
+        case "serial":
+          return dir * (a.serial ?? "").localeCompare(b.serial ?? "");
+        case "instaladoPor":
+          return dir * (a.usuario?.nombre ?? a.instaladoPor ?? "").localeCompare(b.usuario?.nombre ?? b.instaladoPor ?? "");
+        case "actaFirmada":
+          return dir * (Number(!!a.actaFirmadaUrl) - Number(!!b.actaFirmadaUrl));
+        case "fechaInstalacion":
+        default:
+          return dir * (new Date(a.fechaInstalacion).getTime() - new Date(b.fechaInstalacion).getTime());
+      }
+    });
 
   return (
     <div>
@@ -1680,6 +1913,24 @@ function ActasTab() {
         Historial de instalaciones registradas. Para asignar un medidor a un suscriptor, ve a la ficha del suscriptor
         en la pestaña Suscriptores.
       </p>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <BusquedaInput
+          placeholder="Buscar por serial, NUID, suscriptor o instalador..."
+          value={filtro}
+          onChange={setFiltro}
+          className="w-full max-w-xs"
+        />
+        <select value={firmadaFiltro} onChange={(e) => setFirmadaFiltro(e.target.value)} className={inputClass}>
+          <option value="">Firmada o no</option>
+          <option value="firmada">Con acta firmada</option>
+          <option value="sin_firmar">Sin acta firmada</option>
+        </select>
+        {!cargando && (
+          <span className="text-xs text-slate-500 dark:text-slate-400">
+            {filtradas.length} de {actas.length}
+          </span>
+        )}
+      </div>
       {cargando ? (
         <SkeletonLista />
       ) : (
@@ -1687,15 +1938,25 @@ function ActasTab() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-brand-100 bg-brand-50 text-left text-brand-800 dark:border-slate-800 dark:bg-slate-800/50 dark:text-slate-400">
-                <th className="px-4 py-3 font-medium">Fecha</th>
-                <th className="px-4 py-3 font-medium">Suscriptor</th>
-                <th className="px-4 py-3 font-medium">Serial</th>
-                <th className="px-4 py-3 font-medium">Instalado por</th>
-                <th className="px-4 py-3 font-medium">Acta firmada</th>
+                <ThOrdenable campo="fechaInstalacion" orden={orden} onOrdenar={(c) => setOrden(alternarOrden(orden, c))} className="px-4 py-3 font-medium">
+                  Fecha
+                </ThOrdenable>
+                <ThOrdenable campo="suscriptor" orden={orden} onOrdenar={(c) => setOrden(alternarOrden(orden, c))} className="px-4 py-3 font-medium">
+                  Suscriptor
+                </ThOrdenable>
+                <ThOrdenable campo="serial" orden={orden} onOrdenar={(c) => setOrden(alternarOrden(orden, c))} className="px-4 py-3 font-medium">
+                  Serial
+                </ThOrdenable>
+                <ThOrdenable campo="instaladoPor" orden={orden} onOrdenar={(c) => setOrden(alternarOrden(orden, c))} className="px-4 py-3 font-medium">
+                  Instalado por
+                </ThOrdenable>
+                <ThOrdenable campo="actaFirmada" orden={orden} onOrdenar={(c) => setOrden(alternarOrden(orden, c))} className="px-4 py-3 font-medium">
+                  Acta firmada
+                </ThOrdenable>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-              {actas.map((a) => (
+              {filtradas.map((a) => (
                 <tr key={a.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
                   <td className="px-4 py-2.5">{fmtFecha(a.fechaInstalacion, {})}</td>
                   <td className="px-4 py-2.5">
@@ -1720,10 +1981,13 @@ function ActasTab() {
                   </td>
                 </tr>
               ))}
-              {actas.length === 0 && (
+              {filtradas.length === 0 && (
                 <tr>
                   <td colSpan={5} className="px-4 py-6">
-                    <EmptyState mensaje="Aún no hay actas de instalación." icon={FileText} />
+                    <EmptyState
+                      mensaje={actas.length === 0 ? "Aún no hay actas de instalación." : "Ningún acta coincide con el filtro."}
+                      icon={FileText}
+                    />
                   </td>
                 </tr>
               )}

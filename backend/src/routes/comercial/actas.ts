@@ -99,12 +99,26 @@ actasRouter.post("/", upload.array("fotos", 10), async (req, res) => {
   const archivos = (req.files as Express.Multer.File[] | undefined) ?? [];
   const fotos = await subirFotos(archivos);
 
-  // Si el suscriptor ya tenía un medidor activo, este nuevo lo reemplaza:
-  // el anterior queda marcado como inactivo (histórico) pero conserva sus lecturas.
-  await prisma.medidor.updateMany({
+  // Si el suscriptor ya tenía un medidor activo, este nuevo lo reemplaza: el anterior queda
+  // marcado como inactivo (histórico, conserva sus lecturas) y vuelve a bodega — se desvincula
+  // del suscriptor para que no siga apareciendo como instalado en su predio.
+  const medidoresReemplazados = await prisma.medidor.findMany({
     where: { suscriptorId: Number(suscriptorId), activo: true, id: { not: Number(medidorId) } },
-    data: { activo: false },
+    select: { id: true },
   });
+  if (medidoresReemplazados.length > 0) {
+    await prisma.medidor.updateMany({
+      where: { id: { in: medidoresReemplazados.map((m) => m.id) } },
+      data: { activo: false, estado: "en_bodega", suscriptorId: null },
+    });
+    // El acta del medidor reemplazado se cierra con fechaRetiro para que siga apareciendo en el
+    // historial del suscriptor (el modal de historial filtra por fechaRetiro, no por si el
+    // medidor sigue con suscriptorId asignado).
+    await prisma.actaInstalacion.updateMany({
+      where: { medidorId: { in: medidoresReemplazados.map((m) => m.id) }, fechaRetiro: null },
+      data: { fechaRetiro: new Date(fechaInstalacion) },
+    });
+  }
 
   const instalador = await resolverInstalador(usuarioId, instaladoPor);
   const acta = await prisma.actaInstalacion.create({
@@ -120,6 +134,8 @@ actasRouter.post("/", upload.array("fotos", 10), async (req, res) => {
     },
   });
 
+  // lecturaInicial NO se toca acá: ya quedó fijada cuando el medidor se agregó al inventario
+  // (es el valor de fábrica, no cambia por instalarse).
   await prisma.medidor.update({
     where: { id: Number(medidorId) },
     data: {

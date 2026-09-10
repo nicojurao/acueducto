@@ -17,6 +17,8 @@ import {
   Unlock,
   Droplets,
   Waves,
+  LayoutTemplate,
+  ScanLine,
 } from "lucide-react";
 import {
   api,
@@ -28,6 +30,7 @@ import {
   CarteraResumen,
   CarteraSuscriptor,
   Estrato,
+  PasoVerificacionPeriodo,
 } from "../api/client";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
@@ -35,6 +38,9 @@ import { useConfirm } from "../components/ConfirmModal";
 import { SkeletonTabla } from "../components/Skeleton";
 import EmptyState from "../components/EmptyState";
 import BusquedaInput from "../components/BusquedaInput";
+import VerificacionPeriodoPanel from "../components/VerificacionPeriodoPanel";
+import PlantillasFacturaTab from "../components/PlantillasFacturaTab";
+import RecaudoRapidoTab from "../components/RecaudoRapidoTab";
 import { inputClass } from "../lib/ui";
 
 const fmtPesos = (v: number | string) => `$${Number(v).toLocaleString("es-CO", { maximumFractionDigits: 0 })}`;
@@ -62,15 +68,17 @@ const ESTADO_FACTURA_COLORS: Record<string, string> = {
   anulada: "bg-slate-200 text-slate-500 dark:bg-slate-700 dark:text-slate-400",
 };
 
-type Tab = "facturas" | "cartera" | "pagos" | "tarifas";
+type Tab = "facturas" | "recaudo" | "cartera" | "pagos" | "tarifas" | "plantillas";
 
 export default function FacturacionPage() {
   const [tab, setTab] = useState<Tab>("facturas");
   const tabs: { id: Tab; label: string; icon: typeof Receipt }[] = [
     { id: "facturas", label: "Facturas", icon: FileText },
+    { id: "recaudo", label: "Recaudo", icon: ScanLine },
     { id: "cartera", label: "Cartera", icon: Wallet },
     { id: "pagos", label: "Pagos", icon: HandCoins },
     { id: "tarifas", label: "Tarifas", icon: SlidersHorizontal },
+    { id: "plantillas", label: "Plantillas", icon: LayoutTemplate },
   ];
 
   return (
@@ -96,9 +104,11 @@ export default function FacturacionPage() {
         ))}
       </div>
       {tab === "facturas" && <FacturasTab />}
+      {tab === "recaudo" && <RecaudoRapidoTab />}
       {tab === "cartera" && <CarteraTab />}
       {tab === "pagos" && <PagosTab />}
       {tab === "tarifas" && <TarifasTab />}
+      {tab === "plantillas" && <PlantillasFacturaTab />}
     </div>
   );
 }
@@ -149,18 +159,26 @@ function FacturasTab() {
   const [progresoGeneracion, setProgresoGeneracion] = useState<{ procesados: number; total: number } | null>(null);
   const [descargandoLote, setDescargandoLote] = useState(false);
   const [estadoPeriodo, setEstadoPeriodo] = useState<"abierto" | "cerrado" | null>(null);
+  const [verificacion, setVerificacion] = useState<PasoVerificacionPeriodo[] | null>(null);
+  const verificacionCompleta = verificacion !== null && verificacion.every((p) => p.ok);
   const [barrioPdf, setBarrioPdf] = useState("");
   const [rutaPdf, setRutaPdf] = useState("");
   const [barrios, setBarrios] = useState<{ id: number; nombre: string }[]>([]);
+  // Con qué diseño se descarga el PDF: "" = el completo de siempre (con membrete); si no,
+  // el id de una plantilla de sobreimpresión (ver pestaña Plantillas).
+  const [plantillaPdf, setPlantillaPdf] = useState("");
+  const [plantillas, setPlantillas] = useState<{ id: number; nombre: string }[]>([]);
   const { pedirConfirmacion, modal } = useConfirm();
   const porPagina = 10;
 
   useEffect(() => {
     api.facturacion.periodos.estado(periodo).then((r) => setEstadoPeriodo(r.estado));
+    setVerificacion(null);
   }, [periodo]);
 
   useEffect(() => {
     api.suscriptores.barrios().then(setBarrios);
+    api.facturacion.plantillas.list().then(setPlantillas);
   }, []);
 
   // Polling del progreso de la generación en segundo plano (ver backend: lib/facturacionJobs.ts).
@@ -255,6 +273,7 @@ function FacturasTab() {
       await api.facturacion.pdfLote(periodo, {
         barrioId: barrioPdf ? Number(barrioPdf) : undefined,
         ruta: rutaPdf || undefined,
+        plantillaId: plantillaPdf ? Number(plantillaPdf) : undefined,
       });
     } catch (err) {
       mostrarError(err, "no se pudo generar el PDF del lote");
@@ -355,6 +374,19 @@ function FacturasTab() {
             onChange={(e) => setRutaPdf(e.target.value)}
             className={`${inputClass} w-28`}
           />
+          <select
+            value={plantillaPdf}
+            onChange={(e) => setPlantillaPdf(e.target.value)}
+            title="Diseño con el que se imprime el PDF"
+            className={`${inputClass} w-40`}
+          >
+            <option value="">Diseño completo</option>
+            {plantillas.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.nombre}
+              </option>
+            ))}
+          </select>
           <button
             onClick={descargarLote}
             disabled={descargandoLote}
@@ -363,10 +395,12 @@ function FacturasTab() {
             {descargandoLote ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             PDF del periodo
           </button>
+          <VerificacionPeriodoPanel periodo={periodo} onEstadoCambia={setVerificacion} />
           {puedeGenerar && estadoPeriodo !== "cerrado" && (
             <button
               onClick={generar}
-              disabled={generando}
+              disabled={generando || !verificacionCompleta}
+              title={!verificacionCompleta ? "Marca todos los pasos de verificación del periodo antes de facturar" : undefined}
               className="btn-accion flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-500 disabled:opacity-60"
             >
               {generando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
@@ -501,9 +535,8 @@ function FacturaDetalleModal({ facturaId, onClose }: { facturaId: number; onClos
   const [pagoValor, setPagoValor] = useState("");
   const [pagoMedio, setPagoMedio] = useState("efectivo");
   const [guardandoPago, setGuardandoPago] = useState(false);
-  const [conceptoDesc, setConceptoDesc] = useState("");
-  const [conceptoValor, setConceptoValor] = useState("");
-  const [agregandoConcepto, setAgregandoConcepto] = useState(false);
+  const [plantillas, setPlantillas] = useState<{ id: number; nombre: string }[]>([]);
+  const [plantillaPdf, setPlantillaPdf] = useState("");
   const { pedirConfirmacion, modal } = useConfirm();
 
   async function cargar() {
@@ -513,6 +546,9 @@ function FacturaDetalleModal({ facturaId, onClose }: { facturaId: number; onClos
     cargar();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [facturaId]);
+  useEffect(() => {
+    api.facturacion.plantillas.list().then(setPlantillas);
+  }, []);
 
   async function registrarPago() {
     if (!factura || !pagoValor) return;
@@ -526,22 +562,6 @@ function FacturaDetalleModal({ facturaId, onClose }: { facturaId: number; onClos
       mostrarError(err, "no se pudo registrar el pago");
     } finally {
       setGuardandoPago(false);
-    }
-  }
-
-  async function agregarConcepto() {
-    if (!factura || !conceptoDesc || !conceptoValor) return;
-    setAgregandoConcepto(true);
-    try {
-      await api.facturacion.facturas.agregarConcepto(factura.id, conceptoDesc, Number(conceptoValor));
-      mostrar("Concepto agregado.", "exito");
-      setConceptoDesc("");
-      setConceptoValor("");
-      await cargar();
-    } catch (err) {
-      mostrarError(err, "no se pudo agregar el concepto");
-    } finally {
-      setAgregandoConcepto(false);
     }
   }
 
@@ -572,7 +592,7 @@ function FacturaDetalleModal({ facturaId, onClose }: { facturaId: number; onClos
         onClick={(e) => e.stopPropagation()}
       >
         {!factura ? (
-          <div className="flex h-40 items-center justify-center text-slate-500">
+          <div className="flex h-40 items-center justify-center text-slate-500 dark:text-slate-400">
             <Loader2 className="h-6 w-6 animate-spin" />
           </div>
         ) : (
@@ -588,7 +608,7 @@ function FacturaDetalleModal({ facturaId, onClose }: { facturaId: number; onClos
                 <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${ESTADO_FACTURA_COLORS[factura.estado]}`}>
                   {ESTADO_FACTURA_LABELS[factura.estado]}
                 </span>
-                <button onClick={onClose} className="text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">
+                <button onClick={onClose} className="text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:text-slate-300 dark:hover:text-slate-300">
                   <X className="h-5 w-5" />
                 </button>
               </div>
@@ -651,7 +671,7 @@ function FacturaDetalleModal({ facturaId, onClose }: { facturaId: number; onClos
                 <div className="mb-4 space-y-3">
                   <div className="grid gap-3 sm:grid-cols-2">
                     {columnaServicio("Acueducto", <Droplets className="h-3.5 w-3.5 text-brand-500" />, acueducto)}
-                    {columnaServicio("Alcantarillado", <Waves className="h-3.5 w-3.5 text-slate-500" />, alcantarillado)}
+                    {columnaServicio("Alcantarillado", <Waves className="h-3.5 w-3.5 text-slate-500 dark:text-slate-400" />, alcantarillado)}
                   </div>
 
                   {otros.length > 0 && (
@@ -666,20 +686,6 @@ function FacturaDetalleModal({ facturaId, onClose }: { facturaId: number; onClos
                               </td>
                               <td className={`px-3 py-1.5 text-right ${Number(c.valor) < 0 ? "text-emerald-600 dark:text-emerald-400" : ""}`}>
                                 {fmtPesos(c.valor)}
-                              </td>
-                              <td className="w-8 px-2 py-1.5 text-right">
-                                {puedeAvanzado && c.tipo === "manual" && factura.estado !== "anulada" && (
-                                  <button
-                                    onClick={async () => {
-                                      await api.facturacion.facturas.quitarConcepto(factura.id, c.id);
-                                      await cargar();
-                                    }}
-                                    className="text-slate-400 hover:text-red-600"
-                                    title="Quitar concepto manual"
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                  </button>
-                                )}
                               </td>
                             </tr>
                           ))}
@@ -726,31 +732,6 @@ function FacturaDetalleModal({ facturaId, onClose }: { facturaId: number; onClos
                 </div>
               );
             })()}
-
-            {puedeAvanzado && factura.estado !== "anulada" && (
-              <div className="mb-3 flex flex-wrap items-center gap-2">
-                <input
-                  placeholder="Concepto manual (ej. Reconexión)"
-                  value={conceptoDesc}
-                  onChange={(e) => setConceptoDesc(e.target.value)}
-                  className={`${inputClass} flex-1 min-w-40`}
-                />
-                <input
-                  type="number"
-                  placeholder="Valor ($, ± )"
-                  value={conceptoValor}
-                  onChange={(e) => setConceptoValor(e.target.value)}
-                  className={`${inputClass} w-32`}
-                />
-                <button
-                  onClick={agregarConcepto}
-                  disabled={agregandoConcepto || !conceptoDesc || !conceptoValor}
-                  className="btn-accion rounded-lg border border-brand-200 px-3 py-2 text-sm font-medium text-brand-700 hover:bg-brand-50 disabled:opacity-50 dark:border-slate-700 dark:text-brand-400"
-                >
-                  {agregandoConcepto ? "Agregando…" : "Agregar"}
-                </button>
-              </div>
-            )}
 
             {puedePagar && factura.estado === "pendiente" && factura.saldo > 0 && (
               <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-500/30 dark:bg-emerald-500/10">
@@ -815,8 +796,25 @@ function FacturaDetalleModal({ facturaId, onClose }: { facturaId: number; onClos
                   Anular
                 </button>
               )}
+              {plantillas.length > 0 && (
+                <select
+                  value={plantillaPdf}
+                  onChange={(e) => setPlantillaPdf(e.target.value)}
+                  title="Diseño con el que se imprime el PDF"
+                  className={`${inputClass} w-40`}
+                >
+                  <option value="">Diseño completo</option>
+                  {plantillas.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.nombre}
+                    </option>
+                  ))}
+                </select>
+              )}
               <button
-                onClick={() => api.facturacion.facturas.verPdf(factura.id, factura.numero)}
+                onClick={() =>
+                  api.facturacion.facturas.verPdf(factura.id, factura.numero, plantillaPdf ? Number(plantillaPdf) : undefined)
+                }
                 className="btn-accion flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-500"
               >
                 <FileText className="h-4 w-4" />
@@ -1185,7 +1183,7 @@ function TarifasTab() {
                           >
                             Editar
                           </button>
-                          <button onClick={() => eliminar(t)} className="text-slate-500 hover:text-red-600" title="Eliminar">
+                          <button onClick={() => eliminar(t)} className="text-slate-500 dark:text-slate-400 hover:text-red-600" title="Eliminar">
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
                         </div>
@@ -1376,7 +1374,7 @@ function TarifaModal({
                 className={inputClass}
               />
             </label>
-            <button onClick={onClose} className="text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">
+            <button onClick={onClose} className="text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:text-slate-300 dark:hover:text-slate-300">
               <X className="h-5 w-5" />
             </button>
           </div>
@@ -1392,7 +1390,7 @@ function TarifaModal({
 
           {seccionServicio(
             "Alcantarillado",
-            <Waves className="h-4 w-4 text-slate-500" />,
+            <Waves className="h-4 w-4 text-slate-500 dark:text-slate-400" />,
             { cma: "alcCma", cmo: "alcCmo", cmi: "alcCmi", cmt: "alcCmt" },
             alcValorM3,
             "vacío = no se cobra"

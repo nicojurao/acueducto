@@ -1,13 +1,23 @@
 import { Router } from "express";
+import multer from "multer";
 import PDFDocument from "pdfkit";
+import bwipjs from "bwip-js/node";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma.js";
+import { guardarArchivo, borrarArchivo } from "../../lib/storage.js";
 import { requirePermiso } from "../../middleware/auth.js";
 import { primerDiaMes, periodoFacturableActual } from "../../lib/periodo.js";
 import { repartirEntero } from "../../lib/cotitularSplit.js";
 import { liquidarFactura, TarifaCalculo } from "../../lib/facturacionCalculo.js";
 import { encabezadoPdf, tarjetaDatosPdf, tituloSeccionPdf, tablaPdf } from "../../lib/pdfBranding.js";
 import { fechaLegibleColombia } from "../../lib/fechaColombia.js";
+import { obtenerEmpresa } from "../../lib/empresaCache.js";
 import { periodoEstaCerrado, MENSAJE_PERIODO_CERRADO } from "../../lib/periodoFacturacion.js";
+import {
+  calcularVerificacionPeriodo,
+  periodoListoParaFacturar,
+  MENSAJE_VERIFICACION_INCOMPLETA,
+} from "../../lib/verificacionPeriodo.js";
 import { calcularMora } from "../../lib/moraCalculo.js";
 import { randomUUID } from "node:crypto";
 import {
@@ -23,6 +33,12 @@ export const facturacionRouter = Router();
 const permisoVer = requirePermiso("facturacion_ver", "facturacion_avanzado", "pagos_registrar");
 const permisoAvanzado = requirePermiso("facturacion_avanzado");
 const permisoPagos = requirePermiso("pagos_registrar", "facturacion_avanzado");
+
+const uploadImagenGuia = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => cb(null, file.mimetype.startsWith("image/")),
+});
 
 const fmtPesos = (v: number | string) =>
   `$${Number(v).toLocaleString("es-CO", { maximumFractionDigits: 0 })}`;
@@ -118,6 +134,15 @@ facturacionRouter.post("/periodos/:periodo/reabrir", permisoAvanzado, async (req
   });
   req.log?.warn({ periodo: req.params.periodo, usuario: req.usuario?.id }, "Periodo de facturación REABIERTO");
   res.json(p);
+});
+
+// ============================== VERIFICACIÓN DE PERIODO ==============================
+
+// Checklist calculado contra el estado real de la base de datos (tarifa vigente, lecturas
+// completas) — no hay nada que marcar a mano, ver lib/verificacionPeriodo.ts.
+facturacionRouter.get("/periodos/:periodo/verificacion", permisoVer, async (req, res) => {
+  const fechaPeriodo = primerDiaMes(req.params.periodo);
+  res.json(await calcularVerificacionPeriodo(fechaPeriodo));
 });
 
 // ============================== TARIFAS ==============================
@@ -278,6 +303,9 @@ async function consumosDelPeriodo(fechaPeriodo: Date) {
 facturacionRouter.get("/generar/preview", permisoAvanzado, async (req, res) => {
   const periodo = String(req.query.periodo ?? periodoFacturableActual());
   const fechaPeriodo = primerDiaMes(periodo);
+  if (!(await periodoListoParaFacturar(fechaPeriodo))) {
+    return res.status(400).json({ error: MENSAJE_VERIFICACION_INCOMPLETA });
+  }
   const tarifa = await tarifaVigente(fechaPeriodo);
   if (!tarifa) return res.status(400).json({ error: "No hay una tarifa vigente para ese periodo. Crea la tarifa primero." });
 
@@ -325,6 +353,9 @@ facturacionRouter.post("/generar/iniciar", permisoAvanzado, async (req, res) => 
   const fechaPeriodo = primerDiaMes(periodo);
   const diasVencimiento = Number(req.body.diasVencimiento ?? 15);
   if (await periodoEstaCerrado(fechaPeriodo)) return res.status(400).json({ error: MENSAJE_PERIODO_CERRADO });
+  if (!(await periodoListoParaFacturar(fechaPeriodo))) {
+    return res.status(400).json({ error: MENSAJE_VERIFICACION_INCOMPLETA });
+  }
   const tarifa = await tarifaVigente(fechaPeriodo);
   if (!tarifa) return res.status(400).json({ error: "No hay una tarifa vigente para ese periodo. Crea la tarifa primero." });
 
@@ -346,8 +377,6 @@ facturacionRouter.post("/generar/iniciar", permisoAvanzado, async (req, res) => 
 
   (async () => {
     try {
-      const ultimo = await prisma.factura.aggregate({ _max: { numero: true } });
-      let numero = (ultimo._max.numero ?? 0) + 1;
       let creadas = 0;
       let totalFacturado = 0;
 
@@ -368,7 +397,8 @@ facturacionRouter.post("/generar/iniciar", permisoAvanzado, async (req, res) => 
             );
             await tx.factura.create({
               data: {
-                numero: numero++,
+                // numero: lo asigna la secuencia de Postgres (default en el schema), no se
+                // calcula acá — así dos generaciones en paralelo nunca chocan.
                 suscriptorId: c.suscriptor.id,
                 periodo: fechaPeriodo,
                 tarifaId: tarifa.id,
@@ -444,18 +474,32 @@ facturacionRouter.delete("/generar/:periodo", permisoAvanzado, async (req, res) 
     });
   }
 
-  const [, , , eliminadas] = await prisma.$transaction([
-    prisma.facturaConcepto.deleteMany({ where: { factura: { periodo: fechaPeriodo } } }),
-    prisma.periodoFacturacion.deleteMany({ where: { periodo: fechaPeriodo } }),
-    prisma.facturacionOmitida.deleteMany({ where: { periodo: fechaPeriodo } }),
-    prisma.factura.deleteMany({ where: { periodo: fechaPeriodo } }),
-  ]);
+  // El chequeo de "conPagos" de arriba tiene una ventana teórica de carrera (alguien registra un
+  // pago justo entre ese count() y este borrado) — pero Pago.facturaId es ON DELETE RESTRICT en
+  // la base, así que si eso llega a pasar, el deleteMany de Factura choca contra esa restricción
+  // y Postgres revierte TODA la transacción sola (nada queda borrado a medias). Acá solo se
+  // traduce ese choque a un mensaje claro en vez de dejarlo caer como error 500 genérico.
+  try {
+    const [, , , eliminadas] = await prisma.$transaction([
+      prisma.facturaConcepto.deleteMany({ where: { factura: { periodo: fechaPeriodo } } }),
+      prisma.periodoFacturacion.deleteMany({ where: { periodo: fechaPeriodo } }),
+      prisma.facturacionOmitida.deleteMany({ where: { periodo: fechaPeriodo } }),
+      prisma.factura.deleteMany({ where: { periodo: fechaPeriodo } }),
+    ]);
 
-  req.log?.warn(
-    { periodo: req.params.periodo, eliminadas: eliminadas.count, usuario: req.usuario?.id },
-    "Facturación de periodo ELIMINADA en bloque"
-  );
-  res.json({ eliminadas: eliminadas.count });
+    req.log?.warn(
+      { periodo: req.params.periodo, eliminadas: eliminadas.count, usuario: req.usuario?.id },
+      "Facturación de periodo ELIMINADA en bloque"
+    );
+    res.json({ eliminadas: eliminadas.count });
+  } catch (err: any) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2003") {
+      return res.status(409).json({
+        error: "Se registró un pago justo ahora sobre una factura de este periodo — ya no se puede deshacer en bloque. Vuelve a intentarlo o anula individualmente las facturas sin pago.",
+      });
+    }
+    throw err;
+  }
 });
 
 // Suscriptores omitidos en la generación de un periodo, con su motivo.
@@ -549,52 +593,6 @@ facturacionRouter.put("/facturas/:id/anular", permisoAvanzado, async (req, res) 
   res.json(actualizada);
 });
 
-// Concepto manual (reconexión, matrícula, mora, descuento — valor negativo permitido).
-facturacionRouter.post("/facturas/:id/conceptos", permisoAvanzado, async (req, res) => {
-  const id = Number(req.params.id);
-  const { descripcion, valor } = req.body;
-  if (!descripcion || valor == null || Number(valor) === 0) {
-    return res.status(400).json({ error: "descripcion y valor (distinto de 0) son requeridos" });
-  }
-  const factura = await prisma.factura.findUnique({ where: { id } });
-  if (!factura) return res.status(404).json({ error: "No encontrada" });
-  if (factura.estado === "anulada") return res.status(400).json({ error: "La factura está anulada" });
-  if (await periodoEstaCerrado(factura.periodo)) return res.status(400).json({ error: MENSAJE_PERIODO_CERRADO });
-  const [, actualizada] = await prisma.$transaction([
-    prisma.facturaConcepto.create({
-      data: { facturaId: id, tipo: "manual", descripcion: String(descripcion), valor: Math.round(Number(valor)) },
-    }),
-    prisma.factura.update({
-      where: { id },
-      data: {
-        subtotal: { increment: Math.round(Number(valor)) },
-        total: { increment: Math.round(Number(valor)) },
-        // Si estaba "pagada" y se le agrega un cobro nuevo, vuelve a pendiente.
-        estado: Number(valor) > 0 && factura.estado === "pagada" ? "pendiente" : undefined,
-      },
-    }),
-  ]);
-  res.status(201).json(actualizada);
-});
-
-facturacionRouter.delete("/facturas/:id/conceptos/:conceptoId", permisoAvanzado, async (req, res) => {
-  const concepto = await prisma.facturaConcepto.findUnique({
-    where: { id: Number(req.params.conceptoId) },
-    include: { factura: { select: { periodo: true } } },
-  });
-  if (!concepto || concepto.facturaId !== Number(req.params.id)) return res.status(404).json({ error: "No encontrado" });
-  if (concepto.tipo !== "manual") return res.status(400).json({ error: "Solo se pueden eliminar conceptos manuales" });
-  if (await periodoEstaCerrado(concepto.factura.periodo)) return res.status(400).json({ error: MENSAJE_PERIODO_CERRADO });
-  await prisma.$transaction([
-    prisma.facturaConcepto.delete({ where: { id: concepto.id } }),
-    prisma.factura.update({
-      where: { id: concepto.facturaId },
-      data: { subtotal: { decrement: Number(concepto.valor) }, total: { decrement: Number(concepto.valor) } },
-    }),
-  ]);
-  res.status(204).end();
-});
-
 // ============================== PAGOS ==============================
 
 facturacionRouter.post("/pagos", permisoPagos, async (req, res) => {
@@ -684,32 +682,42 @@ facturacionRouter.delete("/pagos/:id", permisoAvanzado, async (req, res) => {
 // ============================== CARTERA ==============================
 
 // Resumen de cartera: saldo total pendiente, por edades (según fechaEmision) y por barrio.
+// El saldo (total - pagos) se calcula EN Postgres, no trayendo cada factura pendiente con sus
+// pagos a Node para sumarlos ahí: con la cartera acumulada creciendo mes a mes, ese findMany()
+// completo era la parte más pesada de esta pantalla. Los pagos se pre-agregan por factura en
+// una subconsulta antes de unirlos, para no inflar el total al hacer join con varios pagos.
 facturacionRouter.get("/cartera/resumen", permisoVer, async (_req, res) => {
-  const facturas = await prisma.factura.findMany({
-    where: { estado: "pendiente" },
-    include: { pagos: { select: { valor: true } }, suscriptor: { include: { barrioCat: true } } },
-  });
-  const ahora = Date.now();
+  const filas = await prisma.$queryRaw<
+    { barrio: string | null; dias: number; saldo: number }[]
+  >`
+    SELECT b.nombre AS barrio,
+           EXTRACT(DAY FROM (now() - f."fechaEmision"))::float8 AS dias,
+           (f.total - COALESCE(pg.pagado, 0))::float8 AS saldo
+    FROM "Factura" f
+    JOIN "Suscriptor" s ON s.id = f."suscriptorId"
+    LEFT JOIN "Barrio" b ON b.id = s."barrioId"
+    LEFT JOIN (
+      SELECT "facturaId", SUM(valor) AS pagado FROM "Pago" GROUP BY "facturaId"
+    ) pg ON pg."facturaId" = f.id
+    WHERE f.estado = 'pendiente'
+      AND f.total - COALESCE(pg.pagado, 0) > 0
+  `;
+
   let total = 0;
   const edades = { d0_30: 0, d31_60: 0, d61_90: 0, d90mas: 0 };
   const porBarrio = new Map<string, number>();
-  let facturasConSaldo = 0;
-  for (const f of facturas) {
-    const saldo = Number(f.total) - f.pagos.reduce((acc, p) => acc + Number(p.valor), 0);
-    if (saldo <= 0) continue;
-    facturasConSaldo++;
-    total += saldo;
-    const dias = (ahora - f.fechaEmision.getTime()) / (24 * 60 * 60 * 1000);
-    if (dias <= 30) edades.d0_30 += saldo;
-    else if (dias <= 60) edades.d31_60 += saldo;
-    else if (dias <= 90) edades.d61_90 += saldo;
-    else edades.d90mas += saldo;
-    const barrio = f.suscriptor.barrioCat?.nombre ?? "Sin barrio";
-    porBarrio.set(barrio, (porBarrio.get(barrio) ?? 0) + saldo);
+  for (const f of filas) {
+    total += f.saldo;
+    if (f.dias <= 30) edades.d0_30 += f.saldo;
+    else if (f.dias <= 60) edades.d31_60 += f.saldo;
+    else if (f.dias <= 90) edades.d61_90 += f.saldo;
+    else edades.d90mas += f.saldo;
+    const barrio = f.barrio ?? "Sin barrio";
+    porBarrio.set(barrio, (porBarrio.get(barrio) ?? 0) + f.saldo);
   }
   res.json({
     total,
-    facturas: facturasConSaldo,
+    facturas: filas.length,
     edades,
     porBarrio: Array.from(porBarrio.entries())
       .map(([barrio, saldo]) => ({ barrio, saldo }))
@@ -717,49 +725,58 @@ facturacionRouter.get("/cartera/resumen", permisoVer, async (_req, res) => {
   });
 });
 
-// Cartera por suscriptor: quiénes deben, cuánto y hace cuántos periodos.
+// Cartera por suscriptor: quiénes deben, cuánto y hace cuántos periodos. Agrupado y paginado EN
+// Postgres (antes traía TODAS las facturas pendientes de TODOS los suscriptores a memoria para
+// agrupar y paginar en JS) — con COUNT(*) OVER() se saca el total de suscriptores con saldo en
+// la misma consulta, sin un segundo roundtrip.
 facturacionRouter.get("/cartera", permisoVer, async (req, res) => {
   const { q, page, limit } = req.query;
-  const facturas = await prisma.factura.findMany({
-    where: {
-      estado: "pendiente",
-      ...(q
-        ? {
-            suscriptor: {
-              OR: [
-                { nombre: { contains: String(q).trim(), mode: "insensitive" as const } },
-                { codigo: { contains: String(q).trim(), mode: "insensitive" as const } },
-              ],
-            },
-          }
-        : {}),
-    },
-    include: { pagos: { select: { valor: true } }, suscriptor: { include: { barrioCat: true } } },
-  });
-  const porSuscriptor = new Map<number, { suscriptor: (typeof facturas)[number]["suscriptor"]; saldo: number; facturas: number; masAntigua: Date }>();
-  for (const f of facturas) {
-    const saldo = Number(f.total) - f.pagos.reduce((acc, p) => acc + Number(p.valor), 0);
-    if (saldo <= 0) continue;
-    const acc = porSuscriptor.get(f.suscriptorId) ?? { suscriptor: f.suscriptor, saldo: 0, facturas: 0, masAntigua: f.periodo };
-    acc.saldo += saldo;
-    acc.facturas += 1;
-    if (f.periodo < acc.masAntigua) acc.masAntigua = f.periodo;
-    porSuscriptor.set(f.suscriptorId, acc);
-  }
-  const todos = Array.from(porSuscriptor.values()).sort((a, b) => b.saldo - a.saldo);
   const pageNum = Math.max(1, Number(page) || 1);
   const limitNum = Math.max(1, Number(limit) || 10);
+  const texto = q ? `%${String(q).trim()}%` : null;
+
+  const filas = await prisma.$queryRaw<
+    {
+      suscriptorId: number;
+      codigo: string;
+      nombre: string;
+      barrio: string | null;
+      saldo: number;
+      facturas: number;
+      masAntigua: Date;
+      totalFilas: number;
+    }[]
+  >`
+    SELECT s.id AS "suscriptorId", s.codigo, s.nombre, b.nombre AS barrio,
+           SUM(f.total - COALESCE(pg.pagado, 0))::float8 AS saldo,
+           COUNT(*)::int AS facturas,
+           MIN(f.periodo) AS "masAntigua",
+           COUNT(*) OVER()::int AS "totalFilas"
+    FROM "Factura" f
+    JOIN "Suscriptor" s ON s.id = f."suscriptorId"
+    LEFT JOIN "Barrio" b ON b.id = s."barrioId"
+    LEFT JOIN (
+      SELECT "facturaId", SUM(valor) AS pagado FROM "Pago" GROUP BY "facturaId"
+    ) pg ON pg."facturaId" = f.id
+    WHERE f.estado = 'pendiente'
+      ${texto ? Prisma.sql`AND (s.nombre ILIKE ${texto} OR s.codigo ILIKE ${texto})` : Prisma.empty}
+    GROUP BY s.id, s.codigo, s.nombre, b.nombre
+    HAVING SUM(f.total - COALESCE(pg.pagado, 0)) > 0
+    ORDER BY saldo DESC
+    LIMIT ${limitNum} OFFSET ${(pageNum - 1) * limitNum}
+  `;
+
   res.json({
-    data: todos.slice((pageNum - 1) * limitNum, pageNum * limitNum).map((t) => ({
-      suscriptorId: t.suscriptor.id,
-      codigo: t.suscriptor.codigo,
-      nombre: t.suscriptor.nombre,
-      barrio: t.suscriptor.barrioCat?.nombre ?? null,
-      saldo: t.saldo,
-      facturasPendientes: t.facturas,
-      periodoMasAntiguo: t.masAntigua.toISOString().slice(0, 7),
+    data: filas.map((f) => ({
+      suscriptorId: f.suscriptorId,
+      codigo: f.codigo,
+      nombre: f.nombre,
+      barrio: f.barrio,
+      saldo: f.saldo,
+      facturasPendientes: f.facturas,
+      periodoMasAntiguo: f.masAntigua.toISOString().slice(0, 7),
     })),
-    total: todos.length,
+    total: filas[0]?.totalFilas ?? 0,
     page: pageNum,
     limit: limitNum,
   });
@@ -847,6 +864,222 @@ function pdfDeFactura(doc: PDFKit.PDFDocument, factura: {
   doc.font("Helvetica").fillColor("#0f172a");
 }
 
+// ===================== Plantillas de factura (sobreimpresión sobre papel pre-impreso) =====================
+//
+// Las facturas físicas de la imprenta ya traen su propio diseño/membrete: en vez del PDF completo
+// de pdfDeFactura (pensado para papel en blanco), acá se genera uno que SOLO escribe cada dato en
+// las coordenadas x/y que el usuario definió en el editor visual — nada de fondos, tablas ni logo.
+//
+// Forma completa que necesita valorDeCampo — el include real de cada endpoint que genera PDF debe
+// traer al menos esto (ver /facturas/:id/pdf y /pdf-lote más abajo).
+type FacturaParaPlantilla = {
+  numero: number;
+  periodo: Date;
+  fechaEmision: Date;
+  fechaVencimiento: Date | null;
+  consumoM3: unknown;
+  consumoAlcantarilladoM3: unknown;
+  sinMedidor: boolean;
+  estratoCodigo: string | null;
+  subtotal: unknown;
+  ajusteEstrato: unknown;
+  total: unknown;
+  suscriptor: {
+    codigo: string;
+    nombre: string;
+    ruta: string | null;
+    direccion: string | null;
+    direccionComercial: string | null;
+    barrioCat: { nombre: string } | null;
+    tercero?: { tipoDocumento: string; numeroDocumento: string | null; nombre: string } | null;
+  };
+  conceptos: { tipo: string; cantidad: unknown; valor: unknown }[];
+  pagado?: number;
+};
+
+// Catálogo de campos que se pueden arrastrar al lienzo del editor — la clave ("campo" en
+// MarcadorPlantilla) es la que resuelve valorDeCampo de abajo. Mantenerlos sincronizados: un
+// campo nuevo acá SIN su caso en valorDeCampo se imprimiría vacío.
+export const CAMPOS_DISPONIBLES = [
+  { clave: "numero", etiqueta: "N° de factura", categoria: "Factura" },
+  // El "recaudo rápido" (ver /pagos/buscar) busca por este mismo número — al escanearlo desde una
+  // factura impresa, encuentra la factura exacta sin tener que buscarla a mano en la lista.
+  { clave: "numeroBarras", etiqueta: "N° de factura (código de barras)", categoria: "Factura" },
+  { clave: "periodo", etiqueta: "Periodo facturado", categoria: "Factura" },
+  { clave: "fechaEmision", etiqueta: "Fecha de emisión", categoria: "Factura" },
+  { clave: "fechaVencimiento", etiqueta: "Fecha de vencimiento", categoria: "Factura" },
+  { clave: "nuid", etiqueta: "NUID", categoria: "Suscriptor" },
+  { clave: "titular", etiqueta: "Nombre del titular", categoria: "Suscriptor" },
+  { clave: "documento", etiqueta: "Documento del titular", categoria: "Suscriptor" },
+  { clave: "direccion", etiqueta: "Dirección del predio", categoria: "Suscriptor" },
+  { clave: "direccionComercial", etiqueta: "Dirección de correspondencia", categoria: "Suscriptor" },
+  { clave: "barrio", etiqueta: "Barrio", categoria: "Suscriptor" },
+  { clave: "ruta", etiqueta: "Ruta", categoria: "Suscriptor" },
+  { clave: "estrato", etiqueta: "Estrato", categoria: "Suscriptor" },
+  { clave: "consumoM3", etiqueta: "Consumo acueducto (m³)", categoria: "Consumo" },
+  { clave: "consumoAlcantarilladoM3", etiqueta: "Consumo alcantarillado (m³)", categoria: "Consumo" },
+  { clave: "cargoFijo", etiqueta: "Cargo fijo", categoria: "Conceptos" },
+  { clave: "consumoBasico", etiqueta: "Consumo básico", categoria: "Conceptos" },
+  { clave: "consumoComplementario", etiqueta: "Consumo complementario", categoria: "Conceptos" },
+  { clave: "consumoSuntuario", etiqueta: "Consumo suntuario", categoria: "Conceptos" },
+  { clave: "alcantarilladoFijo", etiqueta: "Alcantarillado - cargo fijo", categoria: "Conceptos" },
+  { clave: "alcantarilladoConsumo", etiqueta: "Alcantarillado - consumo", categoria: "Conceptos" },
+  { clave: "aseo", etiqueta: "Aseo", categoria: "Conceptos" },
+  { clave: "ajusteEstrato", etiqueta: "Subsidio/contribución por estrato", categoria: "Conceptos" },
+  { clave: "subtotal", etiqueta: "Subtotal", categoria: "Totales" },
+  { clave: "total", etiqueta: "Total a pagar", categoria: "Totales" },
+  { clave: "pagado", etiqueta: "Pagado", categoria: "Totales" },
+  { clave: "saldo", etiqueta: "Saldo pendiente", categoria: "Totales" },
+  // GLN (Global Location Number, ver lib/empresaCache.ts) ante GS1 Colombia, para el convenio de
+  // recaudo — fijo, igual en TODAS las facturas (no depende de cuál factura sea). Por ahora solo
+  // lleva el AI (415), a pedido explícito y mientras el convenio sigue en desarrollo (aún no
+  // público) — ver GENERAR_GS1 más abajo.
+  { clave: "gs1Lineal", etiqueta: "GLN GS1 (código de barras lineal)", categoria: "GS1 (recaudo)" },
+  { clave: "gs1DataMatrix", etiqueta: "GLN GS1 (DataMatrix)", categoria: "GS1 (recaudo)" },
+] as const;
+
+const TIPO_CONCEPTO_POR_CAMPO: Record<string, string> = {
+  cargoFijo: "cargo_fijo",
+  consumoBasico: "consumo_basico",
+  consumoComplementario: "consumo_complementario",
+  consumoSuntuario: "consumo_suntuario",
+  alcantarilladoFijo: "alcantarillado_fijo",
+  alcantarilladoConsumo: "alcantarillado_consumo",
+  aseo: "aseo",
+};
+
+function valorDeCampo(campo: string, factura: FacturaParaPlantilla): string {
+  const tercero = factura.suscriptor.tercero;
+  switch (campo) {
+    case "numero":
+      return String(factura.numero);
+    case "periodo":
+      return factura.periodo.toISOString().slice(0, 7);
+    case "fechaEmision":
+      return fechaLegibleColombia(factura.fechaEmision);
+    case "fechaVencimiento":
+      return factura.fechaVencimiento ? fechaLegibleColombia(factura.fechaVencimiento) : "";
+    case "nuid":
+      return factura.suscriptor.codigo;
+    case "titular":
+      return tercero?.nombre ?? factura.suscriptor.nombre;
+    case "documento":
+      return tercero?.numeroDocumento && !tercero.numeroDocumento.startsWith("PEND-")
+        ? `${tercero.tipoDocumento} ${tercero.numeroDocumento}`
+        : "";
+    case "direccion":
+      return factura.suscriptor.direccion ?? "";
+    case "direccionComercial":
+      return factura.suscriptor.direccionComercial ?? "";
+    case "barrio":
+      return factura.suscriptor.barrioCat?.nombre ?? "";
+    case "ruta":
+      return factura.suscriptor.ruta ?? "";
+    case "estrato":
+      return factura.estratoCodigo ?? "";
+    case "consumoM3":
+      return `${Number(factura.consumoM3)}`;
+    case "consumoAlcantarilladoM3":
+      return `${Number(factura.consumoAlcantarilladoM3)}`;
+    case "subtotal":
+      return fmtPesos(Number(factura.subtotal));
+    case "total":
+      return fmtPesos(Number(factura.total));
+    case "ajusteEstrato":
+      return fmtPesos(Number(factura.ajusteEstrato));
+    case "pagado":
+      return fmtPesos(factura.pagado ?? 0);
+    case "saldo":
+      return fmtPesos(Number(factura.total) - (factura.pagado ?? 0));
+    default: {
+      const tipo = TIPO_CONCEPTO_POR_CAMPO[campo];
+      if (!tipo) return "";
+      const suma = factura.conceptos.filter((c) => c.tipo === tipo).reduce((acc, c) => acc + Number(c.valor), 0);
+      return fmtPesos(suma);
+    }
+  }
+}
+
+// Código de barras Code128 del número de factura, como PNG — el mismo número que escanea la
+// pantalla de "Recaudo rápido" para encontrar la factura sin buscarla a mano (ver /pagos/buscar).
+// Se genera en una resolución fija (queda nítido) y pdfkit lo reescala al tamaño que pida el
+// marcador, así que el tamaño "real" de generación acá no importa mucho.
+async function bufferCodigoBarras(numero: number): Promise<Buffer> {
+  return bwipjs.toBuffer({ bcid: "code128", text: String(numero), scale: 3, height: 10, includetext: false });
+}
+
+// GLN de la entidad ante GS1 Colombia (ver lib/empresaCache.ts), para el convenio de recaudo
+// bancario — FIJO, igual en todas las facturas (no depende de cuál factura sea). AI (415) = "GLN
+// de quien factura/recauda". Por ahora, a pedido explícito, va SOLO este AI (el convenio sigue en
+// desarrollo, todavía no es público) — cuando se sume la referencia de pago (AI 8020) hay que
+// agregarla acá también.
+async function contenidoGlnGs1(): Promise<string> {
+  const empresa = await obtenerEmpresa();
+  return `(415)${empresa.glnGs1}`;
+}
+
+async function bufferGs1Lineal(): Promise<Buffer> {
+  const text = await contenidoGlnGs1();
+  return bwipjs.toBuffer({ bcid: "gs1-128", text, scale: 3, height: 10, includetext: false });
+}
+
+async function bufferGs1DataMatrix(): Promise<Buffer> {
+  // GS1 exige que el AI (415) venga acompañado del AI (8020) — bwip-js valida esto y por defecto
+  // rechaza generarlo solo. "dontlint" salta esa validación a propósito: el usuario confirmó que
+  // por ahora va solo el GLN (desarrollo/pruebas). Si el convenio pasa a producción con el banco,
+  // revisar si hace falta agregar (8020) y quitar este flag.
+  // "dontlint" es una opción real de bwip-js en tiempo de ejecución que sus definiciones de tipos
+  // no incluyen — de ahí el "as any" puntual, no es un error de tipos genuino.
+  const text = await contenidoGlnGs1();
+  const opciones = { bcid: "gs1datamatrix", text, scale: 3, includetext: false, dontlint: true };
+  return bwipjs.toBuffer(opciones as any);
+}
+
+// Dibuja UNA factura sobre "doc" en las coordenadas de "plantilla" — sin membrete, sin tabla, sin
+// fondo: cada marcador es un simple doc.text(valor, x, y) (o una imagen, para el código de
+// barras). El tamaño de página se ajusta al de la plantilla (normalmente carta, igual al papel
+// pre-impreso de la imprenta).
+async function pdfFacturaPlantilla(
+  doc: PDFKit.PDFDocument,
+  factura: FacturaParaPlantilla,
+  plantilla: { marcadores: { campo: string; x: number; y: number; fontSize: number; align: string; bold: boolean; anchoCaja: number | null }[] }
+) {
+  for (const m of plantilla.marcadores) {
+    if (m.campo === "numeroBarras" || m.campo === "gs1Lineal" || m.campo === "gs1DataMatrix") {
+      try {
+        // Reutiliza los mismos dos campos numéricos que un marcador de texto (fontSize, anchoCaja)
+        // pero con otro sentido acá: alto y ancho de la imagen en puntos — así no hace falta una
+        // columna aparte en MarcadorPlantilla solo para esto. El DataMatrix es cuadrado, así que
+        // sin un ancho guardado se usa el mismo valor que el alto (no 120pt de ancho por defecto).
+        const alto = m.fontSize > 9 ? m.fontSize : 30;
+        const ancho = m.anchoCaja ?? (m.campo === "gs1DataMatrix" ? alto : 120);
+        const buffer =
+          m.campo === "numeroBarras"
+            ? await bufferCodigoBarras(factura.numero)
+            : m.campo === "gs1Lineal"
+            ? await bufferGs1Lineal()
+            : await bufferGs1DataMatrix();
+        doc.image(buffer, m.x, m.y, { width: ancho, height: alto });
+      } catch {
+        // si por lo que sea no se pudo generar, se sigue con el resto de marcadores — mejor una
+        // factura sin el código de barras que una que no se genera del todo
+      }
+      continue;
+    }
+    const valor = valorDeCampo(m.campo, factura);
+    if (!valor) continue;
+    doc
+      .font(m.bold ? "Helvetica-Bold" : "Helvetica")
+      .fontSize(m.fontSize)
+      .fillColor("#000000")
+      .text(valor, m.x, m.y, {
+        width: m.anchoCaja ?? undefined,
+        align: (m.align as "left" | "center" | "right") ?? "left",
+        lineBreak: false,
+      });
+  }
+}
+
 facturacionRouter.get("/facturas/:id/pdf", permisoVer, async (req, res) => {
   const factura = await prisma.factura.findUnique({
     where: { id: Number(req.params.id) },
@@ -857,11 +1090,25 @@ facturacionRouter.get("/facturas/:id/pdf", permisoVer, async (req, res) => {
     },
   });
   if (!factura) return res.status(404).json({ error: "No encontrada" });
+  const facturaConPagado = { ...factura, pagado: factura.pagos.reduce((acc, p) => acc + Number(p.valor), 0) };
+
+  // plantillaId: sobreimpresión sobre papel pre-impreso (ver pdfFacturaPlantilla) en vez del PDF
+  // completo con membrete de siempre — se usa el tamaño de página que la plantilla tenga guardado
+  // (normalmente carta, el de la hoja física de la imprenta).
+  const plantillaId = req.query.plantillaId ? Number(req.query.plantillaId) : null;
+  const plantilla = plantillaId
+    ? await prisma.plantillaFactura.findUnique({ where: { id: plantillaId }, include: { marcadores: true } })
+    : null;
+  if (plantillaId && !plantilla) return res.status(404).json({ error: "Plantilla no encontrada" });
+
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", `inline; filename="factura-${factura.numero}.pdf"`);
-  const doc = new PDFDocument({ margin: 40, size: "A4" });
+  const doc = plantilla
+    ? new PDFDocument({ margin: 0, size: [plantilla.anchoPt, plantilla.altoPt] })
+    : new PDFDocument({ margin: 40, size: "A4" });
   doc.pipe(res);
-  pdfDeFactura(doc, { ...factura, pagado: factura.pagos.reduce((acc, p) => acc + Number(p.valor), 0) });
+  if (plantilla) await pdfFacturaPlantilla(doc, facturaConPagado, plantilla);
+  else pdfDeFactura(doc, facturaConPagado);
   doc.end();
 });
 
@@ -887,13 +1134,162 @@ facturacionRouter.get("/pdf-lote", permisoVer, async (req, res) => {
   });
   if (facturas.length === 0) return res.status(404).json({ error: "No hay facturas para esos filtros" });
 
+  const plantillaId = req.query.plantillaId ? Number(req.query.plantillaId) : null;
+  const plantilla = plantillaId
+    ? await prisma.plantillaFactura.findUnique({ where: { id: plantillaId }, include: { marcadores: true } })
+    : null;
+  if (plantillaId && !plantilla) return res.status(404).json({ error: "Plantilla no encontrada" });
+
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", `attachment; filename="facturas_${periodo}.pdf"`);
-  const doc = new PDFDocument({ margin: 40, size: "A4" });
+  const doc = plantilla
+    ? new PDFDocument({ margin: 0, size: [plantilla.anchoPt, plantilla.altoPt] })
+    : new PDFDocument({ margin: 40, size: "A4" });
   doc.pipe(res);
-  facturas.forEach((f, i) => {
+  for (let i = 0; i < facturas.length; i++) {
     if (i > 0) doc.addPage();
-    pdfDeFactura(doc, f);
-  });
+    if (plantilla) await pdfFacturaPlantilla(doc, facturas[i], plantilla);
+    else pdfDeFactura(doc, facturas[i]);
+  }
   doc.end();
+});
+
+// ===================== CRUD de plantillas (editor visual) =====================
+
+// Antes que "/plantillas/:id" a propósito: si no, Express toma "campos" como si fuera un :id.
+facturacionRouter.get("/plantillas/campos", permisoVer, (_req, res) => {
+  res.json(CAMPOS_DISPONIBLES);
+});
+
+facturacionRouter.get("/plantillas", permisoVer, async (_req, res) => {
+  const plantillas = await prisma.plantillaFactura.findMany({
+    include: { _count: { select: { marcadores: true } } },
+    orderBy: { nombre: "asc" },
+  });
+  res.json(plantillas.map((p) => ({ ...p, marcadores: p._count.marcadores, _count: undefined })));
+});
+
+facturacionRouter.get("/plantillas/:id", permisoVer, async (req, res) => {
+  const plantilla = await prisma.plantillaFactura.findUnique({
+    where: { id: Number(req.params.id) },
+    include: { marcadores: true },
+  });
+  if (!plantilla) return res.status(404).json({ error: "No encontrada" });
+  res.json(plantilla);
+});
+
+facturacionRouter.post("/plantillas", permisoAvanzado, async (req, res) => {
+  const { nombre, anchoPt, altoPt } = req.body;
+  if (!nombre || !String(nombre).trim()) return res.status(400).json({ error: "El nombre es requerido" });
+  const plantilla = await prisma.plantillaFactura.create({
+    data: {
+      nombre: String(nombre).trim(),
+      anchoPt: anchoPt ? Number(anchoPt) : undefined,
+      altoPt: altoPt ? Number(altoPt) : undefined,
+    },
+    include: { marcadores: true },
+  });
+  res.status(201).json(plantilla);
+});
+
+facturacionRouter.put("/plantillas/:id", permisoAvanzado, async (req, res) => {
+  const id = Number(req.params.id);
+  const { nombre, anchoPt, altoPt } = req.body;
+  if (!nombre || !String(nombre).trim()) return res.status(400).json({ error: "El nombre es requerido" });
+  const existente = await prisma.plantillaFactura.findUnique({ where: { id } });
+  if (!existente) return res.status(404).json({ error: "No encontrada" });
+  const plantilla = await prisma.plantillaFactura.update({
+    where: { id },
+    data: { nombre: String(nombre).trim(), anchoPt: Number(anchoPt), altoPt: Number(altoPt) },
+    include: { marcadores: true },
+  });
+  res.json(plantilla);
+});
+
+facturacionRouter.delete("/plantillas/:id", permisoAvanzado, async (req, res) => {
+  const id = Number(req.params.id);
+  const existente = await prisma.plantillaFactura.findUnique({ where: { id } });
+  if (!existente) return res.status(404).json({ error: "No encontrada" });
+  if (existente.imagenGuiaUrl) await borrarArchivo(existente.imagenGuiaUrl);
+  await prisma.plantillaFactura.delete({ where: { id } });
+  res.status(204).end();
+});
+
+// Reemplaza TODOS los marcadores de la plantilla de una sola vez — el editor manda el arreglo
+// completo cada vez que se guarda (agregar/mover/borrar un marcador, todo desde el mismo lienzo),
+// así que no hace falta un endpoint separado por cada operación puntual.
+facturacionRouter.put("/plantillas/:id/marcadores", permisoAvanzado, async (req, res) => {
+  const plantillaId = Number(req.params.id);
+  const existente = await prisma.plantillaFactura.findUnique({ where: { id: plantillaId } });
+  if (!existente) return res.status(404).json({ error: "No encontrada" });
+
+  const marcadores = req.body.marcadores as {
+    campo: string;
+    x: number;
+    y: number;
+    fontSize?: number;
+    align?: string;
+    bold?: boolean;
+    anchoCaja?: number | null;
+  }[];
+  if (!Array.isArray(marcadores)) return res.status(400).json({ error: "marcadores debe ser un arreglo" });
+  const clavesValidas = new Set<string>(CAMPOS_DISPONIBLES.map((c) => c.clave));
+  for (const m of marcadores) {
+    if (!clavesValidas.has(m.campo)) return res.status(400).json({ error: `Campo desconocido: ${m.campo}` });
+  }
+
+  await prisma.$transaction([
+    prisma.marcadorPlantilla.deleteMany({ where: { plantillaId } }),
+    prisma.marcadorPlantilla.createMany({
+      data: marcadores.map((m) => ({
+        plantillaId,
+        campo: m.campo,
+        x: m.x,
+        y: m.y,
+        fontSize: m.fontSize ?? 9,
+        align: m.align ?? "left",
+        bold: m.bold ?? false,
+        anchoCaja: m.anchoCaja ?? null,
+      })),
+    }),
+  ]);
+  const plantillaActualizada = await prisma.plantillaFactura.findUnique({
+    where: { id: plantillaId },
+    include: { marcadores: true },
+  });
+  res.json(plantillaActualizada);
+});
+
+facturacionRouter.post(
+  "/plantillas/:id/imagen-guia",
+  permisoAvanzado,
+  uploadImagenGuia.single("imagen"),
+  async (req, res) => {
+    const id = Number(req.params.id);
+    const existente = await prisma.plantillaFactura.findUnique({ where: { id } });
+    if (!existente) return res.status(404).json({ error: "No encontrada" });
+    if (!req.file) return res.status(400).json({ error: "La imagen es requerida" });
+
+    if (existente.imagenGuiaUrl) await borrarArchivo(existente.imagenGuiaUrl);
+    const url = await guardarArchivo("plantillas-factura", req.file.buffer, req.file.originalname, req.file.mimetype);
+    const plantilla = await prisma.plantillaFactura.update({
+      where: { id },
+      data: { imagenGuiaUrl: url },
+      include: { marcadores: true },
+    });
+    res.json(plantilla);
+  }
+);
+
+facturacionRouter.delete("/plantillas/:id/imagen-guia", permisoAvanzado, async (req, res) => {
+  const id = Number(req.params.id);
+  const existente = await prisma.plantillaFactura.findUnique({ where: { id } });
+  if (!existente) return res.status(404).json({ error: "No encontrada" });
+  if (existente.imagenGuiaUrl) await borrarArchivo(existente.imagenGuiaUrl);
+  const plantilla = await prisma.plantillaFactura.update({
+    where: { id },
+    data: { imagenGuiaUrl: null },
+    include: { marcadores: true },
+  });
+  res.json(plantilla);
 });

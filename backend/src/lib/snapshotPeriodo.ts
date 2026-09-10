@@ -21,7 +21,7 @@ function periodoActualStr(fecha: Date): string {
 async function calcularYGuardarSnapshot(periodo: string): Promise<void> {
   const [suscriptoresActivos, medidoresActivos, grupos] = await Promise.all([
     prisma.suscriptor.count({ where: { estadoPredio: "activo" } }),
-    prisma.medidor.count({ where: { activo: true } }),
+    prisma.medidor.count({ where: { activo: true, estado: "instalado" } }),
     prisma.suscriptor.groupBy({
       by: ["estadoFacturacion"],
       where: { estadoPredio: "activo" },

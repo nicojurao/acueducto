@@ -31,7 +31,7 @@ async function obtenerEstadoSuscriptores(periodo: string) {
 
   const [suscriptoresActivos, medidoresActivos, grupos] = await Promise.all([
     prisma.suscriptor.count({ where: { estadoPredio: "activo" } }),
-    prisma.medidor.count({ where: { activo: true } }),
+    prisma.medidor.count({ where: { activo: true, estado: "instalado" } }),
     prisma.suscriptor.groupBy({
       by: ["estadoFacturacion"],
       where: { estadoPredio: "activo" },
@@ -217,33 +217,38 @@ dashboardRouter.get("/top-consumidores", async (req, res) => {
 });
 
 dashboardRouter.get("/distribucion-medidores", async (_req, res) => {
-  const medidores = await prisma.medidor.findMany({ where: { activo: true }, include: { diametroCat: true } });
-
-  const porTipo = new Map<string, number>();
-  const porDiametro = new Map<string, number>();
-  for (const m of medidores) {
-    const tipo = m.tipo?.trim() || "Sin especificar";
-    const diametro = m.diametroCat?.valor?.trim() || "Sin especificar";
-    porTipo.set(tipo, (porTipo.get(tipo) ?? 0) + 1);
-    porDiametro.set(diametro, (porDiametro.get(diametro) ?? 0) + 1);
-  }
+  // Cuenta con groupBy en vez de traer los ~280 medidores completos (con su relación de
+  // diámetro) solo para contarlos en JS uno por uno.
+  const [porTipoRaw, porDiametroRaw, diametros] = await Promise.all([
+    prisma.medidor.groupBy({ by: ["tipo"], where: { activo: true }, _count: { _all: true } }),
+    prisma.medidor.groupBy({ by: ["diametroId"], where: { activo: true }, _count: { _all: true } }),
+    prisma.diametroMedidor.findMany(),
+  ]);
+  const valorDiametro = new Map(diametros.map((d) => [d.id, d.valor]));
 
   res.json({
-    porTipo: Array.from(porTipo.entries()).map(([tipo, cantidad]) => ({ tipo, cantidad })),
-    porDiametro: Array.from(porDiametro.entries()).map(([diametro, cantidad]) => ({ diametro, cantidad })),
+    porTipo: porTipoRaw.map((g) => ({ tipo: g.tipo?.trim() || "Sin especificar", cantidad: g._count._all })),
+    porDiametro: porDiametroRaw.map((g) => ({
+      diametro: (g.diametroId != null ? valorDiametro.get(g.diametroId)?.trim() : null) || "Sin especificar",
+      cantidad: g._count._all,
+    })),
   });
 });
 
 dashboardRouter.get("/tendencia-multianio", async (_req, res) => {
-  const lecturas = await prisma.lectura.findMany();
+  // Suma por año/mes en el propio Postgres (GROUP BY) en vez de traer CADA lectura completa a
+  // Node para sumarlas ahí: con años de histórico esto evitaba transferir decenas de miles de
+  // filas (con fotoUrl, observaciones, etc. que ni se usan acá) solo para un total mensual.
+  const filas = await prisma.$queryRaw<{ anio: number; mes: number; consumo: number }[]>`
+    SELECT EXTRACT(YEAR FROM periodo)::int AS anio, EXTRACT(MONTH FROM periodo)::int AS mes, SUM(consumo)::float8 AS consumo
+    FROM "Lectura"
+    GROUP BY 1, 2
+  `;
 
   const porAnioMes = new Map<number, Map<number, number>>();
-  for (const l of lecturas) {
-    const anio = l.periodo.getUTCFullYear();
-    const mes = l.periodo.getUTCMonth() + 1;
-    if (!porAnioMes.has(anio)) porAnioMes.set(anio, new Map());
-    const meses = porAnioMes.get(anio)!;
-    meses.set(mes, (meses.get(mes) ?? 0) + Number(l.consumo));
+  for (const f of filas) {
+    if (!porAnioMes.has(f.anio)) porAnioMes.set(f.anio, new Map());
+    porAnioMes.get(f.anio)!.set(f.mes, f.consumo);
   }
 
   const anios = Array.from(porAnioMes.keys()).sort();

@@ -754,6 +754,17 @@ medidoresRouter.get("/:id", async (req, res) => {
   res.json(medidor);
 });
 
+// Chequeo de disponibilidad de un serial exacto — lo usa el formulario de "agregar medidor" para
+// avisar de una vez si el serial ya existe, antes de dejar completar el resto de los campos.
+medidoresRouter.get("/serial/:serial/disponible", async (req, res) => {
+  const existente = await prisma.medidor.findUnique({ where: { serial: req.params.serial }, select: { id: true } });
+  res.json({ disponible: !existente });
+});
+
+// Al agregar un medidor nuevo al inventario, todos sus datos de catálogo se piden de una vez
+// (incluida la lectura inicial de fábrica) — antes solo exigía serial + fechas y dejaba la
+// lectura inicial para cuando se instalaba, lo que generaba el mismo problema que el backfill de
+// "instalación tardía" (ver lib/periodo.ts): un medidor podía terminar instalado sin ese dato.
 medidoresRouter.post("/", soloAvanzado, async (req, res) => {
   const {
     suscriptorId,
@@ -771,31 +782,59 @@ medidoresRouter.post("/", soloAvanzado, async (req, res) => {
     lecturaInicial,
   } = req.body;
 
-  const [marcaCat, modeloCat, diametroCat] = await Promise.all([
-    marcaId ? prisma.marcaMedidor.findUnique({ where: { id: Number(marcaId) } }) : null,
-    modeloId ? prisma.modeloMedidor.findUnique({ where: { id: Number(modeloId) } }) : null,
-    diametroId ? prisma.diametroMedidor.findUnique({ where: { id: Number(diametroId) } }) : null,
-  ]);
+  if (
+    !serial ||
+    !marcaId ||
+    !modeloId ||
+    !diametroId ||
+    !fechaFabricacion ||
+    !fechaCertificacion ||
+    !certificado ||
+    lecturaInicial === undefined ||
+    lecturaInicial === null ||
+    lecturaInicial === ""
+  ) {
+    return res.status(400).json({
+      error:
+        "Todos los campos son requeridos: serial, marca, modelo, diámetro, fecha de fabricación, fecha de calibración, N° certificado y lectura inicial (el lote es opcional).",
+    });
+  }
 
-  const medidor = await prisma.medidor.create({
-    data: {
-      suscriptorId: suscriptorId ? Number(suscriptorId) : null,
-      estado: suscriptorId ? "instalado" : "en_bodega",
-      serial: serial || null,
-      marcaId: marcaCat?.id ?? null,
-      modeloId: modeloCat?.id ?? null,
-      diametroId: diametroCat?.id ?? null,
-      fechaInstalacion: fechaInstalacion ? new Date(fechaInstalacion) : null,
-      tipo: modeloCat?.tipo ?? tipo,
-      fechaFabricacion: fechaFabricacion ? new Date(fechaFabricacion) : null,
-      fechaCertificacion: fechaCertificacion ? new Date(fechaCertificacion) : null,
-      clase,
-      certificado,
-      loteId: loteId ? Number(loteId) : null,
-      lecturaInicial,
-    },
-  });
-  res.status(201).json(medidor);
+  const [marcaCat, modeloCat, diametroCat] = await Promise.all([
+    prisma.marcaMedidor.findUnique({ where: { id: Number(marcaId) } }),
+    prisma.modeloMedidor.findUnique({ where: { id: Number(modeloId) } }),
+    prisma.diametroMedidor.findUnique({ where: { id: Number(diametroId) } }),
+  ]);
+  if (!marcaCat) return res.status(400).json({ error: "La marca indicada no existe en el catálogo" });
+  if (!modeloCat) return res.status(400).json({ error: "El modelo indicado no existe en el catálogo" });
+  if (!diametroCat) return res.status(400).json({ error: "El diámetro indicado no existe en el catálogo" });
+
+  try {
+    const medidor = await prisma.medidor.create({
+      data: {
+        suscriptorId: suscriptorId ? Number(suscriptorId) : null,
+        estado: suscriptorId ? "instalado" : "en_bodega",
+        serial,
+        marcaId: marcaCat.id,
+        modeloId: modeloCat.id,
+        diametroId: diametroCat.id,
+        fechaInstalacion: fechaInstalacion ? new Date(fechaInstalacion) : null,
+        tipo: modeloCat.tipo ?? tipo,
+        fechaFabricacion: new Date(fechaFabricacion),
+        fechaCertificacion: new Date(fechaCertificacion),
+        clase,
+        certificado,
+        loteId: loteId ? Number(loteId) : null,
+        lecturaInicial: Number(lecturaInicial),
+      },
+    });
+    res.status(201).json(medidor);
+  } catch (err: any) {
+    // Red de seguridad además del chequeo previo del frontend (GET /serial/:serial/disponible):
+    // cubre el caso raro de que dos personas agreguen el mismo serial casi al mismo tiempo.
+    if (err?.code === "P2002") return res.status(400).json({ error: "Ya existe un medidor con ese serial" });
+    throw err;
+  }
 });
 
 // Solo se puede borrar un medidor "limpio" (sin lecturas, actas, novedades ni cotitulares):

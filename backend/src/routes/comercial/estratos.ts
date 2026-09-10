@@ -11,20 +11,36 @@ estratosRouter.get("/", async (_req, res) => {
     include: { _count: { select: { suscriptores: true } } },
   });
   res.json(
-    estratos.map((e) => ({ id: e.id, codigo: e.codigo, etiqueta: e.etiqueta, suscriptores: e._count.suscriptores }))
+    estratos.map((e) => ({
+      id: e.id,
+      codigo: e.codigo,
+      etiqueta: e.etiqueta,
+      codigoIgac: e.codigoIgac,
+      suscriptores: e._count.suscriptores,
+    }))
   );
 });
 
 estratosRouter.post("/", soloAvanzado, async (req, res) => {
-  const { codigo, etiqueta } = req.body;
+  const { codigo, etiqueta, codigoIgac } = req.body;
   if (!codigo || !String(codigo).trim()) return res.status(400).json({ error: "El código es requerido" });
   if (!etiqueta || !String(etiqueta).trim()) return res.status(400).json({ error: "La etiqueta es requerida" });
 
   try {
     const estrato = await prisma.estrato.create({
-      data: { codigo: String(codigo).trim(), etiqueta: String(etiqueta).trim() },
+      data: {
+        codigo: String(codigo).trim(),
+        etiqueta: String(etiqueta).trim(),
+        codigoIgac: codigoIgac ? String(codigoIgac).trim() : null,
+      },
     });
-    res.status(201).json({ id: estrato.id, codigo: estrato.codigo, etiqueta: estrato.etiqueta, suscriptores: 0 });
+    res.status(201).json({
+      id: estrato.id,
+      codigo: estrato.codigo,
+      etiqueta: estrato.etiqueta,
+      codigoIgac: estrato.codigoIgac,
+      suscriptores: 0,
+    });
   } catch (err: any) {
     if (err?.code === "P2002") return res.status(400).json({ error: "Ese código de estrato ya existe" });
     throw err;
@@ -34,7 +50,7 @@ estratosRouter.post("/", soloAvanzado, async (req, res) => {
 // Editar código y/o etiqueta: Suscriptor.estratoId es una FK real, así que el cambio se refleja
 // solo en todos los suscriptores que lo tengan asignado — no hace falta propagar nada a mano.
 estratosRouter.put("/:id", soloAvanzado, async (req, res) => {
-  const { codigo, etiqueta } = req.body;
+  const { codigo, etiqueta, codigoIgac } = req.body;
   if (!codigo || !String(codigo).trim()) return res.status(400).json({ error: "El código es requerido" });
   if (!etiqueta || !String(etiqueta).trim()) return res.status(400).json({ error: "La etiqueta es requerida" });
   const codigoNuevo = String(codigo).trim();
@@ -46,13 +62,18 @@ estratosRouter.put("/:id", soloAvanzado, async (req, res) => {
   try {
     const actualizado = await prisma.estrato.update({
       where: { id: estrato.id },
-      data: { codigo: codigoNuevo, etiqueta: etiquetaNueva },
+      data: {
+        codigo: codigoNuevo,
+        etiqueta: etiquetaNueva,
+        codigoIgac: codigoIgac !== undefined ? (codigoIgac ? String(codigoIgac).trim() : null) : undefined,
+      },
       include: { _count: { select: { suscriptores: true } } },
     });
     res.json({
       id: actualizado.id,
       codigo: actualizado.codigo,
       etiqueta: actualizado.etiqueta,
+      codigoIgac: actualizado.codigoIgac,
       suscriptores: actualizado._count.suscriptores,
     });
   } catch (err: any) {

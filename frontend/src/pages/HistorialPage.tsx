@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { History, ChevronLeft, ChevronRight } from "lucide-react";
+import { History, ChevronLeft, ChevronRight, Download } from "lucide-react";
 import { api, HistorialCambio, Usuario } from "../api/client";
 import { useEsMovil } from "../lib/useEsMovil";
 import { useFilasAutoajustadas } from "../lib/useFilasAutoajustadas";
@@ -22,11 +22,10 @@ function fmtFechaHora(fecha: string): string {
 export default function HistorialPage() {
   const esMovil = useEsMovil();
   const { contenedorRef, filas: filasAuto } = useFilasAutoajustadas(44, { minimo: esMovil ? 4 : 6 });
-  const [porPagina, setPorPagina] = useState(() => (esMovil ? 5 : 10));
-  const [porPaginaManual, setPorPaginaManual] = useState(false);
-  useEffect(() => {
-    if (!porPaginaManual) setPorPagina(filasAuto);
-  }, [filasAuto, porPaginaManual]);
+  // Derivado en vez de sincronizado con un efecto aparte: ver el comentario en SuscriptoresPage
+  // (mismo patrón) — evita el doble pedido al montar que se describía acá antes.
+  const [porPaginaManual, setPorPaginaManual] = useState<number | null>(null);
+  const porPagina = porPaginaManual ?? filasAuto;
   const [cambios, setCambios] = useState<HistorialCambio[]>([]);
   const [total, setTotal] = useState(0);
   const [pagina, setPagina] = useState(1);
@@ -49,11 +48,9 @@ export default function HistorialPage() {
     api.usuarios.list().then(setUsuarios);
   }, []);
 
-  // porPagina cambia solo una vez que useFilasAutoajustadas termina de medir el layout (después
-  // del primer render), así que el efecto de abajo dispara DOS pedidos casi seguidos al montar
-  // (uno con el porPagina inicial, otro con el ya ajustado). Sin descartar la respuesta más
-  // vieja si llega después, esa pisa a la buena y la tabla se queda en blanco hasta que algo
-  // (redimensionar, cambiar de pestaña) fuerza un nuevo pedido que sí gana la carrera.
+  // Guarda contra respuestas que lleguen desordenadas (ej. cambiar de filtro rápido antes de que
+  // vuelva el pedido anterior): si una respuesta llega y ya no es la del pedido más reciente, se
+  // descarta en vez de pisar la tabla con datos viejos.
   const peticionIdRef = useRef(0);
   useEffect(() => {
     const idPeticion = ++peticionIdRef.current;
@@ -121,10 +118,7 @@ export default function HistorialPage() {
           Mostrar
           <select
             value={porPagina}
-            onChange={(e) => {
-              setPorPagina(Number(e.target.value));
-              setPorPaginaManual(true);
-            }}
+            onChange={(e) => setPorPaginaManual(Number(e.target.value))}
             className={inputClass}
           >
             {[...new Set([porPagina, ...TAMANOS_PAGINA])]
@@ -136,6 +130,21 @@ export default function HistorialPage() {
               ))}
           </select>
         </label>
+        <button
+          onClick={() =>
+            api.historial.export({
+              entidad: entidadFiltro || undefined,
+              usuarioId: usuarioFiltro ? Number(usuarioFiltro) : undefined,
+              desde: desde || undefined,
+              hasta: hasta || undefined,
+              campo: campoDebounced || undefined,
+            })
+          }
+          className="flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800"
+        >
+          <Download className="h-4 w-4" />
+          Descargar Excel
+        </button>
       </div>
 
       <div ref={contenedorRef} />

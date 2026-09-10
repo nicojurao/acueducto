@@ -8,3 +8,17 @@ export function repartirEntero(total: number, nIntegrantes: number, esCotitular:
   const share = Math.floor(total / nIntegrantes);
   return esCotitular ? share : total - share * (nIntegrantes - 1);
 }
+
+// Lista de "integrantes" de un medidor (titular + cotitulares) para repartirle lectura/consumo a
+// cada uno con repartirEntero — vivía copiada en /lecturas-excel y /mapa-consumo (reportes.ts).
+// El suscriptor titular se asume no-null: quien llama esto ya filtró medidores con
+// suscriptorId: { not: null } en el where de Prisma.
+export function integrantesDelMedidor<S>(medidor: {
+  suscriptor: S | null;
+  cotitulares: { suscriptor: S }[];
+}): { suscriptor: S; esCotitular: boolean }[] {
+  return [
+    { suscriptor: medidor.suscriptor as S, esCotitular: false },
+    ...medidor.cotitulares.map((c) => ({ suscriptor: c.suscriptor, esCotitular: true })),
+  ];
+}

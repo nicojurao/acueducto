@@ -10,9 +10,77 @@ import { periodoFacturableActual } from "./periodo.js";
 // marcan con sinLectura=true (y el motivo de la novedad, si se registró uno).
 // Vive en lib/ (no en reportes.ts) porque la reusan 2 endpoints (JSON y PDF del informe de
 // suscriptor) — moverla acá evita que alguno de los dos quede con una copia desactualizada.
+// "YYYY-MM" del periodo, para comparar contra ventanas de instalación sin líos de huso horario.
+function mesDe(fecha: Date): string {
+  return fecha.toISOString().slice(0, 7);
+}
+
 export async function historicoSuscriptor(suscriptorId: number) {
-  const medidoresPropios = await prisma.medidor.findMany({
+  // Los medidores "propios" de este suscriptor a lo largo del tiempo son los que tienen un acta
+  // de instalación a su nombre (aunque ya hayan vuelto a bodega y perdido el suscriptorId actual)
+  // más el que esté vinculado hoy mismo (por si acaso falta el acta, ej. cargas históricas
+  // antiguas). Usar solo Medidor.suscriptorId perdería las lecturas de medidores reemplazados,
+  // que al reemplazarse se desvinculan del suscriptor para no seguir apareciendo como instalados.
+  //
+  // Un mismo medidor físico puede haber pasado por VARIOS suscriptores con el tiempo (se le quita
+  // a uno y se instala en otro predio) — no basta con "este medidor tuvo un acta con este
+  // suscriptor alguna vez", hay que acotar cada lectura a la ventana [fechaInstalacion,
+  // fechaRetiro] de esa acta puntual, si no las lecturas tomadas en el OTRO predio se colarían acá.
+  const actasSuscriptor = await prisma.actaInstalacion.findMany({
     where: { suscriptorId },
+    select: { medidorId: true },
+  });
+  const medidorVinculadoHoy = await prisma.medidor.findMany({
+    where: { suscriptorId },
+    select: { id: true, fechaInstalacion: true },
+  });
+  const medidorIdsPropios = [...new Set([...actasSuscriptor.map((a) => a.medidorId), ...medidorVinculadoHoy.map((m) => m.id)])];
+
+  // Dueño real de cada mes de lecturas de estos medidores: se arma con TODAS las actas de esos
+  // medidores (de cualquier suscriptor, no solo el actual), porque un mismo medidor físico puede
+  // haber pasado por varios predios con el tiempo. Un mes que no cae en ninguna ventana de acta
+  // (frecuente en la carga histórica: hay lecturas de antes de que se registrara formalmente el
+  // acta) se atribuye al primer suscriptor que tuvo ese medidor, no se descarta.
+  const todasLasActas = medidorIdsPropios.length
+    ? await prisma.actaInstalacion.findMany({
+        where: { medidorId: { in: medidorIdsPropios } },
+        select: { medidorId: true, suscriptorId: true, fechaInstalacion: true, fechaRetiro: true },
+        orderBy: { fechaInstalacion: "asc" },
+      })
+    : [];
+  const ventanasGlobalesPorMedidor = new Map<number, { suscriptorId: number; desde: string; hasta: string | null }[]>();
+  for (const a of todasLasActas) {
+    if (!ventanasGlobalesPorMedidor.has(a.medidorId)) ventanasGlobalesPorMedidor.set(a.medidorId, []);
+    ventanasGlobalesPorMedidor.get(a.medidorId)!.push({
+      suscriptorId: a.suscriptorId,
+      desde: mesDe(a.fechaInstalacion),
+      hasta: a.fechaRetiro ? mesDe(a.fechaRetiro) : null,
+    });
+  }
+  for (const m of medidorVinculadoHoy) {
+    // Vinculado hoy sin ninguna acta que lo respalde (dato histórico cargado sin pasar por el
+    // flujo de actas): ventana abierta a nombre de este suscriptor desde su fechaInstalacion.
+    if (!ventanasGlobalesPorMedidor.has(m.id)) {
+      ventanasGlobalesPorMedidor.set(m.id, [
+        { suscriptorId, desde: m.fechaInstalacion ? mesDe(m.fechaInstalacion) : "0000-00", hasta: null },
+      ]);
+    }
+  }
+  const duenoDePeriodo = (medidorId: number, periodo: string): number | null => {
+    const ventanas = ventanasGlobalesPorMedidor.get(medidorId);
+    if (!ventanas || ventanas.length === 0) return null;
+    const exacta = ventanas.find((v) => periodo >= v.desde && (v.hasta === null || periodo <= v.hasta));
+    if (exacta) return exacta.suscriptorId;
+    // Fuera de toda ventana registrada: si es anterior a la primera instalación conocida, es una
+    // lectura inicial de ese mismo primer suscriptor; si es posterior a todas, no se atribuye a
+    // nadie (medidor de vuelta en bodega, sin lecturas reales esperables ahí).
+    const primera = ventanas[0];
+    return periodo < primera.desde ? primera.suscriptorId : null;
+  };
+  const dentroDeVentana = (medidorId: number, periodo: string): boolean => duenoDePeriodo(medidorId, periodo) === suscriptorId;
+
+  const medidoresPropios = await prisma.medidor.findMany({
+    where: { id: { in: medidorIdsPropios } },
     include: {
       lecturas: { orderBy: { periodo: "asc" }, include: { capturadoPor: { select: { nombre: true } } } },
       cotitulares: true,
@@ -24,7 +92,9 @@ export async function historicoSuscriptor(suscriptorId: number) {
   // absorbe el resto de la división, no cada cotitular).
   const historico = medidoresPropios.flatMap((m) => {
     const nIntegrantes = 1 + m.cotitulares.length;
-    return m.lecturas.map((l) => {
+    return m.lecturas
+      .filter((l) => dentroDeVentana(m.id, mesDe(l.periodo)))
+      .map((l) => {
       const valorLecturaTotal = Number(l.valorLectura);
       const consumoTotal = Number(l.consumo);
       return {

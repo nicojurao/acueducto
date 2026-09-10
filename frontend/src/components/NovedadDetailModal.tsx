@@ -79,7 +79,7 @@ export default function NovedadDetailModal({
         ) : (
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
             <div>
-              <label className="mb-1 block text-xs font-medium text-slate-700">Motivo</label>
+              <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">Motivo</label>
               <textarea
                 value={motivo ?? ""}
                 onChange={(e) => setMotivo(e.target.value)}
@@ -90,7 +90,7 @@ export default function NovedadDetailModal({
             <div>
               {fotosExistentes.length > 0 && (
                 <>
-                  <label className="mb-1 block text-xs font-medium text-slate-700">Fotos actuales</label>
+                  <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">Fotos actuales</label>
                   <div className="mb-3 flex flex-wrap gap-2">
                     {fotosExistentes.map((foto) => (
                       <div key={foto} className="group relative shrink-0" style={{ width: 80, height: 80 }}>

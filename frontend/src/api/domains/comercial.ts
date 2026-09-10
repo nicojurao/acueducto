@@ -11,6 +11,7 @@ export interface Estrato {
   id: number;
   codigo: string;
   etiqueta: string;
+  codigoIgac?: string | null;
   suscriptores: number;
 }
 
@@ -23,7 +24,7 @@ export async function cargarEstratos(): Promise<Estrato[]> {
 
 export const ESTADO_FACTURACION_LABELS: Record<string, string> = {
   sin_medidor: "Sin medidor",
-  instalado_prueba: "Instalado",
+  instalado_prueba: "En prueba (sin facturar)",
   facturando: "Facturando por medición",
   inactivo: "Medidor inactivo / dañado",
 };
@@ -83,15 +84,12 @@ export interface Suscriptor {
   tieneAlcantarillado?: boolean;
   consumoPredeterminadoM3?: number;
   consumoPredeterminadoAlcantarilladoM3?: number;
-  numeroCuentaContrato?: string | null;
-  zonaIgac?: string | null;
-  sectorIgac?: string | null;
-  manzanaVeredaIgac?: string | null;
-  numeroPredioIgac?: string | null;
   condicionPropiedadPredioIgac?: string | null;
+  numeroPredialNacional20?: string | null;
+  numeroPredialNacional?: string | null;
   medidores?: Medidor[];
   cotitularDe?: {
-    medidor: { id: number; suscriptor: Suscriptor; cotitulares: { suscriptorId: number }[] };
+    medidor: { id: number; suscriptor: Suscriptor; cotitulares: { suscriptorId: number; suscriptor: Suscriptor }[] };
   } | null;
 }
 
@@ -167,6 +165,7 @@ export interface ActaInstalacion {
   fechaRetiro: string | null;
   instaladoPor: string;
   usuarioId: number | null;
+  usuario?: { id: number; nombre: string; activo: boolean } | null;
   observaciones: string | null;
   fotos: string[];
   actaFirmadaUrl: string | null;
@@ -177,6 +176,7 @@ export interface ActaInstalacion {
 
 export interface LecturaPendiente {
   medidorId: number;
+  serial: string;
   suscriptor: Suscriptor;
   lecturaAnteriorValor: string | null;
   lectura: {
@@ -258,6 +258,7 @@ export interface AforoKpis {
 export interface Barrio {
   id: number;
   nombre: string;
+  zona: "urbano" | "rural";
   suscriptores: number;
 }
 
@@ -292,6 +293,12 @@ export const tercerosApi = {
 
 export const suscriptoresApi = {
   list: () => request<Suscriptor[]>("/api/suscriptores"),
+  // Solo lo que necesita el Mapa de predios (id, NUID, nombre, coordenadas) — mucho más liviano
+  // que list() para las 4000+ filas de esta app.
+  mapa: () =>
+    request<{ id: number; codigo: string; nombre: string; latitud: number | null; longitud: number | null }[]>(
+      "/api/suscriptores/mapa"
+    ),
   listPaginado: (
     page: number,
     limit: number,
@@ -351,17 +358,19 @@ export const suscriptoresApi = {
 
 export const barriosApi = {
   list: () => request<Barrio[]>("/api/barrios"),
-  create: (nombre: string) => request<Barrio>("/api/barrios", { method: "POST", body: JSON.stringify({ nombre }) }),
-  update: (id: number, nombre: string) => request<Barrio>(`/api/barrios/${id}`, { method: "PUT", body: JSON.stringify({ nombre }) }),
+  create: (nombre: string, zona?: Barrio["zona"]) =>
+    request<Barrio>("/api/barrios", { method: "POST", body: JSON.stringify({ nombre, zona }) }),
+  update: (id: number, nombre: string, zona?: Barrio["zona"]) =>
+    request<Barrio>(`/api/barrios/${id}`, { method: "PUT", body: JSON.stringify({ nombre, zona }) }),
   remove: (id: number) => request<void>(`/api/barrios/${id}`, { method: "DELETE" }),
 };
 
 export const estratosApi = {
   list: () => request<Estrato[]>("/api/estratos"),
-  create: (codigo: string, etiqueta: string) =>
-    request<Estrato>("/api/estratos", { method: "POST", body: JSON.stringify({ codigo, etiqueta }) }),
-  update: (id: number, codigo: string, etiqueta: string) =>
-    request<Estrato>(`/api/estratos/${id}`, { method: "PUT", body: JSON.stringify({ codigo, etiqueta }) }),
+  create: (codigo: string, etiqueta: string, codigoIgac?: string) =>
+    request<Estrato>("/api/estratos", { method: "POST", body: JSON.stringify({ codigo, etiqueta, codigoIgac }) }),
+  update: (id: number, codigo: string, etiqueta: string, codigoIgac?: string) =>
+    request<Estrato>(`/api/estratos/${id}`, { method: "PUT", body: JSON.stringify({ codigo, etiqueta, codigoIgac }) }),
   remove: (id: number) => request<void>(`/api/estratos/${id}`, { method: "DELETE" }),
 };
 
@@ -402,6 +411,8 @@ export const medidoresApi = {
   },
   create: (data: Partial<Medidor> & { marcaId?: number; modeloId?: number; diametroId?: number }) =>
     request<Medidor>("/api/medidores", { method: "POST", body: JSON.stringify(data) }),
+  serialDisponible: (serial: string) =>
+    request<{ disponible: boolean }>(`/api/medidores/serial/${encodeURIComponent(serial)}/disponible`),
   update: (id: number, data: Partial<Medidor> & { marcaId?: number | null; modeloId?: number | null; diametroId?: number | null }) =>
     request<Medidor>(`/api/medidores/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   remove: (id: number) => request<void>(`/api/medidores/${id}`, { method: "DELETE" }),
@@ -614,10 +625,11 @@ export const lecturasApi = {
     if (ruta) qs.set("ruta", ruta);
     return request<LecturaPendiente[]>(`/api/lecturas?${qs}`);
   },
-  listPaginado: (periodo: string, page: number, limit: number, filtros?: { estado?: "pendientes" | "tomadas"; q?: string }) => {
+  listPaginado: (periodo: string, page: number, limit: number, filtros?: { estado?: "pendientes" | "tomadas"; q?: string; barrio?: number }) => {
     const qs = new URLSearchParams({ periodo, page: String(page), limit: String(limit) });
     if (filtros?.estado) qs.set("estado", filtros.estado);
     if (filtros?.q) qs.set("q", filtros.q);
+    if (filtros?.barrio) qs.set("barrio", String(filtros.barrio));
     return request<{ data: LecturaPendiente[]; total: number; page: number; limit: number }>(`/api/lecturas?${qs}`);
   },
   create: (data: {

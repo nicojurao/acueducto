@@ -1,11 +1,12 @@
 import { Router } from "express";
 import PDFDocument from "pdfkit";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../../lib/prisma.js";
 import { crearInformeExcel, enviarExcel } from "../../lib/excelBranding.js";
 import { encabezadoPdf, tituloSeccionPdf, tarjetaDatosPdf, tablaPdf } from "../../lib/pdfBranding.js";
 import { requirePermiso } from "../../middleware/auth.js";
 import { primerDiaMes as primerDiaMesPeriodo, periodoFacturableActual as mesFacturableActual } from "../../lib/periodo.js";
-import { repartirEntero } from "../../lib/cotitularSplit.js";
+import { repartirEntero, integrantesDelMedidor } from "../../lib/cotitularSplit.js";
 import { agregarPorClave } from "../../lib/consumoAgregado.js";
 import { historicoSuscriptor } from "../../lib/historicoSuscriptor.js";
 
@@ -76,19 +77,10 @@ reportesRouter.get("/lecturas-excel", permisoReportesODashboard, async (req, res
     include: {
       suscriptor: { include: { barrioCat: true } },
       lecturas: { where: { periodo: { in: periodos.map(primerDiaMesPeriodo) } } },
+      novedadesLectura: { where: { periodo: { in: periodos.map(primerDiaMesPeriodo) } } },
       cotitulares: { include: { suscriptor: { include: { barrioCat: true } } } },
     },
   });
-
-  // Un medidor con cotitulares (acometida multiusuario) reparte lectura y consumo entre todos
-  // (titular + cotitulares) en partes enteras iguales; si no da exacto, el titular se queda con
-  // el resto (puede terminar con un poco más o un poco menos que los demás, nunca ellos).
-  function integrantesDelMedidor(m: (typeof medidores)[number]) {
-    return [
-      { suscriptor: m.suscriptor!, esCotitular: false },
-      ...m.cotitulares.map((c) => ({ suscriptor: c.suscriptor, esCotitular: true })),
-    ];
-  }
 
   const filas: (Record<string, unknown> & { _resaltar?: boolean; _cotitular?: boolean })[] = [];
   for (const periodoActual of periodos) {
@@ -102,6 +94,10 @@ reportesRouter.get("/lecturas-excel", permisoReportesODashboard, async (req, res
         const inicioMesInstalacion = new Date(Date.UTC(inst.getUTCFullYear(), inst.getUTCMonth(), 1));
         return inicioMesInstalacion <= inicioMesPeriodo;
       })
+      // Un periodo con novedad (medidor dañado, predio deshabitado, etc.) tiene un motivo
+      // registrado para la falta de lectura — no es un pendiente que alguien deba salir a
+      // resolver, así que no debe aparecer en este informe ni contar como "sin lectura".
+      .filter((m) => !m.novedadesLectura.some((n) => n.periodo.getTime() === fechaPeriodo.getTime()))
       .filter((m) => {
         if (filtroEstadoLectura === "todas") return true;
         const tieneLectura = m.lecturas.some((l) => l.periodo.getTime() === fechaPeriodo.getTime());
@@ -247,10 +243,7 @@ reportesRouter.get("/mapa-consumo", requirePermiso("reportes", "dashboard", "map
   for (const m of medidores) {
     const lectura = m.lecturas[0];
     const consumoTotal = lectura ? Number(lectura.consumo) : 0;
-    const integrantes = [
-      { suscriptor: m.suscriptor!, esCotitular: false },
-      ...m.cotitulares.map((c) => ({ suscriptor: c.suscriptor, esCotitular: true })),
-    ];
+    const integrantes = integrantesDelMedidor(m);
     const nIntegrantes = integrantes.length;
     for (const { suscriptor: s, esCotitular } of integrantes) {
       if (s.latitud == null || s.longitud == null) continue;
@@ -262,24 +255,26 @@ reportesRouter.get("/mapa-consumo", requirePermiso("reportes", "dashboard", "map
   res.json(puntos);
 });
 
-// Resumen mensual: # usuarios con lectura y consumo total, por mes
+// Resumen mensual: # usuarios con lectura y consumo total, por mes. El frontend lo llama SIEMPRE
+// sin desde/hasta (quiere el histórico completo para la gráfica de tendencia), así que agrupar
+// en Postgres (GROUP BY) es lo que corresponde acá — traer cada lectura completa a Node solo
+// para sumarla es el mismo problema que ya se resolvió en dashboard.ts /tendencia-multianio.
 reportesRouter.get("/resumen-mensual", permisoReportesODashboard, async (req, res) => {
   const { desde, hasta } = req.query;
-  const where: any = {};
-  if (desde) where.gte = new Date(String(desde));
-  if (hasta) where.lte = new Date(String(hasta));
+  const condiciones = [];
+  if (desde) condiciones.push(Prisma.sql`periodo >= ${new Date(String(desde))}`);
+  if (hasta) condiciones.push(Prisma.sql`periodo <= ${new Date(String(hasta))}`);
+  const where = condiciones.length ? Prisma.sql`WHERE ${Prisma.join(condiciones, " AND ")}` : Prisma.empty;
 
-  const lecturas = await prisma.lectura.findMany({
-    where: Object.keys(where).length ? { periodo: where } : undefined,
-  });
+  const filas = await prisma.$queryRaw<{ mes: string; usuarios: number; consumo: number }[]>`
+    SELECT TO_CHAR(periodo, 'YYYY-MM') AS mes, COUNT(*)::int AS usuarios, SUM(consumo)::float8 AS consumo
+    FROM "Lectura"
+    ${where}
+    GROUP BY 1
+    ORDER BY 1
+  `;
 
-  const porMes = agregarPorClave(lecturas, (l) => l.periodo.toISOString().slice(0, 7));
-
-  const resultado = Array.from(porMes.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([mes, v]) => ({ mes, ...v }));
-
-  res.json(resultado);
+  res.json(filas);
 });
 
 reportesRouter.get("/consumo-suscriptor/:id", permisoConsumoSuscriptor, async (req, res) => {

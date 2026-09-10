@@ -18,6 +18,8 @@ import {
 import { api, LecturaPendiente, Barrio } from "../api/client";
 import LecturaModal from "../components/LecturaModal";
 import { PendienteLectura, PendienteNovedad, useColaPendientes, useColaPendientesNovedad } from "../lib/offlineQueue";
+import { guardarEnCache, leerDeCache } from "../lib/cacheOffline";
+import { leerSnapshot, construirLecturasDePeriodo, calcularResumenPeriodo } from "../lib/offlineSnapshot";
 import { useEsMovil } from "../lib/useEsMovil";
 import { SkeletonLista } from "../components/Skeleton";
 import BusquedaInput from "../components/BusquedaInput";
@@ -37,6 +39,21 @@ function periodoActual(): string {
       mes = 12;
       anio -= 1;
     }
+  }
+  return `${anio}-${String(mes).padStart(2, "0")}`;
+}
+
+function sumarMeses(periodo: string, delta: number): string {
+  const [anioStr, mesStr] = periodo.split("-");
+  let anio = Number(anioStr);
+  let mes = Number(mesStr) + delta;
+  while (mes < 1) {
+    mes += 12;
+    anio -= 1;
+  }
+  while (mes > 12) {
+    mes -= 12;
+    anio += 1;
   }
   return `${anio}-${String(mes).padStart(2, "0")}`;
 }
@@ -69,8 +86,12 @@ export default function LecturasPage() {
   const porPagina = esMovil ? 5 : 10;
   const [periodo, setPeriodo] = useState(searchParams.get("periodo") || periodoActual());
   const medidorResaltado = searchParams.get("medidorId") ? Number(searchParams.get("medidorId")) : null;
-  const [filas, setFilas] = useState<LecturaPendiente[]>([]);
-  const [total, setTotal] = useState(0);
+  // Se trae el periodo COMPLETO de una sola vez (no hay tantos medidores como para que pese:
+  // ver comentario en cargar()) y la paginación/búsqueda/filtro de estado y barrio se resuelven
+  // acá mismo en el navegador, sin volver a pedirle nada al servidor. Esto de paso es lo que
+  // permite que, si el fontanero se queda sin internet, siga viendo y filtrando el periodo que
+  // ya se alcanzó a cargar en vez de depender de que cada combinación puntual haya sido cacheada.
+  const [todasFilas, setTodasFilas] = useState<LecturaPendiente[]>([]);
   const [cargando, setCargando] = useState(true);
   const [busqueda, setBusqueda] = useState("");
   const [busquedaDebounced, setBusquedaDebounced] = useState("");
@@ -79,7 +100,16 @@ export default function LecturasPage() {
   const [barrios, setBarrios] = useState<Barrio[]>([]);
   const [filtroBarrio, setFiltroBarrio] = useState<number | "">("");
   useEffect(() => {
-    api.barrios.list().then(setBarrios).catch(() => {});
+    api.barrios
+      .list()
+      .then((data) => {
+        guardarEnCache("barrios", data);
+        setBarrios(data);
+      })
+      .catch(() => {
+        const cache = leerDeCache<Barrio[]>("barrios");
+        if (cache) setBarrios(cache);
+      });
   }, []);
   // "Lecturas pendientes" en el Dashboard manda ?pendientes=1 para llegar con el filtro ya
   // aplicado — sin esto, se ignoraba el query param y quedaba lo que el usuario tuviera
@@ -88,8 +118,31 @@ export default function LecturasPage() {
     if (searchParams.get("pendientes") === "1") setFiltroEstado("pendientes");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Precarga en segundo plano (sin tocar lo que se ve en pantalla) del periodo anterior, el
+  // actual y el siguiente a periodoActual() — ej. si hoy es 6 de septiembre, periodoActual() da
+  // agosto (todavía no arranca la captura de septiembre, ver comentario de periodoActual()), así
+  // que se guardan julio, agosto y septiembre. La idea es que un fontanero que se va a quedar
+  // sin señal en el día ya tenga en el dispositivo tanto el mes que está cerrando como el que
+  // está por abrir, sin depender de que los haya visitado a mano mientras tenía internet. Solo
+  // escribe en la cache (guardarEnCache) — si alguno de estos coincide con el periodo que el
+  // usuario tiene abierto ahora mismo, "cargar()" ya se encarga de mostrarlo en pantalla aparte.
+  useEffect(() => {
+    const base = periodoActual();
+    [sumarMeses(base, -1), base, sumarMeses(base, 1)].forEach((p) => {
+      api.lecturas
+        .listByPeriodo(p)
+        .then((data) => guardarEnCache(`lecturas_${p}`, data))
+        .catch(() => {});
+    });
+  }, []);
   const [pagina, setPagina] = useState(1);
   const [seleccionada, setSeleccionada] = useState<LecturaPendiente | null>(null);
+  // Normalmente el periodo del modal es el que está seleccionado en pantalla — pero desde la
+  // vista "pendientes por sincronizar" (que ahora mezcla todos los periodos, ver comentario más
+  // abajo) se puede abrir un medidor de OTRO mes, y hay que abrir el modal con SU periodo real,
+  // no con el que estaba viendo antes de entrar a esa vista.
+  const [seleccionadaPeriodo, setSeleccionadaPeriodo] = useState<string | null>(null);
   const [importAbierto, setImportAbierto] = useState(false);
   const [resumen, setResumen] = useState<{ total: number; tomadas: number } | null>(null);
   const { pendientes, sincronizando, online, sincronizarAhora } = useColaPendientes();
@@ -108,6 +161,16 @@ export default function LecturasPage() {
     () => new Map(pendientesNovedadDelPeriodo.map((p) => [p.medidorId, p])),
     [pendientesNovedadDelPeriodo]
   );
+  // Versión SIN filtrar por periodo, para la vista "pendientes por sincronizar": el contador del
+  // botón ya suma pendientes de todos los meses, así que al abrir esa vista debe mostrarlos a
+  // todos también — antes se filtraba por el periodo que se tuviera seleccionado en pantalla, y
+  // si las pendientes eran de otro mes (ej. viendo agosto con algo pendiente de septiembre) la
+  // vista salía vacía a pesar de que el botón decía que sí había pendientes.
+  const pendienteGlobalPorMedidor = useMemo(() => new Map(pendientes.map((p) => [p.medidorId, p])), [pendientes]);
+  const pendienteNovedadGlobalPorMedidor = useMemo(
+    () => new Map(pendientesNovedad.map((p) => [p.medidorId, p])),
+    [pendientesNovedad]
+  );
   const totalPendientes = pendientes.length + pendientesNovedad.length;
 
   function sincronizarTodoAhora() {
@@ -120,39 +183,54 @@ export default function LecturasPage() {
     return () => clearTimeout(t);
   }, [busqueda]);
 
-  // La paginación/filtro se resuelven en el servidor, salvo el caso de "llegué desde el
-  // Dashboard con un medidor puntual" (medidorResaltado): ahí se trae todo el periodo sin
-  // paginar, porque ese medidor puede estar en cualquier página y hay que ubicarlo igual.
-  //
-  // peticionIdRef: si cambian varios filtros seguido (ej. llegar desde el Dashboard con
-  // ?pendientes=1 dispara un fetch sin filtro y, apenas después, otro ya filtrado), las
-  // respuestas pueden llegar desordenadas — se descarta el resultado si ya no es la petición
-  // más reciente, para no pisar la vista con datos viejos.
+  // peticionIdRef: si el periodo cambia varias veces seguido, las respuestas pueden llegar
+  // desordenadas — se descarta el resultado si ya no es la petición más reciente, para no pisar
+  // la vista con datos viejos.
   const peticionIdRef = useRef(0);
+  // Una sola entrada de cache por periodo (antes había una por cada combinación de
+  // página/filtro/búsqueda — con el periodo completo en memoria ya no hace falta).
+  function claveCache() {
+    return `lecturas_${periodo}`;
+  }
+  // Periodo de la data que hay ACTUALMENTE en "todasFilas", para saber si sigue sirviendo como
+  // respaldo cuando un fetch falla (ver comentario en el catch de abajo).
+  const periodoMostradoRef = useRef<string | null>(null);
   async function cargar() {
     const idPeticion = ++peticionIdRef.current;
+    const clave = claveCache();
     setCargando(true);
     try {
-      if (medidorResaltado) {
-        const data = await api.lecturas.listByPeriodo(periodo);
-        if (idPeticion !== peticionIdRef.current) return data;
-        setFilas(data);
-        setTotal(data.length);
-        return data;
-      }
-      const resultado = await api.lecturas.listPaginado(periodo, pagina, porPagina, {
-        estado: filtroEstado === "todos" ? undefined : filtroEstado,
-        q: busquedaDebounced || undefined,
-        barrio: filtroBarrio || undefined,
-      });
-      if (idPeticion !== peticionIdRef.current) return resultado.data;
-      setFilas(resultado.data);
-      setTotal(resultado.total);
-      return resultado.data;
+      // Sin "page"/"estado"/"q"/"barrio" en la petición, el backend devuelve TODO el periodo sin
+      // filtrar (ver GET /api/lecturas) — con ~200 medidores en total esto es una sola petición
+      // liviana, y deja resolver paginación/búsqueda/filtro en el cliente sin ir y volver al
+      // servidor por cada tecla o clic.
+      const data = await api.lecturas.listByPeriodo(periodo);
+      if (idPeticion !== peticionIdRef.current) return data;
+      guardarEnCache(clave, data);
+      periodoMostradoRef.current = periodo;
+      setTodasFilas(data);
+      return data;
     } catch {
-      // Sin conexión (u otro error de red): se mantiene lo que ya estaba cargado en pantalla
-      // en vez de quedar pegado en "Cargando...".
-      return filas;
+      // Sin conexión (u otro error de red). Si lo que hay en pantalla es de OTRO periodo (el
+      // fontanero cambió de mes mientras estaba offline), mostrarlo haría parecer que el periodo
+      // nuevo ya tiene las mismas lecturas que el anterior (bug reportado) — se busca la cache de
+      // ESTE periodo puntual, y si nunca se cargó con internet, se limpia en vez de mostrar datos
+      // de otro mes.
+      if (periodoMostradoRef.current === periodo) return todasFilas;
+      const cache = leerDeCache<LecturaPendiente[]>(clave);
+      if (cache) {
+        periodoMostradoRef.current = periodo;
+        setTodasFilas(cache);
+        return cache;
+      }
+      // La cache puntual (los 3 meses que se precargan solos) no tiene este periodo — último
+      // recurso: si el fontanero activó "Modo de salida" antes de salir, el snapshot completo en
+      // IndexedDB trae el histórico ENTERO, no solo esos 3 meses.
+      const snapshot = await leerSnapshot();
+      const desdeSnapshot = snapshot ? construirLecturasDePeriodo(snapshot, periodo) : [];
+      periodoMostradoRef.current = periodo;
+      setTodasFilas(desdeSnapshot);
+      return desdeSnapshot;
     } finally {
       if (idPeticion === peticionIdRef.current) setCargando(false);
     }
@@ -161,10 +239,47 @@ export default function LecturasPage() {
   useEffect(() => {
     cargar();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [periodo, pagina, porPagina, filtroEstado, busquedaDebounced, filtroBarrio, medidorResaltado]);
+  }, [periodo]);
+
+  // Filtro de estado/búsqueda/barrio sobre el periodo completo ya en memoria.
+  const filtradas = useMemo(() => {
+    const texto = busquedaDebounced.trim().toLowerCase();
+    return todasFilas.filter((f) => {
+      if (filtroEstado === "pendientes" && f.lectura) return false;
+      if (filtroEstado === "tomadas" && !f.lectura) return false;
+      if (filtroBarrio && f.suscriptor.barrioId !== filtroBarrio) return false;
+      if (texto) {
+        const coincide =
+          f.suscriptor.nombre.toLowerCase().includes(texto) ||
+          f.suscriptor.codigo.toLowerCase().includes(texto) ||
+          (f.suscriptor.ruta ?? "").toLowerCase().includes(texto) ||
+          f.serial.toLowerCase().includes(texto);
+        if (!coincide) return false;
+      }
+      return true;
+    });
+  }, [todasFilas, filtroEstado, filtroBarrio, busquedaDebounced]);
+  const total = filtradas.length;
+  const filas = medidorResaltado ? todasFilas : filtradas.slice((pagina - 1) * porPagina, pagina * porPagina);
 
   function cargarResumen() {
-    api.lecturas.resumen(periodo).then(setResumen).catch(() => {});
+    api.lecturas
+      .resumen(periodo)
+      .then((data) => {
+        guardarEnCache(`resumen_${periodo}`, data);
+        setResumen(data);
+      })
+      .catch(async () => {
+        // Mismo cuidado que en cargar(): si no hay cache para ESTE periodo puntual, no dejar el
+        // resumen del periodo anterior en pantalla (parecería que este periodo ya tiene lo mismo).
+        const cache = leerDeCache<{ total: number; tomadas: number }>(`resumen_${periodo}`);
+        if (cache) {
+          setResumen(cache);
+          return;
+        }
+        const snapshot = await leerSnapshot();
+        setResumen(snapshot ? calcularResumenPeriodo(snapshot, periodo) : null);
+      });
   }
   useEffect(cargarResumen, [periodo]);
 
@@ -190,12 +305,15 @@ export default function LecturasPage() {
   // Si se llega desde el Dashboard con un medidor puntual (ej. "lecturas pendientes"), se abre
   // el modal directo en vez de obligar a buscarlo a mano.
   useEffect(() => {
-    if (medidorResaltado && filas.length > 0) {
-      const f = filas.find((x) => x.medidorId === medidorResaltado);
-      if (f) setSeleccionada(f);
+    if (medidorResaltado && todasFilas.length > 0) {
+      const f = todasFilas.find((x) => x.medidorId === medidorResaltado);
+      if (f) {
+        setSeleccionada(f);
+        setSeleccionadaPeriodo(periodo);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [medidorResaltado, filas]);
+  }, [medidorResaltado, todasFilas]);
 
   // Al guardar/quitar algo dentro del modal, se refresca la lista en segundo plano y se
   // sincroniza la fila abierta para que el modal muestre el estado más reciente.
@@ -208,12 +326,13 @@ export default function LecturasPage() {
     }
   }
 
-  // Fallback por si el pendiente quedó guardado antes de que "filas" incluyera ese medidor
+  // Fallback por si el pendiente quedó guardado antes de que "todasFilas" incluyera ese medidor
   // (no debería pasar en la práctica, pero evita que desaparezca de la vista de pendientes).
   function filaDesdePendiente(p: PendienteLectura | PendienteNovedad): LecturaPendiente {
     return (
-      filas.find((f) => f.medidorId === p.medidorId) ?? {
+      todasFilas.find((f) => f.medidorId === p.medidorId) ?? {
         medidorId: p.medidorId,
+        serial: "",
         suscriptor: {
           id: 0,
           nombre: p.suscriptor.nombre,
@@ -231,9 +350,7 @@ export default function LecturasPage() {
 
   const totalPaginas = Math.max(1, Math.ceil(total / porPagina));
   const paginaSegura = Math.min(pagina, totalPaginas);
-  const resultados = verColaOffline
-    ? [...pendientesDelPeriodo, ...pendientesNovedadDelPeriodo].map(filaDesdePendiente)
-    : filas;
+  const resultados = verColaOffline ? [...pendientes, ...pendientesNovedad].map(filaDesdePendiente) : filas;
 
   return (
     <div>
@@ -283,7 +400,7 @@ export default function LecturasPage() {
         </label>
         <div className="flex items-center gap-2">
           <BusquedaInput
-            placeholder="Buscar por NUID, nombre, ruta o serial..."
+            placeholder="Buscar por NUID, nombre o ruta..."
             value={busqueda}
             onChange={(valor) => {
               setBusqueda(valor);
@@ -361,8 +478,8 @@ export default function LecturasPage() {
       </div>
 
       {verColaOffline && (
-        <p className="mb-3 text-xs text-slate-600">
-          Mostrando solo lo pendiente por sincronizar este periodo.{" "}
+        <p className="mb-3 text-xs text-slate-600 dark:text-slate-400">
+          Mostrando solo lo pendiente por sincronizar (de todos los periodos).{" "}
           <button onClick={() => setVerColaOffline(false)} className="text-brand-600 hover:underline dark:text-brand-400">
             Volver al listado
           </button>
@@ -372,7 +489,7 @@ export default function LecturasPage() {
       {cargando ? (
         <SkeletonLista filas={porPagina} />
       ) : verColaOffline && resultados.length === 0 ? (
-        <EmptyState mensaje="No hay pendientes por sincronizar en este periodo." />
+        <EmptyState mensaje="No hay pendientes por sincronizar." />
       ) : !verColaOffline && resultados.length === 0 ? (
         <EmptyState
           mensaje={busqueda.trim() ? `Sin resultados para "${busqueda}".` : "No hay medidores en este filtro."}
@@ -380,12 +497,17 @@ export default function LecturasPage() {
       ) : (
         <div className="divide-y divide-slate-100 overflow-hidden rounded-xl border border-brand-200 bg-white shadow-sm animate-content-in dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
           {resultados.map((f) => {
-            const pendiente = pendientePorMedidor.get(f.medidorId);
-            const pendienteNovedad = pendienteNovedadPorMedidor.get(f.medidorId);
+            const pendiente = verColaOffline ? pendienteGlobalPorMedidor.get(f.medidorId) : pendientePorMedidor.get(f.medidorId);
+            const pendienteNovedad = verColaOffline
+              ? pendienteNovedadGlobalPorMedidor.get(f.medidorId)
+              : pendienteNovedadPorMedidor.get(f.medidorId);
             return (
               <button
                 key={f.medidorId}
-                onClick={() => setSeleccionada(f)}
+                onClick={() => {
+                  setSeleccionada(f);
+                  setSeleccionadaPeriodo((pendiente ?? pendienteNovedad)?.periodo ?? periodo);
+                }}
                 className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-slate-50 dark:hover:bg-slate-800/40 sm:px-4 sm:py-3"
               >
                 <EstadoIcono f={f} pendiente={pendiente} pendienteNovedad={pendienteNovedad} />
@@ -395,6 +517,9 @@ export default function LecturasPage() {
                   </div>
                   <div className="text-xs text-slate-700 dark:text-slate-400">
                     NUID {f.suscriptor.codigo} · Ruta {f.suscriptor.ruta ?? "-"} · {f.suscriptor.barrioCat?.nombre ?? "Sin barrio"}
+                    {verColaOffline && (pendiente || pendienteNovedad) && (
+                      <> · Periodo {(pendiente ?? pendienteNovedad)!.periodo}</>
+                    )}
                   </div>
                   {f.lectura && (
                     <div className="text-xs text-slate-500 dark:text-slate-500">
@@ -409,7 +534,7 @@ export default function LecturasPage() {
                   )}
                 </div>
                 {(pendiente || f.lectura) && (
-                  <span className="shrink-0 text-xs text-slate-600">
+                  <span className="shrink-0 text-xs text-slate-600 dark:text-slate-400">
                     {pendiente ? pendiente.valorLectura : f.lectura!.valorLectura}
                   </span>
                 )}
@@ -448,9 +573,14 @@ export default function LecturasPage() {
       {seleccionada && (
         <LecturaModal
           fila={seleccionada}
-          periodo={periodo}
-          pendienteOffline={pendientePorMedidor.get(seleccionada.medidorId)}
-          onClose={() => setSeleccionada(null)}
+          periodo={seleccionadaPeriodo ?? periodo}
+          pendienteOffline={pendientes.find(
+            (p) => p.medidorId === seleccionada.medidorId && p.periodo === (seleccionadaPeriodo ?? periodo)
+          )}
+          onClose={() => {
+            setSeleccionada(null);
+            setSeleccionadaPeriodo(null);
+          }}
           onCambio={onCambioModal}
         />
       )}
@@ -479,7 +609,7 @@ function InformeLecturasPanel({ onCerrar }: { onCerrar: () => void }) {
     <div className="mb-4 rounded-xl border border-brand-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:mb-6">
       <div className="mb-3 flex items-center justify-between">
         <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-200">Informe de lecturas por periodo</h3>
-        <button onClick={onCerrar} className="rounded-lg p-1 text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800">
+        <button onClick={onCerrar} className="rounded-lg p-1 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
           <X className="h-4 w-4" />
         </button>
       </div>

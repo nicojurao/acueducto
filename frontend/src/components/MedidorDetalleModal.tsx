@@ -21,8 +21,8 @@ function fmtFecha(fecha: string | null): string {
 function Campo({ etiqueta, valor }: { etiqueta: string; valor: React.ReactNode }) {
   return (
     <div className="min-w-0">
-      <div className="text-xs text-slate-700 dark:text-slate-400">{etiqueta}</div>
-      <div className="break-words text-sm font-medium text-slate-800 dark:text-slate-100">{valor}</div>
+      <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">{etiqueta}</div>
+      <div className="break-words text-sm text-slate-800 dark:text-slate-100">{valor}</div>
     </div>
   );
 }
@@ -54,6 +54,7 @@ export default function MedidorDetalleModal({
   const [fechaFabricacion, setFechaFabricacion] = useState(medidor.fechaFabricacion?.slice(0, 10) ?? "");
   const [fechaCertificacion, setFechaCertificacion] = useState(medidor.fechaCertificacion?.slice(0, 10) ?? "");
   const [certificado, setCertificado] = useState(medidor.certificado ?? "");
+  const [lecturaInicial, setLecturaInicial] = useState(medidor.lecturaInicial != null ? String(medidor.lecturaInicial) : "");
   const [condicion, setCondicion] = useState(medidor.condicion);
   const [actaCalibracionUrl, setActaCalibracionUrl] = useState(medidor.actaCalibracionUrl);
   const [actaCalibracionArchivo, setActaCalibracionArchivo] = useState<File | null>(null);
@@ -68,19 +69,34 @@ export default function MedidorDetalleModal({
   const modeloSeleccionado = modelos.find((mo) => String(mo.id) === modeloId);
   const diametrosDelModelo: DiametroMedidor[] = modeloSeleccionado?.diametros ?? [];
 
+  // Mismos campos obligatorios que al agregar un medidor al inventario (el lote es la única
+  // excepción, sigue opcional en ambos lados) — antes se podía guardar la edición dejando
+  // cualquiera de estos en blanco, aunque crear uno nuevo ya no lo permitiera.
+  const puedeGuardar =
+    serial.trim() !== "" &&
+    marcaId !== "" &&
+    modeloId !== "" &&
+    diametroId !== "" &&
+    fechaFabricacion !== "" &&
+    fechaCertificacion !== "" &&
+    certificado.trim() !== "" &&
+    lecturaInicial !== "";
+
   async function guardar() {
+    if (!puedeGuardar) return;
     await run(async () => {
       setGuardando(true);
       try {
         await api.medidores.update(medidor.id, {
-          serial: serial || null,
-          marcaId: marcaId ? Number(marcaId) : null,
-          modeloId: modeloId ? Number(modeloId) : null,
-          diametroId: diametroId ? Number(diametroId) : null,
+          serial,
+          marcaId: Number(marcaId),
+          modeloId: Number(modeloId),
+          diametroId: Number(diametroId),
           loteId: loteId ? Number(loteId) : null,
-          fechaFabricacion: fechaFabricacion || null,
-          fechaCertificacion: fechaCertificacion || null,
-          certificado: certificado || null,
+          fechaFabricacion,
+          fechaCertificacion,
+          certificado,
+          lecturaInicial: Number(lecturaInicial),
           condicion,
         });
         if (actaCalibracionArchivo) {
@@ -107,7 +123,7 @@ export default function MedidorDetalleModal({
   return (
     <div className={`fixed inset-0 z-[2000] flex items-center justify-center bg-black/50 p-4 ${saliendo ? "animate-fade-out" : "animate-fade-in"}`}>
       {modalConfirmacion}
-      <div className={`max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-xl dark:bg-slate-900 ${saliendo ? "animate-scale-out" : "animate-scale-in"}`}>
+      <div className={`max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-5 shadow-xl dark:bg-slate-900 sm:max-w-lg lg:max-w-2xl ${saliendo ? "animate-scale-out" : "animate-scale-in"}`}>
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-bold">Medidor {medidor.serial ?? `#${medidor.id}`}</h2>
           <div className="flex items-center gap-1">
@@ -162,7 +178,10 @@ export default function MedidorDetalleModal({
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-3">
+            {/* flex-wrap en vez de grid-cols-2: cada campo pesa lo que necesita su contenido, así
+                un valor corto (ej. Diámetro "1/2\"") no deja un hueco vacío junto a su etiqueta
+                como pasaba con columnas de ancho fijo. */}
+            <div className="flex flex-wrap gap-x-6 gap-y-3">
               <Campo etiqueta="Serial" valor={medidor.serial ?? "-"} />
               <Campo etiqueta="Marca" valor={medidor.marcaCat?.nombre ?? "-"} />
               <Campo etiqueta="Modelo" valor={medidor.modeloCat?.nombre ?? "-"} />
@@ -200,7 +219,12 @@ export default function MedidorDetalleModal({
             <div className="space-y-3">
               <label className="block text-sm">
                 <span className="mb-1 block text-slate-600 dark:text-slate-300">Serial</span>
-                <input value={serial} onChange={(e) => setSerial(e.target.value)} className={`${inputClass} w-full`} />
+                <input
+                  value={serial}
+                  onChange={(e) => setSerial(e.target.value)}
+                  className={`${inputClass} w-full`}
+                  required
+                />
               </label>
 
               <div className="grid grid-cols-2 gap-3">
@@ -214,8 +238,9 @@ export default function MedidorDetalleModal({
                       setDiametroId("");
                     }}
                     className={`${inputClass} w-full`}
+                    required
                   >
-                    <option value="">Marca...</option>
+                    <option value="" disabled hidden>Marca...</option>
                     {marcas.map((m) => (
                       <option key={m.id} value={m.id}>
                         {m.nombre}
@@ -233,8 +258,9 @@ export default function MedidorDetalleModal({
                     }}
                     disabled={!marcaId}
                     className={`${inputClass} w-full`}
+                    required
                   >
-                    <option value="">Modelo...</option>
+                    <option value="" disabled hidden>Modelo...</option>
                     {modelosDeMarca.map((mo) => (
                       <option key={mo.id} value={mo.id}>
                         {mo.nombre}
@@ -252,8 +278,9 @@ export default function MedidorDetalleModal({
                     onChange={(e) => setDiametroId(e.target.value)}
                     disabled={!modeloId}
                     className={`${inputClass} w-full`}
+                    required
                   >
-                    <option value="">Diámetro...</option>
+                    <option value="" disabled hidden>Diámetro...</option>
                     {diametrosDelModelo.map((d) => (
                       <option key={d.id} value={d.id}>
                         {d.valor}
@@ -282,6 +309,7 @@ export default function MedidorDetalleModal({
                     value={fechaFabricacion}
                     onChange={(e) => setFechaFabricacion(e.target.value)}
                     className={`${inputClass} w-full`}
+                    required
                   />
                 </label>
                 <label className="block text-sm">
@@ -291,6 +319,7 @@ export default function MedidorDetalleModal({
                     value={fechaCertificacion}
                     onChange={(e) => setFechaCertificacion(e.target.value)}
                     className={`${inputClass} w-full`}
+                    required
                   />
                 </label>
               </div>
@@ -302,8 +331,24 @@ export default function MedidorDetalleModal({
                     value={certificado}
                     onChange={(e) => setCertificado(e.target.value)}
                     className={`${inputClass} w-full`}
+                    required
                   />
                 </label>
+                <label className="block text-sm">
+                  <span className="mb-1 block text-slate-600 dark:text-slate-300">Lectura inicial (m³)</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={lecturaInicial}
+                    onChange={(e) => setLecturaInicial(e.target.value)}
+                    className={`${inputClass} w-full`}
+                    required
+                  />
+                </label>
+              </div>
+
+              <div>
                 <label className="block text-sm">
                   <span className="mb-1 block text-slate-600 dark:text-slate-300">Condición</span>
                   <select
@@ -357,7 +402,7 @@ export default function MedidorDetalleModal({
               </button>
               <button
                 onClick={() => pedirConfirmacion("¿Deseas guardar los cambios?", guardar, { textoConfirmar: "Guardar", variante: "normal" })}
-                disabled={guardando}
+                disabled={guardando || !puedeGuardar}
                 className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-500 disabled:opacity-60"
               >
                 {guardando ? "Guardando..." : "Guardar"}

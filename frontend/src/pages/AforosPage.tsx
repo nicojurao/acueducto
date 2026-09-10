@@ -11,6 +11,7 @@ import { useEsMovil } from "../lib/useEsMovil";
 import { SkeletonLista } from "../components/Skeleton";
 import { inputClass } from "../lib/ui";
 import EmptyState from "../components/EmptyState";
+import { leerSnapshot, listarAforosOffline } from "../lib/offlineSnapshot";
 
 const GRID_STROKE = "#475569";
 
@@ -238,7 +239,7 @@ function PuntosTab({ puntos, recargar }: { puntos: PuntoAforo[]; recargar: () =>
             ))}
             {puntos.length === 0 && (
               <tr>
-                <td colSpan={4} className="px-4 py-6 text-center text-slate-600">
+                <td colSpan={4} className="px-4 py-6 text-center text-slate-600 dark:text-slate-400">
                   Todavía no hay puntos de aforo registrados.
                 </td>
               </tr>
@@ -265,7 +266,7 @@ function PuntosTab({ puntos, recargar }: { puntos: PuntoAforo[]; recargar: () =>
           </ListCard>
         ))}
         {puntos.length === 0 && (
-          <p className="px-2 py-4 text-center text-sm text-slate-600">Todavía no hay puntos de aforo registrados.</p>
+          <p className="px-2 py-4 text-center text-sm text-slate-600 dark:text-slate-400">Todavía no hay puntos de aforo registrados.</p>
         )}
       </div>
       {modal}
@@ -291,6 +292,16 @@ function RegistrosTab({ puntos }: { puntos: PuntoAforo[] }) {
       const resultado = await api.aforos.listPaginado(pagina, porPagina, puntoFiltro || undefined);
       setFilas(resultado.data);
       setTotal(resultado.total);
+    } catch {
+      const snapshot = await leerSnapshot();
+      if (snapshot) {
+        const resultado = listarAforosOffline(snapshot, { pagina, porPagina, puntoAforoId: puntoFiltro || undefined });
+        setFilas(resultado.data);
+        setTotal(resultado.total);
+      } else {
+        setFilas([]);
+        setTotal(0);
+      }
     } finally {
       setCargando(false);
     }
@@ -361,13 +372,13 @@ function RegistrosTab({ puntos }: { puntos: PuntoAforo[] }) {
                 </div>
               </div>
               {a.fotoUrl && (
-                <a href={urlFoto(a.fotoUrl)} target="_blank" rel="noreferrer" className="shrink-0 text-slate-600 hover:text-brand-600">
+                <a href={urlFoto(a.fotoUrl)} target="_blank" rel="noreferrer" className="shrink-0 text-slate-600 dark:text-slate-400 hover:text-brand-600">
                   <ImageIcon className="h-4 w-4" />
                 </a>
               )}
               <button
                 onClick={() => api.aforos.verPdf(a.id)}
-                className="shrink-0 rounded-lg p-1.5 text-slate-600 hover:bg-brand-50 hover:text-brand-600 dark:hover:bg-brand-500/10"
+                className="shrink-0 rounded-lg p-1.5 text-slate-600 dark:text-slate-400 hover:bg-brand-50 hover:text-brand-600 dark:hover:bg-brand-500/10"
                 title="Ver PDF"
               >
                 <FileText className="h-4 w-4" />
@@ -424,7 +435,12 @@ export default function AforosPage() {
   const [puntos, setPuntos] = useState<PuntoAforo[]>([]);
 
   async function cargarPuntos() {
-    setPuntos(await api.puntosAforo.list());
+    try {
+      setPuntos(await api.puntosAforo.list());
+    } catch {
+      const snapshot = await leerSnapshot();
+      setPuntos(snapshot?.puntosAforo ?? []);
+    }
   }
 
   useEffect(() => {

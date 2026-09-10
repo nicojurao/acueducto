@@ -131,12 +131,13 @@ export default function AsignarMedidorModal({
               <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                 Información del medidor
               </h3>
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
                 <input
-                  placeholder="Serial"
+                  placeholder="Serial *"
                   value={formMedidor.serial}
                   onChange={(e) => setFormMedidor({ ...formMedidor, serial: e.target.value })}
                   className={inputClass}
+                  required
                 />
                 <select
                   value={formMedidor.marcaId}
@@ -144,8 +145,9 @@ export default function AsignarMedidorModal({
                     setFormMedidor({ ...formMedidor, marcaId: e.target.value, modeloId: "", diametroId: "" })
                   }
                   className={inputClass}
+                  required
                 >
-                  <option value="">Marca...</option>
+                  <option value="" disabled hidden>Marca... *</option>
                   {marcas.map((m) => (
                     <option key={m.id} value={m.id}>
                       {m.nombre}
@@ -157,8 +159,9 @@ export default function AsignarMedidorModal({
                   onChange={(e) => setFormMedidor({ ...formMedidor, modeloId: e.target.value, diametroId: "" })}
                   className={inputClass}
                   disabled={!formMedidor.marcaId}
+                  required
                 >
-                  <option value="">Modelo...</option>
+                  <option value="" disabled hidden>Modelo... *</option>
                   {modelos
                     .filter((mo) => String(mo.marcaId) === formMedidor.marcaId)
                     .map((mo) => (
@@ -172,8 +175,9 @@ export default function AsignarMedidorModal({
                   onChange={(e) => setFormMedidor({ ...formMedidor, diametroId: e.target.value })}
                   className={inputClass}
                   disabled={!formMedidor.modeloId}
+                  required
                 >
-                  <option value="">Diámetro...</option>
+                  <option value="" disabled hidden>Diámetro... *</option>
                   {(modelos.find((mo) => String(mo.id) === formMedidor.modeloId)?.diametros ?? []).map((d) => (
                     <option key={d.id} value={d.id}>
                       {d.valor}
@@ -205,36 +209,56 @@ export default function AsignarMedidorModal({
 
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                 <label className="flex flex-col gap-1 text-xs text-slate-600 dark:text-slate-300">
-                  Fecha fabricación
+                  Fecha fabricación *
                   <input
                     type="date"
                     value={formMedidor.fechaFabricacion}
                     onChange={(e) => setFormMedidor({ ...formMedidor, fechaFabricacion: e.target.value })}
                     className={inputClass}
+                    required
                   />
                 </label>
                 <label className="flex flex-col gap-1 text-xs text-slate-600 dark:text-slate-300">
-                  Fecha calibración
+                  Fecha calibración *
                   <input
                     type="date"
                     value={formMedidor.fechaCertificacion}
                     onChange={(e) => setFormMedidor({ ...formMedidor, fechaCertificacion: e.target.value })}
                     className={inputClass}
+                    required
                   />
                 </label>
                 <label className="flex flex-col gap-1 text-xs text-slate-600 dark:text-slate-300">
-                  N° certificado
+                  N° certificado *
                   <input
                     value={formMedidor.certificado}
                     onChange={(e) => setFormMedidor({ ...formMedidor, certificado: e.target.value })}
                     className={inputClass}
+                    required
                   />
                 </label>
               </div>
+              <label className="flex flex-col gap-1 text-xs text-slate-600 dark:text-slate-300">
+                Lectura inicial (m³) *
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  placeholder="0"
+                  value={formActa.lecturaInicial}
+                  onChange={(e) => setFormActa({ ...formActa, lecturaInicial: e.target.value })}
+                  className={inputClass}
+                  required
+                />
+                <span className="text-[11px] font-normal text-slate-500 dark:text-slate-500">
+                  Valor de fábrica con el que arranca el medidor (0 si empieza en 0). La primera lectura real que se le
+                  tome descontará este valor para calcular el consumo.
+                </span>
+              </label>
             </>
           ) : (
             <>
-              <label className="text-xs font-medium text-slate-700">Medidor en bodega</label>
+              <label className="text-xs font-medium text-slate-700 dark:text-slate-300">Medidor en bodega</label>
               <MedidorCombobox
                 medidores={medidoresBodega}
                 value={formActa.medidorId}
@@ -277,22 +301,6 @@ export default function AsignarMedidorModal({
               </select>
             </label>
           </div>
-          <label className="flex flex-col gap-1 text-xs text-slate-600 dark:text-slate-300">
-            Lectura inicial (m³)
-            <input
-              type="number"
-              step="0.01"
-              min="0"
-              placeholder="0"
-              value={formActa.lecturaInicial}
-              onChange={(e) => setFormActa({ ...formActa, lecturaInicial: e.target.value })}
-              className={inputClass}
-            />
-            <span className="text-[11px] font-normal text-slate-500 dark:text-slate-500">
-              Con la que arranca el medidor de fábrica (déjala en 0 si empieza en 0). La primera lectura real que se
-              le tome descontará este valor para calcular el consumo.
-            </span>
-          </label>
           {editandoEsRetirado && (
             <label className="flex flex-col gap-1 text-xs font-medium text-slate-700 dark:text-slate-300">
               Fecha de retiro
@@ -351,7 +359,7 @@ export default function AsignarMedidorModal({
             <div className="min-w-0">
               {fotosExistentes.length > 0 && (
                 <>
-                  <label className="mb-1 block text-xs font-medium text-slate-700">Fotos actuales</label>
+                  <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">Fotos actuales</label>
                   <div className="mb-2 flex flex-wrap gap-2">
                     {fotosExistentes.map((foto) => (
                       <div key={foto} className="group relative">
@@ -373,7 +381,7 @@ export default function AsignarMedidorModal({
                   </div>
                 </>
               )}
-              <label className="mb-1 block text-xs font-medium text-slate-700">
+              <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">
                 {editandoActaId ? "Agregar más fotos" : "Fotos"}
               </label>
               <input

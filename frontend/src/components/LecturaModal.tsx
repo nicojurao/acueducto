@@ -180,8 +180,15 @@ export default function LecturaModal({
     pedirConfirmacion("¿Descartar esta lectura guardada en el dispositivo? No se subirá.", () =>
       run(async () => {
         await eliminarPendiente(pendiente.id);
-        setPendiente(null);
-        onCambio();
+        // Solo cerrar — NO llamar a onCambio() acá. onCambio() es async y no se espera antes de
+        // cerrar, así que su continuación (que refresca la lista y busca de nuevo el medidor por
+        // id para reabrir el modal actualizado) sigue corriendo con la referencia vieja de
+        // "seleccionada" DESPUÉS de que este cierre ya la puso en null — terminaba reabriendo el
+        // modal con lo que encontrara para ese medidor en el periodo actual (ej. su lectura real
+        // de otro mes), pareciendo que el descarte no había funcionado. La lista de pendientes ya
+        // se refresca sola en LecturasPage apenas la cola encoge (ver pendientesPrevRef), así que
+        // no hace falta pedirlo también desde acá.
+        onClose();
       })
     );
   }

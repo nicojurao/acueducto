@@ -38,6 +38,7 @@ import ThOrdenable, { Orden, alternarOrden } from "../components/ThOrdenable";
 import { useAuth } from "../contexts/AuthContext";
 import { inputClass } from "../lib/ui";
 import EmptyState from "../components/EmptyState";
+import { leerSnapshot, listarSuscriptoresOffline, listarTercerosOffline } from "../lib/offlineSnapshot";
 
 const TAMANOS_PAGINA = [5, 10, 25, 50, 100];
 
@@ -73,7 +74,7 @@ export default function SuscriptoresPage() {
             className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium ${
               tab === t.id
                 ? "border-brand-500 text-brand-600"
-                : "border-transparent text-slate-700 hover:text-slate-700 dark:hover:text-slate-300"
+                : "border-transparent text-slate-700 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
             }`}
           >
             {t.label}
@@ -97,11 +98,13 @@ function ListadoTab() {
   const [total, setTotal] = useState(0);
   const [pagina, setPagina] = useState(1);
   const { contenedorRef, filas: filasAuto } = useFilasAutoajustadas(esMovil ? 132 : 44, { minimo: esMovil ? 3 : 6 });
-  const [porPagina, setPorPagina] = useState(() => (esMovil ? 5 : 10));
-  const [porPaginaManual, setPorPaginaManual] = useState(false);
-  useEffect(() => {
-    if (!porPaginaManual) setPorPagina(filasAuto);
-  }, [filasAuto, porPaginaManual]);
+  // Derivado en vez de sincronizado con un efecto aparte: con un useState+useEffect propios,
+  // el primer render usaba un default fijo (10) mientras el hook todavía no había medido la
+  // pantalla, y el efecto de sincronización recién corregía el valor un instante después — eso
+  // disparaba el fetch de la tabla DOS veces (una con el default, otra con el valor ya ajustado).
+  // Al derivarlo directo de filasAuto, el efecto de carga ve el valor final desde la primera vez.
+  const [porPaginaManual, setPorPaginaManual] = useState<number | null>(null);
+  const porPagina = porPaginaManual ?? filasAuto;
   const [filtro, setFiltro] = useState("");
   const [filtroDebounced, setFiltroDebounced] = useState(filtro);
   // El query param (?estado=..., al llegar desde el Dashboard) le gana al filtro recordado.
@@ -127,6 +130,9 @@ function ListadoTab() {
   const [detalleId, setDetalleId] = useState<number | null>(null);
   const [seleccionados, setSeleccionados] = useState<Set<number>>(new Set());
   const [orden, setOrden] = useState<Orden>({ campo: "codigo", dir: "asc" });
+  // Cuándo se generó el snapshot que se está mostrando — solo tiene valor cuando el fetch al
+  // servidor falló y se usó el "Modo de salida" (IndexedDB) como respaldo, ver cargar().
+  const [datosDesdeSnapshot, setDatosDesdeSnapshot] = useState<string | null>(null);
 
   function alternarSeleccion(id: number) {
     setSeleccionados((prev) => {
@@ -174,7 +180,7 @@ function ListadoTab() {
   async function cargar() {
     const idPeticion = ++peticionIdRef.current;
     setCargando(true);
-    const resultado = await api.suscriptores.listPaginado(pagina, porPagina, {
+    const filtros = {
       q: filtroDebounced,
       estadoFacturacion: estadoFiltro,
       barrioId: barrioFiltro ? Number(barrioFiltro) : undefined,
@@ -183,12 +189,33 @@ function ListadoTab() {
       conCotitular: conCotitularFiltro === "1",
       sort: orden.campo,
       dir: orden.dir,
-    });
-    if (idPeticion !== peticionIdRef.current) return; // llegó una petición más nueva primero
-    setSuscriptores(resultado.data);
-    setTotal(resultado.total);
-    setSeleccionados(new Set());
-    setCargando(false);
+    };
+    try {
+      const resultado = await api.suscriptores.listPaginado(pagina, porPagina, filtros);
+      if (idPeticion !== peticionIdRef.current) return; // llegó una petición más nueva primero
+      setSuscriptores(resultado.data);
+      setTotal(resultado.total);
+      setSeleccionados(new Set());
+      setDatosDesdeSnapshot(null);
+      setCargando(false);
+    } catch {
+      // Sin conexión: si se activó "Modo de salida" antes de salir, se reconstruye el listado
+      // (con los mismos filtros/orden/paginación) desde el snapshot completo en IndexedDB en vez
+      // de dejar la tabla cargando para siempre.
+      const snapshot = await leerSnapshot();
+      if (idPeticion !== peticionIdRef.current) return;
+      if (snapshot) {
+        const resultado = listarSuscriptoresOffline(snapshot, { pagina, porPagina, ...filtros });
+        setSuscriptores(resultado.data);
+        setTotal(resultado.total);
+        setDatosDesdeSnapshot(snapshot.generadoEn);
+      } else {
+        setSuscriptores([]);
+        setTotal(0);
+      }
+      setSeleccionados(new Set());
+      setCargando(false);
+    }
   }
 
   useEffect(() => {
@@ -216,6 +243,19 @@ function ListadoTab() {
 
   return (
     <div>
+      {datosDesdeSnapshot && (
+        <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-400">
+          Sin conexión — mostrando datos del "Modo de salida" del{" "}
+          {new Date(datosDesdeSnapshot).toLocaleString("es-CO", {
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+          .
+        </div>
+      )}
       {puedeEditar && (
         <div className="mb-3 flex flex-wrap items-center gap-2 sm:mb-4">
           <button
@@ -240,7 +280,7 @@ function ListadoTab() {
       {importAbierto && (
         <ImportExcelModal
           titulo="Importar suscriptores desde Excel"
-          descripcion="Esta es la única forma de agregar suscriptores nuevos. La clave es siempre el NUID: si ya existe, se actualizan los campos que vengan llenos en la fila; si no existe, se crea. Antes de importar, el archivo se valida (barrios y estratos contra el catálogo, NUID repetido, etc.)."
+          descripcion="Esta es la única forma de agregar suscriptores nuevos. La clave es siempre el NUID: si ya existe, se actualizan los campos que vengan llenos en la fila; si no existe, se crea. Cada fila con IDENTIFICACION también se asocia a un Tercero: si ya hay uno con esa cédula/NIT se enlaza (dos NUID de la misma persona quedan bajo el mismo Tercero), si no existe se crea uno nuevo — pero si el suscriptor ya tenía un Tercero asignado, ese vínculo no se toca. Antes de importar, el archivo se valida (barrios y estratos contra el catálogo, NUID repetido, etc.)."
           nombreReporte="suscriptores_con_observaciones.xlsx"
           onExportarPlantilla={() => api.suscriptores.export()}
           onValidar={(file) => api.suscriptores.validarImport(file)}
@@ -317,10 +357,7 @@ function ListadoTab() {
             Mostrar
             <select
               value={porPagina}
-              onChange={(e) => {
-                setPorPagina(Number(e.target.value));
-                setPorPaginaManual(true);
-              }}
+              onChange={(e) => setPorPaginaManual(Number(e.target.value))}
               className={inputClass}
             >
               {/* El valor calculado automáticamente al cargar (para llenar la pantalla justo)
@@ -540,6 +577,7 @@ function TercerosTab() {
   const [cargando, setCargando] = useState(true);
   const [editando, setEditando] = useState<Tercero | null>(null);
   const [creando, setCreando] = useState(false);
+  const [datosDesdeSnapshot, setDatosDesdeSnapshot] = useState<string | null>(null);
   const porPagina = 10;
 
   useEffect(() => {
@@ -552,9 +590,24 @@ function TercerosTab() {
 
   async function cargarTerceros() {
     setCargando(true);
-    const r = await api.terceros.listPaginado(pagina, porPagina, { q: filtroDebounced || undefined });
-    setTerceros(r.data);
-    setTotal(r.total);
+    try {
+      const r = await api.terceros.listPaginado(pagina, porPagina, { q: filtroDebounced || undefined });
+      setTerceros(r.data);
+      setTotal(r.total);
+      setDatosDesdeSnapshot(null);
+    } catch {
+      // Sin conexión: se reconstruye desde el snapshot del "Modo de salida" (IndexedDB) si existe.
+      const snapshot = await leerSnapshot();
+      if (snapshot) {
+        const r = listarTercerosOffline(snapshot, { pagina, porPagina, q: filtroDebounced || undefined });
+        setTerceros(r.data);
+        setTotal(r.total);
+        setDatosDesdeSnapshot(snapshot.generadoEn);
+      } else {
+        setTerceros([]);
+        setTotal(0);
+      }
+    }
     setCargando(false);
   }
   useEffect(() => {
@@ -566,6 +619,19 @@ function TercerosTab() {
 
   return (
     <div>
+      {datosDesdeSnapshot && (
+        <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-400">
+          Sin conexión — mostrando datos del "Modo de salida" del{" "}
+          {new Date(datosDesdeSnapshot).toLocaleString("es-CO", {
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+          .
+        </div>
+      )}
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <BusquedaInput placeholder="Buscar por nombre, documento o email..." value={filtro} onChange={setFiltro} className="w-full max-w-sm" />
         {puedeEditar && (
@@ -727,7 +793,7 @@ function TerceroModal({
       >
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-bold">{tercero ? "Tercero" : "Nuevo tercero"}</h2>
-          <button onClick={onClose} className="text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">
+          <button onClick={onClose} className="text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:text-slate-300 dark:hover:text-slate-300">
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -813,7 +879,7 @@ function TerceroModal({
                   <span>
                     {s.codigo} · {s.nombre}
                   </span>
-                  <span className="text-xs text-slate-500">Ruta {s.ruta ?? "—"}</span>
+                  <span className="text-xs text-slate-500 dark:text-slate-400">Ruta {s.ruta ?? "—"}</span>
                 </div>
               ))}
             </div>
@@ -849,24 +915,38 @@ function BarriosEstratosTab() {
   const [estratos, setEstratos] = useState<Estrato[]>([]);
   const [cargando, setCargando] = useState(true);
   const [nuevoBarrio, setNuevoBarrio] = useState("");
+  const [nuevoBarrioZona, setNuevoBarrioZona] = useState<Barrio["zona"]>("urbano");
   const [creando, setCreando] = useState(false);
   const [nuevoEstratoCodigo, setNuevoEstratoCodigo] = useState("");
   const [nuevoEstratoEtiqueta, setNuevoEstratoEtiqueta] = useState("");
+  const [nuevoEstratoCodigoIgac, setNuevoEstratoCodigoIgac] = useState("");
   const [creandoEstrato, setCreandoEstrato] = useState(false);
   const [editandoBarrioId, setEditandoBarrioId] = useState<number | null>(null);
   const [editBarrioNombre, setEditBarrioNombre] = useState("");
+  const [editBarrioZona, setEditBarrioZona] = useState<Barrio["zona"]>("urbano");
   const [editandoEstratoId, setEditandoEstratoId] = useState<number | null>(null);
   const [editEstratoCodigo, setEditEstratoCodigo] = useState("");
   const [editEstratoEtiqueta, setEditEstratoEtiqueta] = useState("");
+  const [editEstratoCodigoIgac, setEditEstratoCodigoIgac] = useState("");
   const { error, run } = useErrorHandler();
   const { error: errorEstrato, run: runEstrato } = useErrorHandler();
   const { pedirConfirmacion, modal } = useConfirm();
 
   async function cargar() {
     setCargando(true);
-    const [b, e] = await Promise.all([api.barrios.list(), api.estratos.list()]);
-    setBarrios(b);
-    setEstratos(e);
+    try {
+      const [b, e] = await Promise.all([api.barrios.list(), api.estratos.list()]);
+      setBarrios(b);
+      setEstratos(e);
+    } catch {
+      // Sin conexión: catálogo de solo lectura desde el snapshot (editarlo sin conexión no tiene
+      // sentido de todas formas, no hay dónde guardarlo).
+      const snapshot = await leerSnapshot();
+      if (snapshot) {
+        setBarrios(snapshot.barrios);
+        setEstratos(snapshot.estratos);
+      }
+    }
     setCargando(false);
   }
 
@@ -879,8 +959,9 @@ function BarriosEstratosTab() {
     if (!nuevoBarrio.trim()) return;
     setCreando(true);
     await run(async () => {
-      await api.barrios.create(nuevoBarrio.trim());
+      await api.barrios.create(nuevoBarrio.trim(), nuevoBarrioZona);
       setNuevoBarrio("");
+      setNuevoBarrioZona("urbano");
       await cargar();
     });
     setCreando(false);
@@ -891,9 +972,10 @@ function BarriosEstratosTab() {
     if (!nuevoEstratoCodigo.trim() || !nuevoEstratoEtiqueta.trim()) return;
     setCreandoEstrato(true);
     await runEstrato(async () => {
-      await api.estratos.create(nuevoEstratoCodigo.trim(), nuevoEstratoEtiqueta.trim());
+      await api.estratos.create(nuevoEstratoCodigo.trim(), nuevoEstratoEtiqueta.trim(), nuevoEstratoCodigoIgac.trim() || undefined);
       setNuevoEstratoCodigo("");
       setNuevoEstratoEtiqueta("");
+      setNuevoEstratoCodigoIgac("");
       await cargarEstratos();
       await cargar();
     });
@@ -922,13 +1004,14 @@ function BarriosEstratosTab() {
   function iniciarEdicionBarrio(b: Barrio) {
     setEditandoBarrioId(b.id);
     setEditBarrioNombre(b.nombre);
+    setEditBarrioZona(b.zona);
   }
 
   async function guardarEdicionBarrio(e: React.FormEvent) {
     e.preventDefault();
     if (editandoBarrioId === null || !editBarrioNombre.trim()) return;
     await run(async () => {
-      await api.barrios.update(editandoBarrioId, editBarrioNombre.trim());
+      await api.barrios.update(editandoBarrioId, editBarrioNombre.trim(), editBarrioZona);
       setEditandoBarrioId(null);
       await cargar();
     });
@@ -938,13 +1021,19 @@ function BarriosEstratosTab() {
     setEditandoEstratoId(e.id);
     setEditEstratoCodigo(e.codigo);
     setEditEstratoEtiqueta(e.etiqueta);
+    setEditEstratoCodigoIgac(e.codigoIgac ?? "");
   }
 
   async function guardarEdicionEstrato(e: React.FormEvent) {
     e.preventDefault();
     if (editandoEstratoId === null || !editEstratoCodigo.trim() || !editEstratoEtiqueta.trim()) return;
     await runEstrato(async () => {
-      await api.estratos.update(editandoEstratoId, editEstratoCodigo.trim(), editEstratoEtiqueta.trim());
+      await api.estratos.update(
+        editandoEstratoId,
+        editEstratoCodigo.trim(),
+        editEstratoEtiqueta.trim(),
+        editEstratoCodigoIgac.trim() || undefined
+      );
       setEditandoEstratoId(null);
       await cargarEstratos();
       await cargar();
@@ -975,6 +1064,15 @@ function BarriosEstratosTab() {
               onChange={(e) => setNuevoBarrio(e.target.value)}
               className={`${inputClass} flex-1`}
             />
+            <select
+              value={nuevoBarrioZona}
+              onChange={(e) => setNuevoBarrioZona(e.target.value as Barrio["zona"])}
+              className={`${inputClass} w-28 shrink-0`}
+              title="Zona (la CRA 825 trata distinto el área rural)"
+            >
+              <option value="urbano">Urbano</option>
+              <option value="rural">Rural</option>
+            </select>
             <button
               type="submit"
               disabled={creando}
@@ -999,6 +1097,14 @@ function BarriosEstratosTab() {
                     onChange={(e) => setEditBarrioNombre(e.target.value)}
                     className={`${inputClass} flex-1 py-1.5`}
                   />
+                  <select
+                    value={editBarrioZona}
+                    onChange={(e) => setEditBarrioZona(e.target.value as Barrio["zona"])}
+                    className={`${inputClass} w-24 shrink-0 py-1.5`}
+                  >
+                    <option value="urbano">Urbano</option>
+                    <option value="rural">Rural</option>
+                  </select>
                   <button type="submit" className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-500">
                     Guardar
                   </button>
@@ -1014,29 +1120,34 @@ function BarriosEstratosTab() {
               <div key={b.id} className="flex items-center justify-between px-4 py-2.5 text-sm">
                 <div>
                   <div className="font-medium text-slate-800 dark:text-slate-100">{b.nombre}</div>
-                  <div className="text-xs text-slate-600">
+                  <div className="text-xs text-slate-600 dark:text-slate-400">
                     {b.suscriptores} {b.suscriptores === 1 ? "suscriptor" : "suscriptores"}
                   </div>
                 </div>
-                {puedeEditar && (
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => iniciarEdicionBarrio(b)}
-                      title="Editar barrio"
-                      className="text-slate-600 hover:text-brand-600"
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      onClick={() => eliminarBarrio(b)}
-                      disabled={b.suscriptores > 0}
-                      title={b.suscriptores > 0 ? "No se puede eliminar: tiene suscriptores asignados" : "Eliminar barrio"}
-                      className="text-slate-600 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-30"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                )}
+                <div className="flex items-center gap-2">
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium capitalize text-slate-700 dark:bg-slate-800 dark:text-slate-400">
+                    {b.zona}
+                  </span>
+                  {puedeEditar && (
+                    <>
+                      <button
+                        onClick={() => iniciarEdicionBarrio(b)}
+                        title="Editar barrio"
+                        className="text-slate-600 dark:text-slate-400 hover:text-brand-600"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        onClick={() => eliminarBarrio(b)}
+                        disabled={b.suscriptores > 0}
+                        title={b.suscriptores > 0 ? "No se puede eliminar: tiene suscriptores asignados" : "Eliminar barrio"}
+                        className="text-slate-600 dark:text-slate-400 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-30"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
               )
             )}
@@ -1074,6 +1185,12 @@ function BarriosEstratosTab() {
               onChange={(e) => setNuevoEstratoEtiqueta(e.target.value)}
               className={`${inputClass} flex-1`}
             />
+            <input
+              placeholder="Cód. IGAC (opcional)"
+              value={nuevoEstratoCodigoIgac}
+              onChange={(e) => setNuevoEstratoCodigoIgac(e.target.value)}
+              className={`${inputClass} w-32`}
+            />
             <button
               type="submit"
               disabled={creandoEstrato}
@@ -1105,6 +1222,12 @@ function BarriosEstratosTab() {
                     onChange={(ev) => setEditEstratoEtiqueta(ev.target.value)}
                     className={`${inputClass} flex-1 py-1.5`}
                   />
+                  <input
+                    placeholder="Cód. IGAC"
+                    value={editEstratoCodigoIgac}
+                    onChange={(ev) => setEditEstratoCodigoIgac(ev.target.value)}
+                    className={`${inputClass} w-28 py-1.5`}
+                  />
                   <button type="submit" className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-500">
                     Guardar
                   </button>
@@ -1120,8 +1243,9 @@ function BarriosEstratosTab() {
               <div key={e.id} className="flex items-center justify-between px-4 py-2.5 text-sm">
                 <div>
                   <div className="font-medium text-slate-800 dark:text-slate-100">{e.etiqueta}</div>
-                  <div className="text-xs text-slate-600">
+                  <div className="text-xs text-slate-600 dark:text-slate-400">
                     {e.suscriptores} {e.suscriptores === 1 ? "suscriptor" : "suscriptores"}
+                    {e.codigoIgac ? ` · IGAC ${e.codigoIgac}` : ""}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -1133,7 +1257,7 @@ function BarriosEstratosTab() {
                       <button
                         onClick={() => iniciarEdicionEstrato(e)}
                         title="Editar estrato"
-                        className="text-slate-600 hover:text-brand-600"
+                        className="text-slate-600 dark:text-slate-400 hover:text-brand-600"
                       >
                         <Pencil className="h-3.5 w-3.5" />
                       </button>
@@ -1141,7 +1265,7 @@ function BarriosEstratosTab() {
                         onClick={() => eliminarEstrato(e)}
                         disabled={e.suscriptores > 0}
                         title={e.suscriptores > 0 ? "No se puede eliminar: tiene suscriptores asignados" : "Eliminar estrato"}
-                        className="text-slate-600 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-30"
+                        className="text-slate-600 dark:text-slate-400 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-30"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>

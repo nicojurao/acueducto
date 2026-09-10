@@ -50,7 +50,7 @@ function EncabezadoOrdenable({
     <th className="px-4 py-3 font-medium">
       <button
         onClick={() => onClick(columna)}
-        className={`flex items-center gap-1 hover:text-slate-700 dark:hover:text-slate-200 ${
+        className={`flex items-center gap-1 hover:text-slate-700 dark:text-slate-300 dark:hover:text-slate-200 ${
           activa ? "text-slate-700 dark:text-slate-200" : ""
         }`}
       >
@@ -134,7 +134,7 @@ export default function AtipicosPage() {
       </p>
 
       {!cargando && (
-        <p className="mb-3 text-xs text-slate-600">
+        <p className="mb-3 text-xs text-slate-600 dark:text-slate-400">
           Mostrando periodo <strong>{periodo}</strong> — {atipicos.length} resultado(s)
         </p>
       )}

@@ -21,6 +21,7 @@ import KpiCard from "../components/KpiCard";
 import ChartCard from "../components/ChartCard";
 import { SkeletonLista } from "../components/Skeleton";
 import { useEsMovil } from "../lib/useEsMovil";
+import { guardarEnCache, leerDeCache } from "../lib/cacheOffline";
 
 const COLORES_ESTADO: Record<string, string> = {
   sin_medidor: "#94a3b8",
@@ -68,7 +69,7 @@ function FiltroChip({
       className={`rounded-full border px-2.5 py-1 text-xs font-medium ${
         activo
           ? "border-brand-500 bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-400"
-          : "border-slate-300 text-slate-600 hover:border-slate-400 dark:border-slate-700"
+          : "border-slate-300 text-slate-600 dark:text-slate-400 hover:border-slate-400 dark:border-slate-700"
       }`}
     >
       {label}
@@ -110,8 +111,20 @@ export default function ReportesPage() {
   const [topBarrioFiltro, setTopBarrioFiltro] = useState("");
   const [topEstratoFiltro, setTopEstratoFiltro] = useState("");
   useEffect(() => {
-    api.suscriptores.barrios().then(setBarriosCatalogo).catch(() => {});
-    api.estratos.list().then(setEstratosCatalogo).catch(() => {});
+    api.suscriptores
+      .barrios()
+      .then((data) => {
+        guardarEnCache("dashboard_barrios", data);
+        setBarriosCatalogo(data);
+      })
+      .catch(() => setBarriosCatalogo(leerDeCache("dashboard_barrios") ?? []));
+    api.estratos
+      .list()
+      .then((data) => {
+        guardarEnCache("dashboard_estratos", data);
+        setEstratosCatalogo(data);
+      })
+      .catch(() => setEstratosCatalogo(leerDeCache("dashboard_estratos") ?? []));
   }, []);
 
   function toggleBarrio(barrio: string) {
@@ -150,31 +163,58 @@ export default function ReportesPage() {
 
   useEffect(() => {
     setCargando(true);
+    const clave = `dashboard_principal_${periodo}`;
     Promise.all([
       api.reportes.resumenMensual(),
       api.dashboard.kpis(periodo),
       api.dashboard.atipicos(periodo),
       api.reportes.porEstrato(periodo),
       api.dashboard.estadosFacturacion(periodo),
-    ]).then(([r, k, a, estrato, estados]) => {
-      setResumen(r);
-      setKpis(k);
-      setAtipicos(a);
-      setPorEstrato(estrato);
-      setEstadosFacturacion(estados.estados);
-      setEstadosFacturacionHistorico(estados.historico);
-      setCargando(false);
-    });
+    ])
+      .then(([r, k, a, estrato, estados]) => {
+        guardarEnCache(clave, { r, k, a, estrato, estados });
+        setResumen(r);
+        setKpis(k);
+        setAtipicos(a);
+        setPorEstrato(estrato);
+        setEstadosFacturacion(estados.estados);
+        setEstadosFacturacionHistorico(estados.historico);
+        setCargando(false);
+      })
+      .catch(() => {
+        // Sin conexión: se usa la última copia buena de ESTE periodo puntual si existe, y si no
+        // (nunca se vio online), se limpia en vez de dejar el periodo anterior mostrado por error
+        // — mismo cuidado que en Captura de Lecturas con el bug de "se ve el mes equivocado".
+        const cache = leerDeCache<{
+          r: typeof resumen;
+          k: typeof kpis;
+          a: typeof atipicos;
+          estrato: typeof porEstrato;
+          estados: { estados: typeof estadosFacturacion; historico: boolean };
+        }>(clave);
+        setResumen(cache?.r ?? []);
+        setKpis(cache?.k ?? null);
+        setAtipicos(cache?.a ?? []);
+        setPorEstrato(cache?.estrato ?? []);
+        setEstadosFacturacion(cache?.estados.estados ?? []);
+        setEstadosFacturacionHistorico(cache?.estados.historico ?? true);
+        setCargando(false);
+      });
   }, [periodo]);
 
   // Filtro del Top 10 consumidores: barrio o estrato, mutuamente excluyentes.
   useEffect(() => {
+    const clave = `dashboard_top_${periodo}_${topBarrioFiltro}_${topEstratoFiltro}`;
     api.dashboard
       .topConsumidores(periodo, 10, {
         barrio: topBarrioFiltro ? Number(topBarrioFiltro) : undefined,
         estrato: topEstratoFiltro ? Number(topEstratoFiltro) : undefined,
       })
-      .then(setTopConsumidores);
+      .then((data) => {
+        guardarEnCache(clave, data);
+        setTopConsumidores(data);
+      })
+      .catch(() => setTopConsumidores(leerDeCache(clave) ?? []));
   }, [periodo, topBarrioFiltro, topEstratoFiltro]);
 
   useEffect(() => {
@@ -182,7 +222,14 @@ export default function ReportesPage() {
       setPorEstratoComparar([]);
       return;
     }
-    api.reportes.porEstrato(periodoComparar).then(setPorEstratoComparar);
+    const clave = `dashboard_estrato_${periodoComparar}`;
+    api.reportes
+      .porEstrato(periodoComparar)
+      .then((data) => {
+        guardarEnCache(clave, data);
+        setPorEstratoComparar(data);
+      })
+      .catch(() => setPorEstratoComparar(leerDeCache(clave) ?? []));
   }, [periodoComparar]);
 
   // El consumo por barrio se filtra en el servidor por los mismos estratos activos en los
@@ -194,7 +241,14 @@ export default function ReportesPage() {
       setPorBarrio([]);
       return;
     }
-    api.reportes.porBarrio(periodo, estratosVisibles).then(setPorBarrio);
+    const clave = `dashboard_porBarrio_${periodo}_${estratosVisibles.join(",")}`;
+    api.reportes
+      .porBarrio(periodo, estratosVisibles)
+      .then((data) => {
+        guardarEnCache(clave, data);
+        setPorBarrio(data);
+      })
+      .catch(() => setPorBarrio(leerDeCache(clave) ?? []));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [periodo, estratosOcultos]);
 
@@ -203,7 +257,14 @@ export default function ReportesPage() {
       setPorBarrioComparar([]);
       return;
     }
-    api.reportes.porBarrio(periodoComparar, estratosVisibles).then(setPorBarrioComparar);
+    const clave = `dashboard_porBarrio_${periodoComparar}_${estratosVisibles.join(",")}`;
+    api.reportes
+      .porBarrio(periodoComparar, estratosVisibles)
+      .then((data) => {
+        guardarEnCache(clave, data);
+        setPorBarrioComparar(data);
+      })
+      .catch(() => setPorBarrioComparar(leerDeCache(clave) ?? []));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [periodoComparar, estratosOcultos]);
 
@@ -292,13 +353,14 @@ export default function ReportesPage() {
                 key={e.estado}
                 label={ESTADO_FACTURACION_LABELS[e.estado] ?? e.estado}
                 value={fmt(e.cantidad, 0)}
+                hint={e.estado === "facturando" ? "cuenta cada cotitular por separado" : undefined}
                 icon={Users}
                 color={COLORES_ESTADO[e.estado]}
                 onClick={() => navigate(`/suscriptores?estado=${e.estado}`)}
               />
             ))}
             <KpiCard
-              label="Medidores activos"
+              label="Medidores instalados"
               value={fmt(kpis.medidoresActivos, 0)}
               icon={Gauge}
               onClick={() => navigate("/medidores")}
@@ -334,7 +396,7 @@ export default function ReportesPage() {
 
           {!estadosFacturacionHistorico && periodo !== periodoActual() && (
             <p className="mb-3 text-xs text-amber-600 dark:text-amber-400 sm:mb-6">
-              "Medidores activos" y "Cobertura con medidor" de este periodo son aproximados (reflejan el estado
+              "Medidores instalados" y "Cobertura con medidor" de este periodo son aproximados (reflejan el estado
               actual, no el que tenía exactamente ese mes) — todavía no tienen una foto histórica guardada.
             </p>
           )}
@@ -353,7 +415,7 @@ export default function ReportesPage() {
                     <div className="mt-1 text-sm font-bold text-slate-800 dark:text-slate-100 sm:text-lg">
                       {fmt(promedioPorEstrato(e))} m³
                     </div>
-                    <div className="mt-0.5 hidden text-xs text-slate-600 sm:block">{fmt(e.usuarios, 0)} usuarios</div>
+                    <div className="mt-0.5 hidden text-xs text-slate-600 dark:text-slate-400 sm:block">{fmt(e.usuarios, 0)} usuarios</div>
                   </div>
                 ))}
               </div>
@@ -395,7 +457,7 @@ export default function ReportesPage() {
                       onChange={(e) => setResumenDesde(e.target.value)}
                       className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
                     />
-                    <span className="text-xs text-slate-600">a</span>
+                    <span className="text-xs text-slate-600 dark:text-slate-400">a</span>
                     <input
                       type="month"
                       value={resumenHasta}
@@ -534,7 +596,7 @@ export default function ReportesPage() {
                 {periodoComparar && (
                   <button
                     onClick={() => setPeriodoComparar("")}
-                    className="text-xs text-slate-600 hover:text-slate-600 dark:hover:text-slate-200"
+                    className="text-xs text-slate-600 dark:text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
                   >
                     quitar
                   </button>
@@ -545,7 +607,7 @@ export default function ReportesPage() {
                 <button onClick={seleccionarTodosEstratos} className="font-medium text-brand-600 hover:underline dark:text-brand-400">
                   Todos
                 </button>
-                <button onClick={deseleccionarTodosEstratos} className="font-medium text-slate-600 hover:underline">
+                <button onClick={deseleccionarTodosEstratos} className="font-medium text-slate-600 dark:text-slate-400 hover:underline">
                   Ninguno
                 </button>
               </div>
@@ -559,7 +621,7 @@ export default function ReportesPage() {
                 <button onClick={seleccionarTodosBarrios} className="font-medium text-brand-600 hover:underline dark:text-brand-400">
                   Todos
                 </button>
-                <button onClick={deseleccionarTodosBarrios} className="font-medium text-slate-600 hover:underline">
+                <button onClick={deseleccionarTodosBarrios} className="font-medium text-slate-600 dark:text-slate-400 hover:underline">
                   Ninguno
                 </button>
               </div>
@@ -624,7 +686,7 @@ export default function ReportesPage() {
                 </BarChart>
               </ResponsiveContainer>
               {estratosVisibles.length === 0 && (
-                <p className="mt-2 text-center text-xs text-slate-600">
+                <p className="mt-2 text-center text-xs text-slate-600 dark:text-slate-400">
                   Selecciona al menos un estrato arriba para ver el consumo por barrio.
                 </p>
               )}
@@ -645,7 +707,7 @@ export default function ReportesPage() {
                 {periodoComparar && (
                   <button
                     onClick={() => setPeriodoComparar("")}
-                    className="text-xs text-slate-600 hover:text-slate-600 dark:hover:text-slate-200"
+                    className="text-xs text-slate-600 dark:text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
                   >
                     quitar
                   </button>
@@ -655,7 +717,7 @@ export default function ReportesPage() {
                 <button onClick={seleccionarTodosEstratos} className="font-medium text-brand-600 hover:underline dark:text-brand-400">
                   Todos
                 </button>
-                <button onClick={deseleccionarTodosEstratos} className="font-medium text-slate-600 hover:underline">
+                <button onClick={deseleccionarTodosEstratos} className="font-medium text-slate-600 dark:text-slate-400 hover:underline">
                   Ninguno
                 </button>
               </div>
