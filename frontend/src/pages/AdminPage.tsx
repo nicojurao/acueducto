@@ -11,12 +11,14 @@ import {
   LayoutGrid,
   ShieldCheck,
   History,
+  Building2,
 } from "lucide-react";
 import { api } from "../api/client";
 import UsuariosPage from "./UsuariosPage";
 import AuditoriaPage from "./AuditoriaPage";
 import RolesPage from "./RolesPage";
 import HistorialPage from "./HistorialPage";
+import EmpresaTab from "../components/empresa/EmpresaTab";
 import { useToast } from "../contexts/ToastContext";
 import { useMensajeProgresivo } from "../lib/useMensajeProgresivo";
 
@@ -43,13 +45,14 @@ function formatBytes(bytesStr: string): string {
   return `${(bytes / 1024 ** i).toFixed(i === 0 ? 0 : 1)} ${unidades[i]}`;
 }
 
-type Tab = "resumen" | "usuarios" | "roles" | "historial" | "auditoria";
+type Tab = "resumen" | "empresa" | "usuarios" | "roles" | "historial" | "auditoria";
 
 export default function AdminPage() {
   const [tab, setTab] = useState<Tab>("resumen");
 
   const tabs: { id: Tab; label: string; icon: typeof LayoutGrid }[] = [
     { id: "resumen", label: "Resumen del sistema", icon: LayoutGrid },
+    { id: "empresa", label: "Empresa", icon: Building2 },
     { id: "usuarios", label: "Usuarios", icon: UserCog },
     { id: "roles", label: "Roles y permisos", icon: ShieldCheck },
     { id: "historial", label: "Historial de cambios", icon: History },
@@ -81,6 +84,7 @@ export default function AdminPage() {
       </div>
 
       {tab === "resumen" && <ResumenSistema />}
+      {tab === "empresa" && <EmpresaTab />}
       {tab === "usuarios" && <UsuariosPage />}
       {tab === "roles" && <RolesPage />}
       {tab === "historial" && <HistorialPage />}

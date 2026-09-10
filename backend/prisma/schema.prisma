@@ -48,14 +48,15 @@ model Suscriptor {
   // el mismo consumo medido, porque es la misma agua).
   consumoPredeterminadoAlcantarilladoM3 Decimal @db.Decimal(12, 2) @default(0)
 
-  // Identificación catastral IGAC + número de cuenta/contrato, requeridos por el reporte SUI
-  // (Formato 279 de facturación). Todos opcionales porque hoy no se tienen para el histórico
-  // completo — se van completando predio por predio.
-  numeroCuentaContrato       String?
-  zonaIgac                   String?
-  sectorIgac                 String?
-  manzanaVeredaIgac          String?
-  numeroPredioIgac           String?
+  // Número Predial Nacional (NPN) del IGAC: identificador catastral único, de 30 dígitos desde
+  // 2014 (reemplazó al código catastral anterior, de 20 dígitos y de longitud variable por
+  // municipio antes de eso). Se guardan ambos porque un mismo predio puede tener el código
+  // clásico de 20 dígitos en documentos viejos y el NPN de 30 en los nuevos — ninguno reemplaza
+  // al otro en los registros históricos. Opcionales y sin validar longitud fija en BD porque el
+  // histórico importado no los trae completos para todos los predios — se valida en la ruta al
+  // capturarlos manualmente.
+  numeroPredialNacional20     String?
+  numeroPredialNacional        String?
   // Código SUI de condición de propiedad del predio: "00" propietario, "01" poseedor,
   // "02" tenedor a cualquier titulo, "03" arrendatario. "000" (el que trae el histórico
   // importado) significa "no reportado".
@@ -71,6 +72,7 @@ model Suscriptor {
   terceroId           Int?
   tercero             Tercero?  @relation(fields: [terceroId], references: [id])
   actas               ActaInstalacion[]
+  pqrs                Pqr[]
 
   @@index([barrioId])
   @@index([estratoId])
@@ -81,6 +83,9 @@ model Suscriptor {
 model Barrio {
   id           Int          @id @default(autoincrement())
   nombre       String       @unique
+  // "urbano" | "rural" — la Resolución CRA 825 de 2017 trata distinto el área rural (aplica
+  // independientemente del número de suscriptores, y algunos rangos/beneficios difieren).
+  zona         String       @default("urbano")
   createdAt    DateTime     @default(now())
   suscriptores Suscriptor[]
 }
@@ -92,6 +97,9 @@ model Estrato {
   id           Int          @id @default(autoincrement())
   codigo       String       @unique
   etiqueta     String
+  // Código catastral IGAC del estrato, distinto del código SSPD que ya vive en `codigo` — los
+  // reportes SUI (Formato 279) piden ambas codificaciones por separado, y no siempre coinciden.
+  codigoIgac   String?
   createdAt    DateTime     @default(now())
   suscriptores Suscriptor[]
   tarifas      TarifaEstrato[]
@@ -232,6 +240,8 @@ model HistorialCambio {
   fecha         DateTime  @default(now())
 
   @@index([entidad, entidadId])
+  @@index([fecha])
+  @@index([usuarioId, fecha])
 }
 
 // Suscriptor adicional que comparte un mismo medidor (acometida multiusuario).
@@ -639,7 +649,11 @@ model TarifaEstrato {
 
 model Factura {
   id               Int       @id @default(autoincrement())
-  numero           Int       @unique // consecutivo de facturación
+  // Consecutivo de facturación. Lo asigna una SECUENCIA de Postgres (factura_numero_seq, ver
+  // migración), no código de la app: nextval() es atómico, así que dos generaciones corriendo
+  // al mismo tiempo nunca pueden calcular el mismo número (antes se calculaba en memoria con un
+  // MAX(numero)+1 leído una sola vez al empezar — con dos corridas simultáneas eso podía chocar).
+  numero           Int       @unique @default(dbgenerated("nextval('factura_numero_seq')::integer"))
   suscriptorId     Int
   suscriptor       Suscriptor @relation(fields: [suscriptorId], references: [id])
   periodo          DateTime  // primer día del mes facturado
@@ -701,6 +715,46 @@ model Pago {
   @@index([fecha])
 }
 
+// Editor visual de "sobreimpresión" de facturas: las facturas físicas vienen pre-impresas de la
+// imprenta con su propio diseño/membrete, y acá solo se define EN QUÉ COORDENADAS va cada dato
+// variable (nombre, consumo, total, etc.) sobre esa hoja — el PDF generado con una plantilla no
+// dibuja fondo ni membrete propio, solo el texto en las posiciones guardadas (ver
+// pdfFacturaPlantilla en routes/comercial/facturacion.ts). Puede haber varias plantillas
+// guardadas (ej. si la imprenta cambia el formato) y se elige cuál usar al generar el PDF.
+model PlantillaFactura {
+  id            Int      @id @default(autoincrement())
+  nombre        String
+  // Guía visual SOLO para ubicar los marcadores en el editor (ej. un escaneo de la hoja
+  // pre-impresa) — nunca se incluye en el PDF generado, es puramente de referencia al diseñar.
+  imagenGuiaUrl String?
+  // Tamaño de página en puntos PDF (72 pt = 1 pulgada). Carta = 612x792.
+  anchoPt       Float    @default(612)
+  altoPt        Float    @default(792)
+  marcadores    MarcadorPlantilla[]
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model MarcadorPlantilla {
+  id          Int              @id @default(autoincrement())
+  plantillaId Int
+  plantilla   PlantillaFactura @relation(fields: [plantillaId], references: [id], onDelete: Cascade)
+  // Clave del dato a mostrar — ver CAMPOS_DISPONIBLES en routes/comercial/facturacion.ts (ej.
+  // "nombre", "nuid", "cargoFijo", "totalPagar").
+  campo       String
+  x           Float
+  y           Float
+  fontSize    Float   @default(9)
+  align       String  @default("left") // "left" | "center" | "right"
+  bold        Boolean @default(false)
+  // Ancho de la "caja" de texto en puntos, para que align="center"/"right" tengan un ancho de
+  // referencia sobre el cual centrarse/alinearse — sin esto, el texto se alinea a la izquierda
+  // de (x,y) tal cual sin importar el "align" elegido.
+  anchoCaja   Float?
+
+  @@index([plantillaId])
+}
+
 // Tercero: la PERSONA (natural o jurídica) titular de uno o más suscriptores. El suscriptor es
 // en realidad el predio/servicio (número predial, barrio, estrato); los datos personales para
 // la facturación (y a futuro la facturación electrónica DIAN) viven acá. Una misma persona con
@@ -719,6 +773,152 @@ model Tercero {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   suscriptores    Suscriptor[]
+  pqrs            Pqr[]
+}
+
+// PQR (Petición/Queja/Reclamo/Sugerencia) radicada por el público desde pqrs.acbum.com.co —
+// formulario SIN autenticación (cualquiera puede radicar), a diferencia de todo lo demás en este
+// schema. terceroId/suscriptorId quedan opcionales porque quien radica puede no coincidir con
+// ningún Tercero existente (no se le bloquea por eso, solo no queda enlazado) y porque una PQR no
+// tiene por qué referirse a un predio puntual. nombre/documento/email/telefono se guardan tal
+// cual se radicaron (aunque coincidan con un Tercero) para que la PQR quede como constancia fija
+// de lo que la persona escribió ese día, sin depender de que el Tercero no cambie después.
+model Pqr {
+  id             Int         @id @default(autoincrement())
+  // Null brevemente entre el create() y el update() que le pone el valor real (necesita el id
+  // real, autoincremental, para armarlo) — Postgres permite varios NULL bajo un @unique sin que
+  // choquen entre sí, así que dos radicaciones al mismo tiempo no compiten por ese instante.
+  numeroRadicado String?     @unique
+  terceroId      Int?
+  tercero        Tercero?    @relation(fields: [terceroId], references: [id])
+  suscriptorId   Int?
+  suscriptor     Suscriptor? @relation(fields: [suscriptorId], references: [id])
+  nombre         String
+  documento      String?
+  email          String
+  telefono       String
+  descripcion    String
+  fotos          String[]    @default([])
+  // "radicada" | "en_proceso" | "resuelta" | "cerrada" — el seguimiento/gestión interna de esto
+  // (cambiar estado, responder) queda para una siguiente vuelta, no en este primer alcance.
+  estado         String      @default("radicada")
+  respuesta      String?
+  // Cuándo se guardó "respuesta" — NO se puede usar updatedAt para esto (cambia con cualquier
+  // edición, incluido un simple cambio de estado sin responder), y el reporte SUI necesita la
+  // fecha exacta de la respuesta como columna aparte (ver lib/suiCausales.ts).
+  respondidaEn   DateTime?
+
+  // Clasificación para el reporte mensual de PQR al SUI (Resolución SSPD 20151300054575 de 2015,
+  // modificada por la 20188000076635 de 2018 — ver lib/suiCausales.ts para el catálogo completo).
+  // El ciudadano puede sugerir causal/detalleCausal al radicar (opcional, ver publico/pqrs.ts);
+  // el staff interno los confirma o corrige, y es quien asigna tipoTramite/tipoRespuesta/
+  // tipoNotificacion, que requieren criterio técnico/legal que no se le pide al ciudadano.
+  tipoTramite      Int?    // 1-6: Reclamación/Queja/Denuncia/Recurso reposición/+Apelación/Solicitud info
+  causal           String? // "F" (Facturación) o "P" (Prestación)
+  detalleCausal    Int?    // código de 3 dígitos del Anexo (ej. 101, 303...)
+  tipoRespuesta    Int?    // 1-11: Accede/Accede parcial/No accede/Confirma/Modifica/Revoca/Rechaza/...
+  tipoNotificacion Int?    // 1-5: personal/edicto/no aplica/aviso/conducta concluyente
+  // Solo aplica cuando tipoTramite=5 (Recurso de Reposición y Subsidiario de Apelación) y la
+  // empresa confirma su decisión inicial — fecha en que se traslada el expediente a la SSPD.
+  fechaTrasladoSspd DateTime?
+
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  mensajes       PqrMensaje[]
+
+  @@index([terceroId])
+  @@index([suscriptorId])
+  @@index([estado])
+}
+
+// Hilo de conversación de una PQR: el funcionario puede pedir una aclaración (sin cerrar el
+// caso) y el ciudadano puede responderle desde la página pública de Consultar, y así seguir
+// varias rondas. "respuesta"/"respondidaEn"/"tipoRespuesta"/"tipoNotificacion" en Pqr siguen
+// siendo la respuesta OFICIAL para el reporte SUI — se llenan solo cuando el funcionario marca un
+// mensaje suyo como "esRespuestaFinal" (puede ser el primero, o uno varios días después tras ida
+// y vuelta, incluido documentar que el ciudadano respondió por otro medio, ej. una llamada).
+model PqrMensaje {
+  id               Int      @id @default(autoincrement())
+  pqrId            Int
+  pqr              Pqr      @relation(fields: [pqrId], references: [id], onDelete: Cascade)
+  autor            String   // "staff" | "ciudadano"
+  // Nombre de quien escribió, capturado tal cual en ese momento (no FK a Usuario) — mismo patrón
+  // de denormalización que el resto de la app para registros de auditoría/histórico.
+  autorNombre      String?
+  texto            String
+  archivos         String[] @default([])
+  esRespuestaFinal Boolean  @default(false)
+  createdAt        DateTime @default(now())
+
+  @@index([pqrId])
+}
+
+// Catálogo de causales del reporte SUI (Anexo A), editable desde el panel de Parametrización en
+// vez de vivir fijo en código — si el SUI publica un anexo nuevo, o el staff detecta que falta
+// alguna, se agrega sin necesitar un despliegue. Pqr.detalleCausal guarda el código tal cual (no
+// es FK) a propósito: así un código nunca queda huérfano en el histórico si algún día se
+// desactiva o se corrige el texto.
+model PqrCausal {
+  id        Int      @id @default(autoincrement())
+  codigo    Int      @unique
+  grupo     String // "F" (Facturación) o "P" (Prestación)
+  detalle   String
+  // Deja de ofrecerse en los selectores (radicar público, clasificar interno) pero no se borra:
+  // preserva el histórico de cualquier PQR que ya lo tenga asignado.
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+// Fila única (id siempre 1) con parámetros editables del módulo de PQRS — hoy los tres encabezados
+// que se anteponen a cada correo que le llega al ciudadano (radicación, respuesta/aclaración del
+// funcionario, y cierre/respuesta final), pero deja espacio para más sin necesitar tabla nueva.
+model PqrConfiguracion {
+  id                   Int      @id @default(1)
+  encabezadoRadicacion String   @default("")
+  encabezadoRespuesta  String   @default("")
+  encabezadoCierre     String   @default("")
+  updatedAt            DateTime @updatedAt
+}
+
+// Fila única (id siempre 1) con la identidad de la entidad que opera este despliegue — antes vivía
+// repartida entre .env (backend) y un archivo TS editado a mano (frontend); ahora se configura una
+// sola vez desde el wizard de primer uso (o después, desde el panel de administración) y queda acá
+// para que TODO el sistema (correos, PDFs, reporte SUI, CORS, dominios públicos) lea de un solo
+// lugar. `configuradoEn` es la señal de "todavía falta el wizard" (null = falta).
+model Empresa {
+  id                Int       @id @default(1)
+  // Datos de la empresa
+  nit               String    @default("")
+  nitDv             String    @default("")
+  nombre            String    @default("")
+  nombreCorto       String    @default("")
+  direccion         String    @default("")
+  sitioWeb          String    @default("")
+  email             String    @default("")
+  telefonos         String    @default("")
+  // Marca: un solo color del que se deriva toda la escala visual (claro y oscuro), y el logo.
+  colorMarca        String    @default("#00487f")
+  logoRuta          String?
+  // Catastral — código DANE (departamento-municipio-centro poblado) que exige el reporte SUI, y
+  // el GLN de GS1 para el código de barras de recaudo en la factura (opcional, no todos lo tienen).
+  daneDepartamento  String    @default("")
+  daneMunicipio     String    @default("")
+  daneCentroPoblado String    @default("")
+  glnGs1            String    @default("")
+  // Dominios reales del despliegue — de estos depende qué app se muestra por hostname, los links
+  // de seguimiento en los correos de PQRS, y la whitelist de CORS.
+  dominioOperativo  String    @default("")
+  dominioPqrs       String    @default("")
+  dominioCalidad    String    @default("")
+  // Correo saliente (PQRS) — antes SMTP_* por variable de entorno.
+  smtpHost          String    @default("")
+  smtpPort          Int?
+  smtpUser          String    @default("")
+  smtpPass          String    @default("")
+  smtpFrom          String    @default("")
+  configuradoEn     DateTime?
+  updatedAt         DateTime  @updatedAt
 }
 
 // Ciclo de facturación: cada periodo (mes) se genera entre los últimos días del mes y los
@@ -732,6 +932,16 @@ model PeriodoFacturacion {
   estado          String    @default("abierto") // "abierto" | "cerrado"
   fechaGeneracion DateTime?
   fechaCierre     DateTime?
+  // Fecha límite de pago del periodo, informativa (además de Factura.fechaVencimiento, que es
+  // por factura individual): sirve de referencia para calcular cuándo se cumplen los mínimos de
+  // mora del Art. 140 de la Ley 142 de 1994 (2 periodos si la facturación es bimestral, 3 si es
+  // mensual) antes de poder suspender el servicio.
+  fechaLimite     DateTime?
+  // Fecha a partir de la cual un suscriptor en mora de este periodo puede pasar a estado
+  // suspendido. Es SOLO el dato de la regla; Fluvi todavía no tiene un proceso que la use para
+  // suspender automáticamente ni para dejar constancia del aviso previo que exige la Ley 142
+  // (Art. 140: causal, recursos, plazo y autoridad) — eso queda pendiente como trabajo futuro.
+  fechaSuspension DateTime?
   cerradoPorId    Int?
   cerradoPor      Usuario?  @relation(fields: [cerradoPorId], references: [id], onDelete: SetNull)
   observaciones   String?
@@ -752,4 +962,51 @@ model FacturacionOmitida {
 
   @@unique([suscriptorId, periodo])
   @@index([periodo])
+}
+
+// ===================== CALIDAD: control documental (SGC) =====================
+
+// Documento controlado del Sistema de Gestión de Calidad (procedimiento, formato, instructivo,
+// manual), identificado por su código (ej. P-OP-001, F-SGC-003). El documento en sí (el archivo)
+// vive en VersionDocumentoSgc — este modelo es solo la ficha/identidad que agrupa sus versiones.
+// Se consulta sin autenticación desde calidad.acbum.com.co (ver routes/publico/documentosSgc.ts),
+// que solo expone los que estén en estado "vigente".
+model DocumentoSgc {
+  id        Int      @id @default(autoincrement())
+  codigo    String   @unique // "P-OP-001", "F-SGC-003", "I-...", "M-..."
+  titulo    String
+  tipo      String   // "procedimiento" | "formato" | "instructivo" | "manual"
+  proceso   String   // "comercial" | "inventario" | "facturacion" | "calidad" | ...
+  // "vigente" | "obsoleto" | "en_revision" — solo "vigente" se expone en el sitio público.
+  estado    String   @default("vigente")
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  versiones VersionDocumentoSgc[]
+
+  @@index([proceso])
+  @@index([estado])
+}
+
+// Una fila por cada versión subida de un DocumentoSgc. Nunca se borra al subir una nueva versión
+// (trazabilidad para auditorías ISO 9001): la anterior se marca vigente=false y queda de solo
+// lectura. A lo sumo una versión por documento tiene vigente=true a la vez (se aplica en la ruta,
+// no hay constraint de BD para eso — igual que el patrón de "una sola vigente" en Tarifa/Lectura).
+model VersionDocumentoSgc {
+  id                Int          @id @default(autoincrement())
+  documentoId       Int
+  documento         DocumentoSgc @relation(fields: [documentoId], references: [id])
+  numeroVersion     Int
+  archivoUrl        String
+  vigente           Boolean      @default(true)
+  fechaVigencia     DateTime
+  descripcionCambio String?
+  elaboroPor        String?
+  revisoPor         String?
+  aproboPor         String?
+  createdAt         DateTime     @default(now())
+
+  @@unique([documentoId, numeroVersion])
+  @@index([documentoId, vigente])
 }

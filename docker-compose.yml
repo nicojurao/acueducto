@@ -53,7 +53,6 @@ services:
     volumes:
       - ./backend:/app
       - backend_node_modules:/app/node_modules
-      - "./LECTURAS DE MEDIDORES 2026.xlsx:/data/lecturas.xlsx:ro"
     depends_on:
       db:
         condition: service_healthy
