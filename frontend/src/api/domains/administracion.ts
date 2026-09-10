@@ -152,6 +152,15 @@ export const historialApi = {
     if (filtros?.campo) qs.set("campo", filtros.campo);
     return request<{ data: HistorialCambio[]; total: number; page: number; limit: number }>(`/api/historial?${qs}`);
   },
+  export: (filtros?: { entidad?: string; usuarioId?: number; desde?: string; hasta?: string; campo?: string }) => {
+    const qs = new URLSearchParams();
+    if (filtros?.entidad) qs.set("entidad", filtros.entidad);
+    if (filtros?.usuarioId) qs.set("usuarioId", String(filtros.usuarioId));
+    if (filtros?.desde) qs.set("desde", filtros.desde);
+    if (filtros?.hasta) qs.set("hasta", filtros.hasta);
+    if (filtros?.campo) qs.set("campo", filtros.campo);
+    return descargarArchivo(`/api/historial/export?${qs}`, `historial_de_cambios.xlsx`);
+  },
 };
 
 export const auditoriaApi = {

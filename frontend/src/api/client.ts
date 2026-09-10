@@ -10,6 +10,9 @@ export * from "./domains/administracion.js";
 export * from "./domains/comercial.js";
 export * from "./domains/facturacion.js";
 export * from "./domains/inventario.js";
+export * from "./domains/pqrs.js";
+export * from "./domains/calidad.js";
+export * from "./domains/empresa.js";
 
 import { authApi } from "./domains/auth.js";
 import { usuariosApi, rolesApi, historialApi, auditoriaApi, adminApi } from "./domains/administracion.js";
@@ -33,6 +36,9 @@ import {
 } from "./domains/comercial.js";
 import { inventarioApi } from "./domains/inventario.js";
 import { facturacionApi } from "./domains/facturacion.js";
+import { pqrsApi } from "./domains/pqrs.js";
+import { documentosSgcApi } from "./domains/calidad.js";
+import { empresaApi } from "./domains/empresa.js";
 
 export const api = {
   auth: authApi,
@@ -59,4 +65,7 @@ export const api = {
   dashboard: dashboardApi,
   facturacion: facturacionApi,
   terceros: tercerosApi,
+  pqrs: pqrsApi,
+  documentosSgc: documentosSgcApi,
+  empresa: empresaApi,
 };

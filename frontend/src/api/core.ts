@@ -3,6 +3,11 @@
 export const API_URL = import.meta.env.VITE_API_URL ?? "";
 
 const TOKEN_KEY = "medidores_token";
+// Copia del usuario de la última sesión válida: si el fontanero pierde conexión (o se le
+// cierra la app) y la vuelve a abrir sin internet, esto permite seguir mostrando la app como
+// autenticado en lugar de forzarlo a un login que no puede completar sin red. Se reemplaza
+// por la respuesta real del servidor apenas hay conexión de nuevo (ver AuthProvider).
+const USUARIO_KEY = "medidores_usuario";
 
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
@@ -11,6 +16,21 @@ export function getToken(): string | null {
 export function setToken(token: string | null) {
   if (token) localStorage.setItem(TOKEN_KEY, token);
   else localStorage.removeItem(TOKEN_KEY);
+  if (!token) localStorage.removeItem(USUARIO_KEY);
+}
+
+export function getUsuarioGuardado<T>(): T | null {
+  const raw = localStorage.getItem(USUARIO_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
+export function guardarUsuario(usuario: unknown): void {
+  localStorage.setItem(USUARIO_KEY, JSON.stringify(usuario));
 }
 
 function authHeaders(): Record<string, string> {

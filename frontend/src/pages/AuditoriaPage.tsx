@@ -109,11 +109,10 @@ function Paginacion({
 function SesionesTab() {
   const esMovil = useEsMovil();
   const { contenedorRef, filas: filasAuto } = useFilasAutoajustadas(44, { minimo: esMovil ? 4 : 6 });
-  const [porPagina, setPorPagina] = useState(() => (esMovil ? 5 : 10));
-  const [porPaginaManual, setPorPaginaManual] = useState(false);
-  useEffect(() => {
-    if (!porPaginaManual) setPorPagina(filasAuto);
-  }, [filasAuto, porPaginaManual]);
+  // Derivado en vez de sincronizado con un efecto aparte: ver el comentario en SuscriptoresPage
+  // (mismo patrón) — evita el doble pedido al montar que se describe más abajo.
+  const [porPaginaManual, setPorPaginaManual] = useState<number | null>(null);
+  const porPagina = porPaginaManual ?? filasAuto;
   const { usuario } = useAuth();
   const { pedirConfirmacion, modal: modalConfirmacion } = useConfirm();
   const [sesiones, setSesiones] = useState<InicioSesion[]>([]);
@@ -129,11 +128,9 @@ function SesionesTab() {
     api.usuarios.list().then(setUsuarios);
   }, []);
 
-  // porPagina cambia solo una vez que useFilasAutoajustadas termina de medir el layout (después
-  // del primer render), así que este efecto dispara DOS pedidos casi seguidos al montar (uno
-  // con el porPagina inicial, otro con el ya ajustado). Sin descartar la respuesta más vieja si
-  // llega después, esa pisa a la buena y la tabla se queda en blanco hasta que algo (redimensionar,
-  // cambiar de pestaña) fuerza un nuevo pedido que sí gana la carrera.
+  // Guarda contra respuestas que lleguen desordenadas (ej. cambiar de filtro rápido antes de que
+  // vuelva el pedido anterior): si una respuesta llega y ya no es la del pedido más reciente, se
+  // descarta en vez de pisar la tabla con datos viejos.
   const peticionIdRef = useRef(0);
   function cargar() {
     const idPeticion = ++peticionIdRef.current;
@@ -220,10 +217,7 @@ function SesionesTab() {
           Mostrar
           <select
             value={porPagina}
-            onChange={(e) => {
-              setPorPagina(Number(e.target.value));
-              setPorPaginaManual(true);
-            }}
+            onChange={(e) => setPorPaginaManual(Number(e.target.value))}
             className={inputClass}
           >
             {[...new Set([porPagina, ...TAMANOS_PAGINA])]
@@ -366,11 +360,8 @@ function SesionesTab() {
 function FallidosTab() {
   const esMovil = useEsMovil();
   const { contenedorRef, filas: filasAuto } = useFilasAutoajustadas(44, { minimo: esMovil ? 4 : 6 });
-  const [porPagina, setPorPagina] = useState(() => (esMovil ? 5 : 10));
-  const [porPaginaManual, setPorPaginaManual] = useState(false);
-  useEffect(() => {
-    if (!porPaginaManual) setPorPagina(filasAuto);
-  }, [filasAuto, porPaginaManual]);
+  const [porPaginaManual, setPorPaginaManual] = useState<number | null>(null);
+  const porPagina = porPaginaManual ?? filasAuto;
   const [intentos, setIntentos] = useState<IntentoLoginFallido[]>([]);
   const [total, setTotal] = useState(0);
   const [pagina, setPagina] = useState(1);
@@ -383,8 +374,7 @@ function FallidosTab() {
     return () => clearTimeout(t);
   }, [identificadorFiltro]);
 
-  // Ver el mismo comentario en SesionesTab: sin esto, la respuesta del porPagina inicial puede
-  // llegar después de la del porPagina ya ajustado y dejar la tabla en blanco.
+  // Ver el comentario en SesionesTab: descarta respuestas desordenadas.
   const peticionIdRef = useRef(0);
   useEffect(() => {
     const idPeticion = ++peticionIdRef.current;
@@ -423,10 +413,7 @@ function FallidosTab() {
           Mostrar
           <select
             value={porPagina}
-            onChange={(e) => {
-              setPorPagina(Number(e.target.value));
-              setPorPaginaManual(true);
-            }}
+            onChange={(e) => setPorPaginaManual(Number(e.target.value))}
             className={inputClass}
           >
             {[...new Set([porPagina, ...TAMANOS_PAGINA])]
@@ -516,7 +503,7 @@ export default function AuditoriaPage() {
             className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium ${
               tab === t.id
                 ? "border-brand-500 text-brand-600"
-                : "border-transparent text-slate-700 hover:text-slate-700 dark:hover:text-slate-300"
+                : "border-transparent text-slate-700 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
             }`}
           >
             {t.label}

@@ -1,5 +1,15 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
-import { api, getToken, setToken, refrescarMediaToken, limpiarMediaToken, cargarEstratos, Usuario } from "../api/client";
+import {
+  api,
+  getToken,
+  setToken,
+  refrescarMediaToken,
+  limpiarMediaToken,
+  cargarEstratos,
+  getUsuarioGuardado,
+  guardarUsuario,
+  Usuario,
+} from "../api/client";
 
 interface AuthState {
   usuario: Usuario | null;
@@ -31,10 +41,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // <img src={urlFoto(...)}> se pinta con mediaToken aún null, cae al token de sesión
         // completo (que el backend rechaza por no ser tipo "media") y la foto rompe hasta el
         // próximo re-render — el bug intermitente de "a veces no carga la foto".
-        await Promise.all([refrescarMediaToken(), cargarEstratos()]);
+        // cargarEstratos() puede dar 403 si el rol no tiene "suscriptores_ver"/"_avanzado" (ej. un
+        // rol solo de Documentos SGC o Inventario) — no debe tumbar la carga de sesión completa
+        // por eso, solo se queda sin las etiquetas de estrato (que ese rol no usa igual).
+        await Promise.all([refrescarMediaToken(), cargarEstratos().catch(() => {})]);
+        guardarUsuario(u);
         setUsuario(u);
       })
-      .catch(() => setToken(null))
+      .catch((err) => {
+        // Si el fetch falla por falta de red (TypeError, sin llegar a preguntarle al servidor),
+        // NO es lo mismo que un token inválido/expirado — este último llega como un 401 real y
+        // ya se maneja aparte (ver handleUnauthorized en api/core.ts, que borra el token). Acá
+        // solo cae el caso "no hay internet en este momento": un fontanero que estaba trabajando
+        // en campo, se le fue la señal y se le cerró la app, no debe quedar bloqueado sin poder
+        // ni abrir la pantalla — se usa la última copia del usuario guardada localmente para que
+        // pueda seguir viendo/usando la app (las lecturas ya se guardan offline aparte, ver
+        // offlineQueue.ts) hasta que vuelva la conexión.
+        if (!navigator.onLine || err instanceof TypeError) {
+          const guardado = getUsuarioGuardado<Usuario>();
+          if (guardado) setUsuario(guardado);
+          return;
+        }
+        setToken(null);
+      })
       .finally(() => setCargando(false));
   }, []);
 
@@ -57,7 +86,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function login(identificador: string, password: string) {
     const { token, usuario: u } = await api.auth.login(identificador, password);
     setToken(token);
-    await Promise.all([refrescarMediaToken(), cargarEstratos()]);
+    // Ver comentario arriba: cargarEstratos() puede dar 403 según el rol, y eso no debe hacer
+    // fallar el login (que ya fue exitoso del lado del servidor).
+    await Promise.all([refrescarMediaToken(), cargarEstratos().catch(() => {})]);
+    guardarUsuario(u);
     setUsuario(u);
   }
 
@@ -77,7 +109,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function refrescarUsuario() {
-    setUsuario(await api.auth.me());
+    const u = await api.auth.me();
+    guardarUsuario(u);
+    setUsuario(u);
   }
 
   return (

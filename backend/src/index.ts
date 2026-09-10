@@ -25,7 +25,14 @@ import {
 import { actasRouter } from "./routes/comercial/actas.js";
 import { facturacionRouter } from "./routes/comercial/facturacion.js";
 import { tercerosRouter } from "./routes/comercial/terceros.js";
+import { offlineRouter } from "./routes/comercial/offline.js";
 import { authRouter } from "./routes/auth/auth.js";
+import { pqrsPublicoRouter } from "./routes/publico/pqrs.js";
+import { pqrsRouter } from "./routes/comercial/pqrs.js";
+import { documentosSgcPublicoRouter } from "./routes/publico/documentosSgc.js";
+import { documentosSgcRouter } from "./routes/calidad/documentosSgc.js";
+import { empresaPublicoRouter } from "./routes/publico/empresa.js";
+import { empresaRouter } from "./routes/administracion/empresa.js";
 import { usuariosRouter } from "./routes/administracion/usuarios.js";
 import { rolesRouter } from "./routes/administracion/roles.js";
 import { barriosRouter } from "./routes/comercial/barrios.js";
@@ -48,16 +55,19 @@ import { adminRouter } from "./routes/administracion/admin.js";
 import { requireAuth, requireAuthQuery, requirePermiso, requirePermisoCatalogos, requirePermisoVerAvanzado } from "./middleware/auth.js";
 import { limiteApi } from "./middleware/rateLimit.js";
 import { leerArchivo } from "./lib/storage.js";
+import { obtenerEmpresa } from "./lib/empresaCache.js";
 import { iniciarCronSnapshotAlmacenamiento } from "./lib/snapshotAlmacenamiento.js";
 import { iniciarCronSnapshotPeriodo } from "./lib/snapshotPeriodo.js";
 
 // Dominios desde los que se permite llamar a la API por CORS. Las llamadas normales de la app
 // (navegador -> mismo origen -> Vite hace de proxy hacia este backend) no pasan por aquí, así
 // que esto es solo una capa extra de defensa por si un token se filtrara y se intentara usar
-// desde otro sitio. Configurable por env var para no tener que tocar código si cambia el dominio.
-const origenesPermitidos = (
-  process.env.CORS_ORIGINS ?? "https://operativo.acbum.com.co,http://localhost:5173"
-)
+// desde otro sitio. Se arma en dos partes: un fallback fijo (CORS_ORIGINS por env, o localhost
+// para desarrollo) MÁS los dominios que la entidad configuró en el wizard/panel de administración
+// (Empresa.dominioOperativo/Pqrs/Calidad) — estos últimos se consultan en caliente en cada
+// request (con caché, ver lib/empresaCache.ts) para que un cambio de dominio no exija reiniciar
+// el backend.
+const origenesFallback = (process.env.CORS_ORIGINS ?? "http://localhost:5173")
   .split(",")
   .map((o) => o.trim())
   .filter(Boolean);
@@ -73,9 +83,14 @@ app.set("trust proxy", 1);
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(
   cors({
-    origin: (origen, callback) => {
+    origin: async (origen, callback) => {
       // Sin header Origin (curl, apps móviles, requests server-a-server) o en la whitelist: ok.
-      if (!origen || origenesPermitidos.includes(origen)) return callback(null, true);
+      if (!origen || origenesFallback.includes(origen)) return callback(null, true);
+      const empresa = await obtenerEmpresa();
+      const origenesEmpresa = [empresa.dominioOperativo, empresa.dominioPqrs, empresa.dominioCalidad]
+        .filter(Boolean)
+        .map((dominio) => `https://${dominio}`);
+      if (origenesEmpresa.includes(origen)) return callback(null, true);
       callback(new Error("Origen no permitido por CORS"));
     },
     // Sin esto, un fetch cross-origin no puede LEER headers de respuesta que no sean los
@@ -120,6 +135,13 @@ app.get("/uploads/*", requireAuthQuery, async (req, res) => {
 
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 app.use("/api/auth", authRouter);
+// Módulos públicos del backend (sin login): el formulario de pqrs.acbum.com.co y la consulta de
+// documentos SGC de calidad.acbum.com.co. Van antes de requireAuth a propósito, igual que /api/auth.
+app.use("/api/publico/pqrs", pqrsPublicoRouter);
+app.use("/api/publico/documentos-sgc", documentosSgcPublicoRouter);
+// Identidad de la entidad (nombre, logo, color, dominios) — también sin sesión: la necesita el
+// login (antes de autenticarse) y los dos sitios públicos de arriba.
+app.use("/api/publico/empresa", empresaPublicoRouter);
 
 // Todo lo demás requiere sesión. El acceso a cada módulo depende de los permisos
 // del rol del usuario (ver backend/src/lib/permisos.ts y la pantalla de Roles).
@@ -131,6 +153,11 @@ app.use("/api/barrios", requirePermiso("suscriptores_ver", "suscriptores_avanzad
 app.use("/api/estratos", requirePermiso("suscriptores_ver", "suscriptores_avanzado"), estratosRouter);
 app.use("/api/medidores", requirePermiso("medidores_ver", "medidores_avanzado"), medidoresRouter);
 app.use("/api/lecturas", requirePermiso("lecturas"), lecturasRouter);
+// Sin requirePermiso acá a propósito: el filtrado real es por SECCIÓN dentro del handler (ver
+// offline.ts), según los permisos concretos de quien pide el snapshot — así alguien con un solo
+// permiso (ej. solo "lecturas") igual puede llamarlo y recibe el núcleo que le corresponde, sin
+// que closures de otros módulos (facturación, inventario) le lleguen sin tener acceso real a eso.
+app.use("/api/offline", offlineRouter);
 app.use("/api/reportes", reportesRouter);
 app.use("/api/dashboard", requirePermiso("dashboard"), dashboardRouter);
 // Permisos por ruta ADENTRO del router (ver/avanzado/pagos difieren por endpoint).
@@ -142,6 +169,7 @@ app.use("/api/diametros", requirePermisoCatalogos, diametrosRouter);
 app.use("/api/lotes", requirePermisoCatalogos, lotesRouter);
 app.use("/api/variantes", requirePermisoCatalogos, variantesRouter);
 app.use("/api/actas", requirePermisoVerAvanzado("actas_ver", "actas_avanzado"), actasRouter);
+app.use("/api/pqrs", requirePermisoVerAvanzado("pqrs_ver", "pqrs_avanzado"), pqrsRouter);
 app.use("/api/puntos-aforo", requirePermiso("aforos_ver", "aforos_avanzado"), puntosAforoRouter);
 app.use("/api/aforos/kpis", requirePermiso("aforos_ver", "aforos_avanzado"), aforosKpisRouter);
 app.use("/api/aforos", requirePermiso("aforos_ver", "aforos_avanzado"), aforosRouter);
@@ -157,6 +185,12 @@ app.use("/api/roles", requirePermiso("roles"), rolesRouter);
 app.use("/api/historial", requirePermiso("historial"), historialRouter);
 app.use("/api/auditoria", requirePermiso("auditoria"), auditoriaRouter);
 app.use("/api/admin", requirePermiso("admin_panel"), adminRouter);
+app.use("/api/admin/empresa", requirePermiso("admin_panel"), empresaRouter);
+app.use(
+  "/api/documentos-sgc",
+  requirePermisoVerAvanzado("documentos_sgc_ver", "documentos_sgc_avanzado"),
+  documentosSgcRouter
+);
 
 // Red de seguridad final: cualquier error que llegue hasta acá (gracias a "express-async-errors")
 // se responde como 500 en vez de dejar caer el proceso completo. Debe ir después de todas las

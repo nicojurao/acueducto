@@ -11,7 +11,12 @@ export default defineConfig({
     // preparado para cuando se pase a servir el build.
     VitePWA({
       registerType: "autoUpdate",
-      injectRegister: "auto",
+      // "auto" solo inyecta un <script> que hace un `serviceWorker.register()` sencillo, sin
+      // revisar nunca si hay una versión nueva ni recargar la pestaña — por eso "autoUpdate" no
+      // alcanzaba solo con esto: el navegador quedaba con el service worker viejo indefinidamente
+      // hasta un hard refresh. Se registra a mano en main.tsx con virtual:pwa-register, que sí
+      // revisa periódicamente y recarga solo cuando encuentra una versión nueva.
+      injectRegister: false,
       manifest: {
         name: "Fluvi — Gestión de Acueducto",
         short_name: "Fluvi",
@@ -26,6 +31,14 @@ export default defineConfig({
       workbox: {
         globPatterns: ["**/*.{js,css,html,svg,png,ico}"],
         navigateFallbackDenylist: [/^\/api\//, /^\/uploads\//],
+        // "registerType: autoUpdate" NO alcanza por sí solo para esto — son dos flags de workbox
+        // aparte, y sin ellos el service worker generado se queda esperando un postMessage
+        // "SKIP_WAITING" del cliente que nunca llega (eso es lo que hacía el <script> que se
+        // sacó arriba), y nunca reclama el control de las pestañas ya abiertas. Con esto, el
+        // service worker nuevo se activa solo apenas se instala y toma control de todo enseguida
+        // — lo que a su vez dispara el "controllerchange" que main.tsx escucha para recargar.
+        skipWaiting: true,
+        clientsClaim: true,
       },
     }),
   ],

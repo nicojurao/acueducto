@@ -4,6 +4,7 @@ import { Eye, EyeOff, Sun, Moon, Gauge, MapPin, ClipboardList, BarChart3 } from 
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
 import { inputClass } from "../lib/ui";
+import { useEmpresa, urlLogoEmpresa } from "../lib/empresaRuntime";
 
 const caracteristicas = [
   { icon: Gauge, texto: "Inventario y control de medidores" },
@@ -15,6 +16,7 @@ const caracteristicas = [
 export default function LoginPage() {
   const { login } = useAuth();
   const { dark, toggle } = useTheme();
+  const empresa = useEmpresa();
   const navigate = useNavigate();
   const [identificador, setIdentificador] = useState("");
   const [password, setPassword] = useState("");
@@ -29,8 +31,15 @@ export default function LoginPage() {
     try {
       await login(identificador, password);
       navigate("/");
-    } catch {
-      setError("Cédula/usuario o contraseña incorrectos.");
+    } catch (err) {
+      // Sin conexión, el fetch ni llega a preguntarle al servidor — falla como TypeError, no
+      // como un 401. Sin distinguirlo, se le decía "usuario o contraseña incorrectos" a alguien
+      // que en realidad solo se quedó sin señal (típico en campo, celular del fontanero).
+      if (!navigator.onLine || err instanceof TypeError) {
+        setError("Sin conexión a internet. Conéctate e inténtalo de nuevo.");
+      } else {
+        setError("Cédula/usuario o contraseña incorrectos.");
+      }
     } finally {
       setCargando(false);
     }
@@ -49,9 +58,11 @@ export default function LoginPage() {
       <div className="grid w-full max-w-3xl overflow-hidden rounded-xl border border-brand-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900 md:grid-cols-2">
         <div className="hidden flex-col justify-between bg-gradient-to-br from-brand-600 to-brand-800 p-8 text-white md:flex">
           <div className="flex items-center gap-3">
-            <img src="/logo-acbum.png" alt="Logo ACBUM" className="h-14 w-14 shrink-0 object-contain" />
+            {urlLogoEmpresa() && (
+              <img src={urlLogoEmpresa()} alt={`Logo ${empresa.nombreCorto}`} className="h-14 w-14 shrink-0 object-contain" />
+            )}
             <div>
-              <div className="text-base font-bold leading-tight">Acueducto Comunitario Barrios Unidos de Mocoa</div>
+              <div className="text-base font-bold leading-tight">{empresa.nombre}</div>
               <div className="mt-0.5 text-xs text-brand-100">Sistema de gestión operativa y ambiental</div>
             </div>
           </div>
@@ -68,14 +79,16 @@ export default function LoginPage() {
               ))}
             </ul>
           </div>
-          <div className="text-xs text-brand-200">© {new Date().getFullYear()} Acueducto</div>
+          <div className="text-xs text-brand-200">© {new Date().getFullYear()} {empresa.nombreCorto}</div>
         </div>
 
         <div className="flex flex-col justify-center p-6 sm:p-8">
           <div className="mb-6 flex flex-col items-center gap-2 text-center md:hidden">
-            <img src="/logo-acbum.png" alt="Logo ACBUM" className="h-12 w-12 object-contain" />
+            {urlLogoEmpresa() && (
+              <img src={urlLogoEmpresa()} alt={`Logo ${empresa.nombreCorto}`} className="h-12 w-12 object-contain" />
+            )}
             <div>
-              <div className="text-base font-bold">Acueducto Comunitario Barrios Unidos de Mocoa</div>
+              <div className="text-base font-bold">{empresa.nombre}</div>
               <div className="text-xs text-slate-700 dark:text-slate-400">Sistema de gestión operativa y ambiental</div>
             </div>
           </div>
@@ -114,7 +127,7 @@ export default function LoginPage() {
                   type="button"
                   onClick={() => setVerPassword((v) => !v)}
                   tabIndex={-1}
-                  className="absolute inset-y-0 right-0 flex items-center px-2.5 text-slate-600 hover:text-slate-600 dark:hover:text-slate-200"
+                  className="absolute inset-y-0 right-0 flex items-center px-2.5 text-slate-600 dark:text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
                 >
                   {verPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>

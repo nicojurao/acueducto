@@ -10,7 +10,8 @@ const ThemeContext = createContext<ThemeState | null>(null);
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [dark, setDark] = useState(() => {
     const stored = localStorage.getItem("theme");
-    return stored ? stored === "dark" : true;
+    // Claro por defecto hasta que el usuario elija lo contrario a mano (queda guardado abajo).
+    return stored === "dark";
   });
 
   useEffect(() => {

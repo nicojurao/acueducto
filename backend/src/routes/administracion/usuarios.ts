@@ -149,6 +149,17 @@ usuariosRouter.delete("/:id", async (req, res) => {
   }
   const usuario = await prisma.usuario.findUnique({ where: { id: Number(req.params.id) } });
   if (!usuario) return res.status(404).json({ error: "No encontrado" });
+
+  const tienePrestamos = await prisma.prestamoInventario.count({ where: { usuarioId: usuario.id } });
+  if (tienePrestamos > 0) {
+    return res.status(400).json({
+      error: "No se puede eliminar: el usuario tiene préstamos de inventario registrados a su nombre.",
+    });
+  }
+
+  // El historial de inicios de sesión es solo un log de auditoría atado a la cuenta, no un dato
+  // de negocio — se borra junto con el usuario para no dejar una FK huérfana bloqueando el delete.
+  await prisma.inicioSesion.deleteMany({ where: { usuarioId: usuario.id } });
   await prisma.usuario.delete({ where: { id: usuario.id } });
   if (usuario.foto) await borrarArchivo(usuario.foto);
   res.status(204).end();

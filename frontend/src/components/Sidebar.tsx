@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   Gauge,
@@ -17,28 +17,31 @@ import {
   Home,
   ShieldAlert,
   Receipt,
+  MessageSquareWarning,
+  FileText,
 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
-import { urlFoto } from "../api/client";
 import PerfilModal from "./PerfilModal";
+import FotoPerfil from "./FotoPerfil";
 import GlobalSearch from "./GlobalSearch";
 import { listarPendientes, listarPendientesNovedad } from "../lib/offlineQueue";
 import { useCierreAnimado } from "../lib/useCierreAnimado";
+import { useEmpresa, urlLogoEmpresa } from "../lib/empresaRuntime";
 
 type Link = { to: string; label: string; icon: typeof LayoutDashboard; permiso?: string | string[] };
 type Entrada = Link | { label: string; icon: typeof LayoutDashboard; children: Link[] };
 
 const medicion: Link[] = [
-  { to: "/medicion", label: "Dashboard", icon: LayoutDashboard, permiso: "dashboard" },
-  { to: "/suscriptores", label: "Suscriptores", icon: Users, permiso: "suscriptores_ver" },
   { to: "/medidores", label: "Medidores", icon: Gauge, permiso: ["medidores_ver", "medidores_avanzado"] },
-  { to: "/mapa", label: "Mapa", icon: Map, permiso: "mapa" },
   { to: "/lecturas", label: "Captura de Lecturas", icon: ClipboardList, permiso: "lecturas" },
 ];
 
 const entradas: Entrada[] = [
   { to: "/", label: "Inicio", icon: Home },
+  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, permiso: "dashboard" },
+  { to: "/suscriptores", label: "Suscriptores", icon: Users, permiso: "suscriptores_ver" },
+  { to: "/mapa", label: "Mapa", icon: Map, permiso: "mapa" },
   { label: "Medición", icon: Droplets, children: medicion },
   {
     to: "/facturacion",
@@ -46,8 +49,10 @@ const entradas: Entrada[] = [
     icon: Receipt,
     permiso: ["facturacion_ver", "facturacion_avanzado", "pagos_registrar"],
   },
+  { to: "/pqrs", label: "PQRS", icon: MessageSquareWarning, permiso: ["pqrs_ver", "pqrs_avanzado"] },
   { to: "/aforos", label: "Aforos", icon: Waves, permiso: ["aforos_ver", "aforos_avanzado"] },
   { to: "/inventario", label: "Inventario general", icon: Warehouse, permiso: ["inventario_ver", "inventario_avanzado"] },
+  { to: "/documentos-sgc", label: "Documentos SGC", icon: FileText, permiso: ["documentos_sgc_ver", "documentos_sgc_avanzado"] },
   { to: "/admin", label: "Panel de administración", icon: ShieldAlert, permiso: "admin_panel" },
 ];
 
@@ -65,9 +70,12 @@ const linkClass = ({ isActive }: { isActive: boolean }) =>
 export default function Sidebar({ abierto, onCerrar }: { abierto: boolean; onCerrar: () => void }) {
   const { dark, toggle } = useTheme();
   const { usuario, logout } = useAuth();
+  const empresa = useEmpresa();
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const [perfilAbierto, setPerfilAbierto] = useState(false);
+  const [fotoRota, setFotoRota] = useState(false);
+  useEffect(() => setFotoRota(false), [usuario?.foto]);
   const [avisoCierreSesion, setAvisoCierreSesion] = useState<number | null>(null);
   const { saliendo: saliendoAviso, cerrar: cerrarAviso } = useCierreAnimado(() => setAvisoCierreSesion(null));
 
@@ -116,10 +124,12 @@ export default function Sidebar({ abierto, onCerrar }: { abierto: boolean; onCer
       >
         <div className="flex items-center justify-between gap-2 border-b border-white/10 px-4 py-4 dark:border-slate-800">
           <div className="flex items-center gap-2.5 min-w-0">
-            <img src="/logo-acbum.png" alt="Logo ACBUM" className="h-11 w-11 shrink-0 object-contain" />
+            {urlLogoEmpresa() && (
+              <img src={urlLogoEmpresa()} alt={`Logo ${empresa.nombreCorto}`} className="h-11 w-11 shrink-0 object-contain" />
+            )}
             <div className="min-w-0">
               <div className="text-xs font-bold leading-tight text-white">
-                Acueducto Comunitario Barrios Unidos de Mocoa
+                {empresa.nombre}
               </div>
               <div className="mt-0.5 text-[10px] leading-tight text-brand-200 dark:text-slate-400">
                 Sistema de gestión operativa y ambiental
@@ -139,11 +149,11 @@ export default function Sidebar({ abierto, onCerrar }: { abierto: boolean; onCer
             onClick={() => setPerfilAbierto(true)}
             className="flex items-center gap-2.5 border-b border-white/10 px-5 py-3 text-left hover:bg-white/5 dark:border-slate-800 dark:hover:bg-slate-800/60"
           >
-            {usuario.foto ? (
-              <img
-                src={urlFoto(usuario.foto)}
-                alt=""
+            {usuario.foto && !fotoRota ? (
+              <FotoPerfil
+                foto={usuario.foto}
                 className="h-8 w-8 shrink-0 rounded-full object-cover"
+                onFallar={() => setFotoRota(true)}
               />
             ) : (
               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/15 text-xs font-semibold text-white dark:bg-brand-500/15 dark:text-brand-400">

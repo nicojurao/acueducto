@@ -63,7 +63,7 @@ export default function GlobalSearch({ onNavegar }: { onNavegar?: () => void }) 
           }}
           onFocus={() => setAbierto(true)}
           placeholder="Buscar suscriptor por NUID o nombre..."
-          className="w-full min-w-0 bg-transparent placeholder:text-brand-200 focus:outline-none dark:placeholder:text-slate-500"
+          className="w-full min-w-0 bg-transparent placeholder:text-brand-200 focus:outline-none dark:placeholder:text-slate-500 dark:text-slate-400"
         />
         {q && (
           <button onClick={() => setQ("")} className="shrink-0 text-brand-200 hover:text-white dark:text-slate-400">
