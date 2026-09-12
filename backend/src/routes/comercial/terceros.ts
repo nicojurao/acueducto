@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { prisma } from "../../lib/prisma.js";
 import { requirePermiso } from "../../middleware/auth.js";
+import { registrarCambios, camposSuscriptor } from "../../lib/historial.js";
 
 export const tercerosRouter = Router();
 
@@ -102,16 +103,27 @@ tercerosRouter.put("/:id", permisoEditar, async (req, res) => {
 });
 
 // Reasignar un suscriptor a otro tercero (ej. el predio cambió de dueño, o quedó mal agrupado
-// en la migración inicial).
+// en la migración inicial). Se deja constancia en el Historial de cambios (campo "Titular
+// (tercero)") de quién era el dueño anterior — antes este cambio no dejaba ningún rastro, así que
+// si un predio cambiaba de dueño se perdía el vínculo con el anterior (ej. para cobrarle una
+// deuda retroactiva a quien vendió el predio con mora).
 tercerosRouter.put("/:id/suscriptores/:suscriptorId", permisoEditar, async (req, res) => {
   const terceroId = Number(req.params.id);
   const suscriptorId = Number(req.params.suscriptorId);
-  const [tercero, suscriptor] = await Promise.all([
+  const [tercero, antes] = await Promise.all([
     prisma.tercero.findUnique({ where: { id: terceroId } }),
-    prisma.suscriptor.findUnique({ where: { id: suscriptorId } }),
+    prisma.suscriptor.findUnique({
+      where: { id: suscriptorId },
+      include: { barrioCat: true, estratoCat: true, tercero: true },
+    }),
   ]);
-  if (!tercero || !suscriptor) return res.status(404).json({ error: "No encontrado" });
-  const actualizado = await prisma.suscriptor.update({ where: { id: suscriptorId }, data: { terceroId } });
+  if (!tercero || !antes) return res.status(404).json({ error: "No encontrado" });
+  const actualizado = await prisma.suscriptor.update({
+    where: { id: suscriptorId },
+    data: { terceroId },
+    include: { barrioCat: true, estratoCat: true, tercero: true },
+  });
+  await registrarCambios("suscriptor", suscriptorId, camposSuscriptor(antes), camposSuscriptor(actualizado), req.usuario?.id);
   res.json(actualizado);
 });
 

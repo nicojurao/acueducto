@@ -160,6 +160,11 @@ export function camposMedidor(m: {
 }
 
 // "Snapshot" legible de un Suscriptor. Recibe el registro con barrioCat/estratoCat incluidos.
+// `tercero` es OPCIONAL a propósito: solo se incluye cuando el llamador explícitamente cargó la
+// relación en ambos lados (antes/después) — ej. al reasignar el titular del predio (ver
+// PUT /api/terceros/:id/suscriptores/:suscriptorId). Si un llamador no la incluye en ninguno de
+// los dos lados, queda "undefined" en ambos y registrarCambios() no genera una fila falsa; si un
+// llamador la incluyera solo de un lado, sí generaría ruido — por eso siempre se agrega en pareja.
 export function camposSuscriptor(s: {
   nombre: string;
   codigo: string;
@@ -171,8 +176,9 @@ export function camposSuscriptor(s: {
   estratoCat: { codigo: string; etiqueta: string } | null;
   estadoFacturacion: string;
   estadoPredio: string;
+  tercero?: { nombre: string; numeroDocumento: string | null } | null;
 }): Record<string, unknown> {
-  return {
+  const campos: Record<string, unknown> = {
     Nombre: s.nombre,
     NUID: s.codigo,
     Ruta: s.ruta,
@@ -184,6 +190,10 @@ export function camposSuscriptor(s: {
     "Estado de facturación": ESTADO_FACTURACION_LABELS[s.estadoFacturacion] ?? s.estadoFacturacion,
     "Estado del predio": ESTADO_PREDIO_LABELS[s.estadoPredio] ?? s.estadoPredio,
   };
+  if (s.tercero !== undefined) {
+    campos["Titular (tercero)"] = s.tercero ? `${s.tercero.nombre}${s.tercero.numeroDocumento ? ` (${s.tercero.numeroDocumento})` : ""}` : null;
+  }
+  return campos;
 }
 
 // "Snapshot" legible de un ItemInventario. Recibe el registro con las relaciones de catálogo
