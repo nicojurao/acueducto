@@ -13,6 +13,8 @@ export * from "./domains/inventario.js";
 export * from "./domains/pqrs.js";
 export * from "./domains/calidad.js";
 export * from "./domains/empresa.js";
+export * from "./domains/contabilidad.js";
+export * from "./domains/suspensiones.js";
 
 import { authApi } from "./domains/auth.js";
 import { usuariosApi, rolesApi, historialApi, auditoriaApi, adminApi } from "./domains/administracion.js";
@@ -39,6 +41,8 @@ import { facturacionApi } from "./domains/facturacion.js";
 import { pqrsApi } from "./domains/pqrs.js";
 import { documentosSgcApi } from "./domains/calidad.js";
 import { empresaApi } from "./domains/empresa.js";
+import { contabilidadApi } from "./domains/contabilidad.js";
+import { suspensionesApi } from "./domains/suspensiones.js";
 
 export const api = {
   auth: authApi,
@@ -68,4 +72,6 @@ export const api = {
   pqrs: pqrsApi,
   documentosSgc: documentosSgcApi,
   empresa: empresaApi,
+  contabilidad: contabilidadApi,
+  suspensiones: suspensionesApi,
 };

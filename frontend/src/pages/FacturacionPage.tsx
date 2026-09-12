@@ -19,6 +19,8 @@ import {
   Waves,
   LayoutTemplate,
   ScanLine,
+  FileMinus2,
+  CalendarClock,
 } from "lucide-react";
 import {
   api,
@@ -27,10 +29,13 @@ import {
   FacturaResumen,
   FacturaDetalle,
   PagoItem,
+  NotaItem,
+  AcuerdoPagoItem,
   CarteraResumen,
   CarteraSuscriptor,
   Estrato,
   PasoVerificacionPeriodo,
+  Suscriptor,
 } from "../api/client";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
@@ -68,7 +73,7 @@ const ESTADO_FACTURA_COLORS: Record<string, string> = {
   anulada: "bg-slate-200 text-slate-500 dark:bg-slate-700 dark:text-slate-400",
 };
 
-type Tab = "facturas" | "recaudo" | "cartera" | "pagos" | "tarifas" | "plantillas";
+type Tab = "facturas" | "recaudo" | "cartera" | "pagos" | "notas" | "acuerdos" | "tarifas" | "plantillas";
 
 export default function FacturacionPage() {
   const [tab, setTab] = useState<Tab>("facturas");
@@ -77,6 +82,8 @@ export default function FacturacionPage() {
     { id: "recaudo", label: "Recaudo", icon: ScanLine },
     { id: "cartera", label: "Cartera", icon: Wallet },
     { id: "pagos", label: "Pagos", icon: HandCoins },
+    { id: "notas", label: "Notas", icon: FileMinus2 },
+    { id: "acuerdos", label: "Acuerdos de pago", icon: CalendarClock },
     { id: "tarifas", label: "Tarifas", icon: SlidersHorizontal },
     { id: "plantillas", label: "Plantillas", icon: LayoutTemplate },
   ];
@@ -107,6 +114,8 @@ export default function FacturacionPage() {
       {tab === "recaudo" && <RecaudoRapidoTab />}
       {tab === "cartera" && <CarteraTab />}
       {tab === "pagos" && <PagosTab />}
+      {tab === "notas" && <NotasTab />}
+      {tab === "acuerdos" && <AcuerdosPagoTab />}
       {tab === "tarifas" && <TarifasTab />}
       {tab === "plantillas" && <PlantillasFacturaTab />}
     </div>
@@ -537,6 +546,10 @@ function FacturaDetalleModal({ facturaId, onClose }: { facturaId: number; onClos
   const [guardandoPago, setGuardandoPago] = useState(false);
   const [plantillas, setPlantillas] = useState<{ id: number; nombre: string }[]>([]);
   const [plantillaPdf, setPlantillaPdf] = useState("");
+  const [mostrarFormAnular, setMostrarFormAnular] = useState(false);
+  const [motivoAnular, setMotivoAnular] = useState("");
+  const [radicadoPqrAnular, setRadicadoPqrAnular] = useState("");
+  const [anulando, setAnulando] = useState(false);
   const { pedirConfirmacion, modal } = useConfirm();
 
   async function cargar() {
@@ -565,12 +578,21 @@ function FacturaDetalleModal({ facturaId, onClose }: { facturaId: number; onClos
     }
   }
 
-  function anular() {
+  async function confirmarAnular() {
     if (!factura) return;
-    pedirConfirmacion(`¿Anular la factura No. ${factura.numero}? Esta acción no se puede deshacer.`, async () => {
-      await api.facturacion.facturas.anular(factura.id);
+    setAnulando(true);
+    try {
+      await api.facturacion.facturas.anular(factura.id, motivoAnular.trim() || undefined, radicadoPqrAnular.trim() || undefined);
+      mostrar("Factura anulada", "exito");
+      setMostrarFormAnular(false);
+      setMotivoAnular("");
+      setRadicadoPqrAnular("");
       await cargar();
-    }, { textoConfirmar: "Anular", textoExito: "Factura anulada" });
+    } catch (err) {
+      mostrarError(err, "anular la factura");
+    } finally {
+      setAnulando(false);
+    }
   }
 
   function eliminarPago(pagoId: number, valor: string) {
@@ -613,6 +635,17 @@ function FacturaDetalleModal({ facturaId, onClose }: { facturaId: number; onClos
                 </button>
               </div>
             </div>
+
+            {factura.estado === "anulada" && (factura.observaciones || factura.pqr) && (
+              <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">
+                {factura.observaciones && <p>{factura.observaciones}</p>}
+                {factura.pqr && (
+                  <p className="mt-1">
+                    Ligada a la PQR <span className="font-mono font-semibold">{factura.pqr.numeroRadicado}</span> ({factura.pqr.estado})
+                  </p>
+                )}
+              </div>
+            )}
 
             {(() => {
               // Cada servicio en su propia columna, con el subsidio/contribución de CADA
@@ -786,10 +819,45 @@ function FacturaDetalleModal({ facturaId, onClose }: { facturaId: number; onClos
               </div>
             )}
 
+            {puedeAvanzado && factura.estado === "pendiente" && factura.pagos.length === 0 && mostrarFormAnular && (
+              <div className="mb-3 space-y-2 rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-500/30 dark:bg-red-500/10">
+                <p className="text-sm font-medium text-red-800 dark:text-red-300">
+                  ¿Anular la factura No. {factura.numero}? Esta acción no se puede deshacer.
+                </p>
+                <input
+                  value={motivoAnular}
+                  onChange={(e) => setMotivoAnular(e.target.value)}
+                  placeholder="Motivo (opcional)"
+                  className={`${inputClass} w-full`}
+                />
+                <input
+                  value={radicadoPqrAnular}
+                  onChange={(e) => setRadicadoPqrAnular(e.target.value)}
+                  placeholder="N.º de radicado de PQR relacionada (opcional)"
+                  className={`${inputClass} w-full`}
+                />
+                <div className="flex justify-end gap-2">
+                  <button
+                    onClick={() => setMostrarFormAnular(false)}
+                    className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={confirmarAnular}
+                    disabled={anulando}
+                    className="rounded-lg bg-red-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-500 disabled:opacity-60"
+                  >
+                    {anulando ? "Anulando..." : "Confirmar anulación"}
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="flex flex-wrap justify-end gap-2">
-              {puedeAvanzado && factura.estado === "pendiente" && factura.pagos.length === 0 && (
+              {puedeAvanzado && factura.estado === "pendiente" && factura.pagos.length === 0 && !mostrarFormAnular && (
                 <button
-                  onClick={anular}
+                  onClick={() => setMostrarFormAnular(true)}
                   className="btn-accion flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 dark:border-red-500/30 dark:text-red-400"
                 >
                   <Ban className="h-4 w-4" />
@@ -932,6 +1000,9 @@ function CarteraTab() {
 // ============================== PAGOS ==============================
 
 function PagosTab() {
+  const { usuario } = useAuth();
+  const { pedirConfirmacion, modal } = useConfirm();
+  const puedeDeshacer = Boolean(usuario?.permisos?.includes("pagos_registrar") || usuario?.permisos?.includes("facturacion_avanzado"));
   const [pagos, setPagos] = useState<PagoItem[]>([]);
   const [total, setTotal] = useState(0);
   const [sumaValor, setSumaValor] = useState(0);
@@ -941,10 +1012,7 @@ function PagosTab() {
   const [cargando, setCargando] = useState(true);
   const porPagina = 10;
 
-  useEffect(() => {
-    setPagina(1);
-  }, [desde, hasta]);
-  useEffect(() => {
+  function cargar() {
     setCargando(true);
     api.facturacion.pagos
       .listPaginado(pagina, porPagina, { desde: desde || undefined, hasta: hasta || undefined })
@@ -954,7 +1022,23 @@ function PagosTab() {
         setSumaValor(r.sumaValor);
       })
       .finally(() => setCargando(false));
-  }, [pagina, desde, hasta]);
+  }
+
+  useEffect(() => {
+    setPagina(1);
+  }, [desde, hasta]);
+  useEffect(cargar, [pagina, desde, hasta]);
+
+  function deshacerPago(pago: PagoItem) {
+    pedirConfirmacion(
+      `¿Deshacer el pago de ${fmtPesos(pago.valor)} de la factura No. ${pago.factura.numero}? El saldo de la factura se recalcula solo.`,
+      async () => {
+        await api.facturacion.pagos.remove(pago.id);
+        cargar();
+      },
+      { textoConfirmar: "Deshacer pago", textoExito: "Pago eliminado" }
+    );
+  }
 
   return (
     <div>
@@ -973,7 +1057,7 @@ function PagosTab() {
       </div>
 
       {cargando && pagos.length === 0 ? (
-        <SkeletonTabla columnas={6} filas={porPagina} />
+        <SkeletonTabla columnas={puedeDeshacer ? 7 : 6} filas={porPagina} />
       ) : (
         <div className={`transition-opacity duration-150 ${cargando ? "pointer-events-none opacity-40" : "opacity-100"}`}>
           <div className="overflow-x-auto rounded-xl border border-brand-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -986,6 +1070,7 @@ function PagosTab() {
                   <th className="px-3 py-2 font-medium">Medio</th>
                   <th className="px-3 py-2 font-medium">Registrado por</th>
                   <th className="px-3 py-2 font-medium text-right">Valor</th>
+                  {puedeDeshacer && <th className="px-3 py-2 font-medium text-right">Acciones</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -999,11 +1084,22 @@ function PagosTab() {
                     <td className="px-3 py-2 capitalize">{p.medio}</td>
                     <td className="px-3 py-2">{p.registradoPor?.nombre ?? "—"}</td>
                     <td className="px-3 py-2 text-right font-medium">{fmtPesos(p.valor)}</td>
+                    {puedeDeshacer && (
+                      <td className="px-3 py-2 text-right">
+                        <button
+                          onClick={() => deshacerPago(p)}
+                          title="Deshacer pago"
+                          className="text-red-600 hover:text-red-500 dark:text-red-400"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
                 {pagos.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-6">
+                    <td colSpan={puedeDeshacer ? 7 : 6} className="px-4 py-6">
                       <EmptyState mensaje="No hay pagos registrados en este rango." />
                     </td>
                   </tr>
@@ -1014,6 +1110,585 @@ function PagosTab() {
           <Paginacion pagina={pagina} totalPaginas={Math.max(1, Math.ceil(total / porPagina))} onCambiar={setPagina} />
         </div>
       )}
+      {modal}
+    </div>
+  );
+}
+
+// ============================== NOTAS ==============================
+
+const ESTADO_NOTA_LABELS: Record<string, string> = { pendiente: "Pendiente", aplicada: "Aplicada", anulada: "Anulada" };
+const ESTADO_NOTA_COLORS: Record<string, string> = {
+  pendiente: "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400",
+  aplicada: "bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400",
+  anulada: "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-500",
+};
+
+function NotasTab() {
+  const { usuario } = useAuth();
+  const { mostrar, mostrarError } = useToast();
+  const { pedirConfirmacion, modal } = useConfirm();
+  const puedeEditar = usuario?.permisos?.includes("facturacion_avanzado") ?? false;
+
+  const [notas, setNotas] = useState<NotaItem[]>([]);
+  const [total, setTotal] = useState(0);
+  const [pagina, setPagina] = useState(1);
+  const [cargando, setCargando] = useState(true);
+  const [mostrarForm, setMostrarForm] = useState(false);
+  const porPagina = 10;
+
+  const [busquedaSuscriptor, setBusquedaSuscriptor] = useState("");
+  const [resultadosSuscriptor, setResultadosSuscriptor] = useState<Suscriptor[]>([]);
+  const [suscriptorElegido, setSuscriptorElegido] = useState<Suscriptor | null>(null);
+  const [tipo, setTipo] = useState<"credito" | "debito">("credito");
+  const [valor, setValor] = useState("");
+  const [concepto, setConcepto] = useState("");
+  const [radicadoPqr, setRadicadoPqr] = useState("");
+  const [guardando, setGuardando] = useState(false);
+
+  function cargar() {
+    setCargando(true);
+    api.facturacion.notas
+      .listPaginado(pagina, porPagina)
+      .then((r) => {
+        setNotas(r.data);
+        setTotal(r.total);
+      })
+      .finally(() => setCargando(false));
+  }
+  useEffect(cargar, [pagina]);
+
+  useEffect(() => {
+    if (!busquedaSuscriptor.trim() || suscriptorElegido) {
+      setResultadosSuscriptor([]);
+      return;
+    }
+    const t = setTimeout(() => {
+      api.suscriptores.listPaginado(1, 5, { q: busquedaSuscriptor }).then((r) => setResultadosSuscriptor(r.data));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [busquedaSuscriptor, suscriptorElegido]);
+
+  function limpiarForm() {
+    setBusquedaSuscriptor("");
+    setSuscriptorElegido(null);
+    setTipo("credito");
+    setValor("");
+    setConcepto("");
+    setRadicadoPqr("");
+  }
+
+  async function crear(e: React.FormEvent) {
+    e.preventDefault();
+    if (!suscriptorElegido || !valor || !concepto.trim()) return;
+    setGuardando(true);
+    try {
+      await api.facturacion.notas.crear({
+        suscriptorId: suscriptorElegido.id,
+        tipo,
+        valor: Number(valor),
+        concepto: concepto.trim(),
+        numeroRadicadoPqr: radicadoPqr.trim() || undefined,
+      });
+      mostrar("Nota creada");
+      limpiarForm();
+      setMostrarForm(false);
+      cargar();
+    } catch (err) {
+      mostrarError(err, "crear la nota");
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  function anularNota(nota: NotaItem) {
+    pedirConfirmacion(
+      `¿Anular la nota ${nota.tipo === "credito" ? "crédito" : "débito"} #${nota.numero}?`,
+      async () => {
+        await api.facturacion.notas.remove(nota.id);
+        cargar();
+      },
+      { textoConfirmar: "Anular", textoExito: "Nota anulada" }
+    );
+  }
+
+  return (
+    <div>
+      {puedeEditar && (
+        <div className="mb-3 flex justify-end">
+          <button
+            onClick={() => setMostrarForm((v) => !v)}
+            className="flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-500"
+          >
+            <Plus className="h-4 w-4" />
+            Nueva nota
+          </button>
+        </div>
+      )}
+
+      {mostrarForm && (
+        <form onSubmit={crear} className="mb-4 space-y-3 rounded-xl border border-brand-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="relative flex flex-col gap-1 text-xs font-medium text-slate-600 dark:text-slate-300">
+              Suscriptor
+              {suscriptorElegido ? (
+                <div className="flex items-center justify-between rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800">
+                  <span className="text-slate-900 dark:text-slate-100">
+                    {suscriptorElegido.codigo} · {suscriptorElegido.nombre}
+                  </span>
+                  <button type="button" onClick={() => setSuscriptorElegido(null)} className="text-xs text-brand-600 hover:underline dark:text-brand-400">
+                    Cambiar
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <BusquedaInput value={busquedaSuscriptor} onChange={setBusquedaSuscriptor} placeholder="Buscar por NUID o nombre..." />
+                  {resultadosSuscriptor.length > 0 && (
+                    <div className="absolute top-full z-10 mt-1 w-full rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900">
+                      {resultadosSuscriptor.map((s) => (
+                        <button
+                          key={s.id}
+                          type="button"
+                          onClick={() => {
+                            setSuscriptorElegido(s);
+                            setResultadosSuscriptor([]);
+                          }}
+                          className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
+                        >
+                          {s.codigo} · {s.nombre}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+            <label className="flex flex-col gap-1 text-xs font-medium text-slate-600 dark:text-slate-300">
+              Tipo
+              <select value={tipo} onChange={(e) => setTipo(e.target.value as "credito" | "debito")} className={inputClass}>
+                <option value="credito">Crédito (saldo a favor / descuento)</option>
+                <option value="debito">Débito (cargo adicional)</option>
+              </select>
+            </label>
+          </div>
+          <label className="flex flex-col gap-1 text-xs font-medium text-slate-600 dark:text-slate-300">
+            Concepto
+            <input value={concepto} onChange={(e) => setConcepto(e.target.value)} placeholder="Descuento por reclamo de fugas" required className={inputClass} />
+          </label>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="flex flex-col gap-1 text-xs font-medium text-slate-600 dark:text-slate-300">
+              Valor
+              <input type="number" min="1" value={valor} onChange={(e) => setValor(e.target.value)} required className={inputClass} />
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-medium text-slate-600 dark:text-slate-300">
+              N.º de radicado de PQR (opcional)
+              <input value={radicadoPqr} onChange={(e) => setRadicadoPqr(e.target.value)} className={inputClass} />
+            </label>
+          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            La nota queda "pendiente" y se aplica sola en la próxima factura que se genere para este suscriptor. Si el
+            crédito vale más que esa factura, el sobrante queda pendiente para la siguiente.
+          </p>
+          <div className="flex justify-end">
+            <button
+              type="submit"
+              disabled={guardando || !suscriptorElegido}
+              className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-60"
+            >
+              {guardando ? "Guardando..." : "Crear nota"}
+            </button>
+          </div>
+        </form>
+      )}
+
+      {cargando && notas.length === 0 ? (
+        <SkeletonTabla columnas={7} filas={porPagina} />
+      ) : notas.length === 0 ? (
+        <EmptyState mensaje="Todavía no hay notas registradas." />
+      ) : (
+        <div className={`transition-opacity duration-150 ${cargando ? "pointer-events-none opacity-40" : "opacity-100"}`}>
+          <div className="overflow-x-auto rounded-xl border border-brand-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-brand-100 bg-brand-50 text-left text-brand-800 dark:border-slate-800 dark:bg-slate-800/50 dark:text-slate-400">
+                  <th className="px-3 py-2 font-medium">N.º</th>
+                  <th className="px-3 py-2 font-medium">Tipo</th>
+                  <th className="px-3 py-2 font-medium">Suscriptor</th>
+                  <th className="px-3 py-2 font-medium">Concepto</th>
+                  <th className="px-3 py-2 font-medium text-right">Valor</th>
+                  <th className="px-3 py-2 font-medium">Estado</th>
+                  {puedeEditar && <th className="px-3 py-2 font-medium text-right">Acciones</th>}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                {notas.map((n) => (
+                  <tr key={n.id}>
+                    <td className="px-3 py-2 font-mono text-xs">{n.numero}</td>
+                    <td className="px-3 py-2 capitalize">{n.tipo}</td>
+                    <td className="px-3 py-2">
+                      {n.suscriptor.codigo} · {n.suscriptor.nombre}
+                    </td>
+                    <td className="px-3 py-2">
+                      {n.concepto}
+                      {n.pqr && <span className="ml-1 text-xs text-slate-400">· PQR {n.pqr.numeroRadicado}</span>}
+                      {n.facturaAplicada && <span className="ml-1 text-xs text-slate-400">· Factura No. {n.facturaAplicada.numero}</span>}
+                    </td>
+                    <td className="px-3 py-2 text-right font-medium">{fmtPesos(n.valor)}</td>
+                    <td className="px-3 py-2">
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${ESTADO_NOTA_COLORS[n.estado]}`}>
+                        {ESTADO_NOTA_LABELS[n.estado]}
+                      </span>
+                    </td>
+                    {puedeEditar && (
+                      <td className="px-3 py-2 text-right">
+                        {n.estado === "pendiente" && (
+                          <button onClick={() => anularNota(n)} className="text-red-600 hover:text-red-500 dark:text-red-400">
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        )}
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <Paginacion pagina={pagina} totalPaginas={Math.max(1, Math.ceil(total / porPagina))} onCambiar={setPagina} />
+        </div>
+      )}
+      {modal}
+    </div>
+  );
+}
+
+// ============================== ACUERDOS DE PAGO ==============================
+
+const ESTADO_ACUERDO_LABELS: Record<string, string> = { activo: "Activo", completado: "Completado", anulado: "Anulado" };
+const ESTADO_ACUERDO_COLORS: Record<string, string> = {
+  activo: "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400",
+  completado: "bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400",
+  anulado: "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-500",
+};
+
+function AcuerdosPagoTab() {
+  const { usuario } = useAuth();
+  const { mostrar, mostrarError } = useToast();
+  const { pedirConfirmacion, modal } = useConfirm();
+  const puedeEditar = usuario?.permisos?.includes("facturacion_avanzado") ?? false;
+
+  const [acuerdos, setAcuerdos] = useState<AcuerdoPagoItem[]>([]);
+  const [total, setTotal] = useState(0);
+  const [pagina, setPagina] = useState(1);
+  const [cargando, setCargando] = useState(true);
+  const [mostrarForm, setMostrarForm] = useState(false);
+  const porPagina = 10;
+
+  const [modo, setModo] = useState<"factura" | "cargo">("factura");
+  const [busquedaFactura, setBusquedaFactura] = useState("");
+  const [resultadosFactura, setResultadosFactura] = useState<FacturaResumen[]>([]);
+  const [facturaElegida, setFacturaElegida] = useState<FacturaResumen | null>(null);
+  const [busquedaSuscriptor, setBusquedaSuscriptor] = useState("");
+  const [resultadosSuscriptor, setResultadosSuscriptor] = useState<Suscriptor[]>([]);
+  const [suscriptorElegido, setSuscriptorElegido] = useState<Suscriptor | null>(null);
+  const [valorCargo, setValorCargo] = useState("");
+  const [numeroCuotas, setNumeroCuotas] = useState("2");
+  const [concepto, setConcepto] = useState("");
+  const [radicadoPqr, setRadicadoPqr] = useState("");
+  const [guardando, setGuardando] = useState(false);
+
+  function cargar() {
+    setCargando(true);
+    api.facturacion.acuerdosPago
+      .listPaginado(pagina, porPagina)
+      .then((r) => {
+        setAcuerdos(r.data);
+        setTotal(r.total);
+      })
+      .finally(() => setCargando(false));
+  }
+  useEffect(cargar, [pagina]);
+
+  useEffect(() => {
+    if (!busquedaFactura.trim() || facturaElegida) {
+      setResultadosFactura([]);
+      return;
+    }
+    const t = setTimeout(() => {
+      api.facturacion.facturas.listPaginado(1, 5, { q: busquedaFactura, estado: "pendiente" }).then((r) => setResultadosFactura(r.data));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [busquedaFactura, facturaElegida]);
+
+  useEffect(() => {
+    if (!busquedaSuscriptor.trim() || suscriptorElegido) {
+      setResultadosSuscriptor([]);
+      return;
+    }
+    const t = setTimeout(() => {
+      api.suscriptores.listPaginado(1, 5, { q: busquedaSuscriptor }).then((r) => setResultadosSuscriptor(r.data));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [busquedaSuscriptor, suscriptorElegido]);
+
+  function limpiarForm() {
+    setBusquedaFactura("");
+    setFacturaElegida(null);
+    setBusquedaSuscriptor("");
+    setSuscriptorElegido(null);
+    setValorCargo("");
+    setNumeroCuotas("2");
+    setConcepto("");
+    setRadicadoPqr("");
+  }
+
+  async function crear(e: React.FormEvent) {
+    e.preventDefault();
+    if (!numeroCuotas || !concepto.trim()) return;
+    if (modo === "factura" && !facturaElegida) return;
+    if (modo === "cargo" && (!suscriptorElegido || !valorCargo)) return;
+    setGuardando(true);
+    try {
+      if (modo === "factura") {
+        await api.facturacion.acuerdosPago.crear({
+          facturaId: facturaElegida!.id,
+          numeroCuotas: Number(numeroCuotas),
+          concepto: concepto.trim(),
+          numeroRadicadoPqr: radicadoPqr.trim() || undefined,
+        });
+        mostrar("Acuerdo de pago creado — la factura original quedó anulada");
+      } else {
+        await api.facturacion.acuerdosPago.crear({
+          suscriptorId: suscriptorElegido!.id,
+          valorCargo: Number(valorCargo),
+          numeroCuotas: Number(numeroCuotas),
+          concepto: concepto.trim(),
+          numeroRadicadoPqr: radicadoPqr.trim() || undefined,
+        });
+        mostrar("Acuerdo de pago creado para el cargo nuevo");
+      }
+      limpiarForm();
+      setMostrarForm(false);
+      cargar();
+    } catch (err) {
+      mostrarError(err, "crear el acuerdo de pago");
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  function anularAcuerdo(acuerdo: AcuerdoPagoItem) {
+    pedirConfirmacion(
+      `¿Anular este acuerdo de pago? Las cuotas ya aplicadas en facturas anteriores no se deshacen, solo se detienen las que faltan.`,
+      async () => {
+        await api.facturacion.acuerdosPago.remove(acuerdo.id);
+        cargar();
+      },
+      { textoConfirmar: "Anular", textoExito: "Acuerdo anulado" }
+    );
+  }
+
+  return (
+    <div>
+      {puedeEditar && (
+        <div className="mb-3 flex justify-end">
+          <button
+            onClick={() => setMostrarForm((v) => !v)}
+            className="flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white hover:bg-brand-500"
+          >
+            <Plus className="h-4 w-4" />
+            Nuevo acuerdo
+          </button>
+        </div>
+      )}
+
+      {mostrarForm && (
+        <form onSubmit={crear} className="mb-4 space-y-3 rounded-xl border border-brand-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+          <div className="flex gap-1 rounded-lg border border-slate-200 p-1 dark:border-slate-700">
+            {(
+              [
+                ["factura", "Financiar factura vencida"],
+                ["cargo", "Cargo nuevo (matrícula, etc.)"],
+              ] as [typeof modo, string][]
+            ).map(([v, label]) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setModo(v)}
+                className={`flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                  modo === v ? "bg-brand-600 text-white" : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {modo === "factura" ? (
+            <div className="relative flex flex-col gap-1 text-xs font-medium text-slate-600 dark:text-slate-300">
+              Factura vencida a financiar (solo pendientes, sin pagos)
+              {facturaElegida ? (
+                <div className="flex items-center justify-between rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800">
+                  <span className="text-slate-900 dark:text-slate-100">
+                    No. {facturaElegida.numero} · {facturaElegida.suscriptor.codigo} · {facturaElegida.suscriptor.nombre} · {fmtPesos(facturaElegida.total)}
+                  </span>
+                  <button type="button" onClick={() => setFacturaElegida(null)} className="text-xs text-brand-600 hover:underline dark:text-brand-400">
+                    Cambiar
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <BusquedaInput value={busquedaFactura} onChange={setBusquedaFactura} placeholder="Buscar por nombre, NUID o No. de factura..." />
+                  {resultadosFactura.length > 0 && (
+                    <div className="absolute top-full z-10 mt-1 w-full rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900">
+                      {resultadosFactura.map((f) => (
+                        <button
+                          key={f.id}
+                          type="button"
+                          onClick={() => {
+                            setFacturaElegida(f);
+                            setResultadosFactura([]);
+                          }}
+                          className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
+                        >
+                          No. {f.numero} · {f.suscriptor.codigo} · {f.suscriptor.nombre} · {fmtPesos(f.total)}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="relative flex flex-col gap-1 text-xs font-medium text-slate-600 dark:text-slate-300">
+                Suscriptor
+                {suscriptorElegido ? (
+                  <div className="flex items-center justify-between rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-800">
+                    <span className="text-slate-900 dark:text-slate-100">
+                      {suscriptorElegido.codigo} · {suscriptorElegido.nombre}
+                    </span>
+                    <button type="button" onClick={() => setSuscriptorElegido(null)} className="text-xs text-brand-600 hover:underline dark:text-brand-400">
+                      Cambiar
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <BusquedaInput value={busquedaSuscriptor} onChange={setBusquedaSuscriptor} placeholder="Buscar por NUID o nombre..." />
+                    {resultadosSuscriptor.length > 0 && (
+                      <div className="absolute top-full z-10 mt-1 w-full rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900">
+                        {resultadosSuscriptor.map((s) => (
+                          <button
+                            key={s.id}
+                            type="button"
+                            onClick={() => {
+                              setSuscriptorElegido(s);
+                              setResultadosSuscriptor([]);
+                            }}
+                            className="block w-full px-3 py-2 text-left text-sm hover:bg-slate-50 dark:hover:bg-slate-800"
+                          >
+                            {s.codigo} · {s.nombre}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+              <label className="flex flex-col gap-1 text-xs font-medium text-slate-600 dark:text-slate-300">
+                Valor total del cargo
+                <input type="number" min="1" value={valorCargo} onChange={(e) => setValorCargo(e.target.value)} required className={inputClass} />
+              </label>
+            </div>
+          )}
+
+          <label className="flex flex-col gap-1 text-xs font-medium text-slate-600 dark:text-slate-300">
+            Concepto
+            <input
+              value={concepto}
+              onChange={(e) => setConcepto(e.target.value)}
+              placeholder={modo === "factura" ? "Acuerdo por mora acumulada" : "Matrícula / conexión nueva"}
+              required
+              className={inputClass}
+            />
+          </label>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="flex flex-col gap-1 text-xs font-medium text-slate-600 dark:text-slate-300">
+              N.º de cuotas
+              <input type="number" min="2" value={numeroCuotas} onChange={(e) => setNumeroCuotas(e.target.value)} required className={inputClass} />
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-medium text-slate-600 dark:text-slate-300">
+              N.º de radicado de PQR (opcional)
+              <input value={radicadoPqr} onChange={(e) => setRadicadoPqr(e.target.value)} className={inputClass} />
+            </label>
+          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            {modo === "factura"
+              ? "La factura elegida se anula y su valor se reparte en cuotas — cada una se agrega sola como un concepto extra en las próximas facturas de este suscriptor, una por una."
+              : "El valor del cargo se reparte en cuotas — cada una se agrega sola como un concepto extra en las próximas facturas de este suscriptor, una por una."}
+          </p>
+          <div className="flex justify-end">
+            <button
+              type="submit"
+              disabled={guardando || (modo === "factura" ? !facturaElegida : !suscriptorElegido || !valorCargo)}
+              className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-500 disabled:opacity-60"
+            >
+              {guardando ? "Guardando..." : "Crear acuerdo"}
+            </button>
+          </div>
+        </form>
+      )}
+
+      {cargando && acuerdos.length === 0 ? (
+        <SkeletonTabla columnas={6} filas={porPagina} />
+      ) : acuerdos.length === 0 ? (
+        <EmptyState mensaje="Todavía no hay acuerdos de pago registrados." />
+      ) : (
+        <div className={`transition-opacity duration-150 ${cargando ? "pointer-events-none opacity-40" : "opacity-100"}`}>
+          <div className="space-y-3">
+            {acuerdos.map((a) => (
+              <div key={a.id} className="overflow-x-auto rounded-xl border border-brand-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-3 py-2 dark:border-slate-800">
+                  <div className="text-sm">
+                    <span className="font-medium text-slate-900 dark:text-slate-100">
+                      {a.suscriptor.codigo} · {a.suscriptor.nombre}
+                    </span>
+                    <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">
+                      {a.concepto} · {a.factura ? `Factura original No. ${a.factura.numero}` : "Cargo nuevo"} · {fmtPesos(a.valorTotal)} en {a.numeroCuotas} cuotas
+                      {a.pqr && ` · PQR ${a.pqr.numeroRadicado}`}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${ESTADO_ACUERDO_COLORS[a.estado]}`}>
+                      {ESTADO_ACUERDO_LABELS[a.estado]}
+                    </span>
+                    {puedeEditar && a.estado === "activo" && (
+                      <button onClick={() => anularAcuerdo(a)} className="text-red-600 hover:text-red-500 dark:text-red-400">
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2 p-3">
+                  {a.cuotas.map((c) => (
+                    <span
+                      key={c.id}
+                      className={`rounded-full px-2 py-1 text-xs font-medium ${
+                        c.estado === "aplicada"
+                          ? "bg-green-50 text-green-700 dark:bg-green-500/10 dark:text-green-400"
+                          : "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400"
+                      }`}
+                    >
+                      Cuota {c.numero}: {fmtPesos(c.valor)} {c.estado === "aplicada" ? "✓" : ""}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          <Paginacion pagina={pagina} totalPaginas={Math.max(1, Math.ceil(total / porPagina))} onCambiar={setPagina} />
+        </div>
+      )}
+      {modal}
     </div>
   );
 }

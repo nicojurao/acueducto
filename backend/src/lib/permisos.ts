@@ -104,6 +104,26 @@ export const PERMISOS = [
     nombre: "Documentos SGC (avanzado)",
     descripcion: "Crear documentos, subir nuevas versiones y cambiar su estado (vigente/obsoleto/en revisión)",
   },
+  {
+    clave: "contabilidad_ver",
+    nombre: "Contabilidad",
+    descripcion: "Ver el PUC, comprobantes, libros y estados financieros",
+  },
+  {
+    clave: "contabilidad_avanzado",
+    nombre: "Contabilidad (avanzado)",
+    descripcion: "Editar el PUC, registrar gastos, anular comprobantes y emitir facturación electrónica DIAN",
+  },
+  {
+    clave: "suspensiones_ver",
+    nombre: "Suspensión del servicio",
+    descripcion: "Ver los avisos y suspensiones del servicio por mora o mutuo acuerdo",
+  },
+  {
+    clave: "suspensiones_avanzado",
+    nombre: "Suspensión del servicio (avanzado)",
+    descripcion: "Crear avisos, aprobar/ejecutar/reactivar suspensiones del servicio",
+  },
 ] as const;
 
 export type ClavePermiso = (typeof PERMISOS)[number]["clave"];

@@ -69,6 +69,7 @@ export interface FacturaDetalle extends Omit<FacturaResumen, "pagado" | "saldo">
   saldo: number;
   diasMora: number;
   interesMora: number;
+  pqr: { id: number; numeroRadicado: string; estado: string } | null;
 }
 
 export interface PagoItem {
@@ -79,6 +80,40 @@ export interface PagoItem {
   observaciones: string | null;
   factura: { id: number; numero: number; periodo: string; suscriptor: { codigo: string; nombre: string } };
   registradoPor: { nombre: string } | null;
+}
+
+export interface CuotaAcuerdoPago {
+  id: number;
+  numero: number;
+  valor: string;
+  estado: "pendiente" | "aplicada";
+  facturaAplicadaId: number | null;
+}
+
+export interface AcuerdoPagoItem {
+  id: number;
+  valorTotal: string;
+  numeroCuotas: number;
+  concepto: string;
+  estado: "activo" | "completado" | "anulado";
+  createdAt: string;
+  suscriptor: { codigo: string; nombre: string };
+  factura: { numero: number } | null;
+  pqr: { numeroRadicado: string } | null;
+  cuotas: CuotaAcuerdoPago[];
+}
+
+export interface NotaItem {
+  id: number;
+  tipo: "credito" | "debito";
+  numero: number;
+  valor: string;
+  concepto: string;
+  estado: "pendiente" | "aplicada" | "anulada";
+  createdAt: string;
+  suscriptor: { codigo: string; nombre: string };
+  pqr: { numeroRadicado: string } | null;
+  facturaAplicada: { numero: number } | null;
 }
 
 export interface CarteraResumen {
@@ -238,8 +273,11 @@ export const facturacionApi = {
       return request<{ data: FacturaResumen[]; total: number; page: number; limit: number }>(`/api/facturacion/facturas?${qs}`);
     },
     get: (id: number) => request<FacturaDetalle>(`/api/facturacion/facturas/${id}`),
-    anular: (id: number, motivo?: string) =>
-      request<FacturaResumen>(`/api/facturacion/facturas/${id}/anular`, { method: "PUT", body: JSON.stringify({ motivo }) }),
+    anular: (id: number, motivo?: string, numeroRadicadoPqr?: string) =>
+      request<FacturaResumen>(`/api/facturacion/facturas/${id}/anular`, {
+        method: "PUT",
+        body: JSON.stringify({ motivo, numeroRadicadoPqr }),
+      }),
     verPdf: (id: number, numero: number, plantillaId?: number) => {
       const qs = plantillaId ? `?plantillaId=${plantillaId}` : "";
       return descargarArchivo(`/api/facturacion/facturas/${id}/pdf${qs}`, `factura-${numero}.pdf`, true);
@@ -264,6 +302,31 @@ export const facturacionApi = {
       );
     },
     remove: (id: number) => request<void>(`/api/facturacion/pagos/${id}`, { method: "DELETE" }),
+  },
+  notas: {
+    listPaginado: (page: number, limit: number, filtros?: { suscriptorId?: number; estado?: string }) => {
+      const qs = new URLSearchParams({ page: String(page), limit: String(limit) });
+      if (filtros?.suscriptorId) qs.set("suscriptorId", String(filtros.suscriptorId));
+      if (filtros?.estado) qs.set("estado", filtros.estado);
+      return request<{ data: NotaItem[]; total: number; page: number; limit: number }>(`/api/facturacion/notas?${qs}`);
+    },
+    crear: (data: { suscriptorId: number; tipo: "credito" | "debito"; valor: number; concepto: string; numeroRadicadoPqr?: string }) =>
+      request<NotaItem>("/api/facturacion/notas", { method: "POST", body: JSON.stringify(data) }),
+    remove: (id: number) => request<void>(`/api/facturacion/notas/${id}`, { method: "DELETE" }),
+  },
+  acuerdosPago: {
+    listPaginado: (page: number, limit: number, filtros?: { suscriptorId?: number; estado?: string }) => {
+      const qs = new URLSearchParams({ page: String(page), limit: String(limit) });
+      if (filtros?.suscriptorId) qs.set("suscriptorId", String(filtros.suscriptorId));
+      if (filtros?.estado) qs.set("estado", filtros.estado);
+      return request<{ data: AcuerdoPagoItem[]; total: number; page: number; limit: number }>(`/api/facturacion/acuerdos-pago?${qs}`);
+    },
+    crear: (
+      data:
+        | { facturaId: number; numeroCuotas: number; concepto: string; numeroRadicadoPqr?: string }
+        | { suscriptorId: number; valorCargo: number; numeroCuotas: number; concepto: string; numeroRadicadoPqr?: string }
+    ) => request<AcuerdoPagoItem>("/api/facturacion/acuerdos-pago", { method: "POST", body: JSON.stringify(data) }),
+    remove: (id: number) => request<void>(`/api/facturacion/acuerdos-pago/${id}`, { method: "DELETE" }),
   },
   omitidos: (periodo: string) =>
     request<{ id: number; motivo: string; suscriptor: { id: number; codigo: string; nombre: string } }[]>(

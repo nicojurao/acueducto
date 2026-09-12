@@ -34,6 +34,11 @@ model Suscriptor {
   // "activo" | "inactivo". Un predio inactivo (lote baldío, demolido, etc.) no puede tener
   // medidor asignado — se valida en las rutas de suscriptores/actas, no solo en la UI.
   estadoPredio        String    @default("activo")
+  // Flag informativo, deliberadamente SEPARADO de estadoFacturacion: una suspensión (Suspension,
+  // ver modelo abajo) documenta el debido proceso legal, pero NO cambia todavía cómo se calcula
+  // la factura de este suscriptor — eso es una decisión de negocio aparte, no asumida acá. Se
+  // prende/apaga solo desde POST /suspensiones/:id/ejecutar y /reactivar.
+  suspendido          Boolean   @default(false)
   // Servicios contratados: si uno esta apagado, ese concepto NO se factura a este suscriptor.
   tieneAcueducto      Boolean   @default(true)
   tieneAlcantarillado Boolean   @default(true)
@@ -73,6 +78,9 @@ model Suscriptor {
   tercero             Tercero?  @relation(fields: [terceroId], references: [id])
   actas               ActaInstalacion[]
   pqrs                Pqr[]
+  notas               Nota[]
+  acuerdosPago        AcuerdoPago[]
+  suspensiones        Suspension[]
 
   @@index([barrioId])
   @@index([estratoId])
@@ -305,6 +313,12 @@ model Usuario {
   sesiones        InicioSesion[]
   pagosRegistrados Pago[]
   periodosCerrados PeriodoFacturacion[]
+  comprobantesCreados ComprobanteContable[]
+  gastosRegistrados Gasto[]
+  notasCreadas    Nota[]
+  acuerdosPagoCreados AcuerdoPago[]
+  suspensionesCreadas Suspension[] @relation("SuspensionCreada")
+  suspensionesAprobadas Suspension[] @relation("SuspensionAprobada")
 }
 
 // Un renglón por cada login exitoso, para auditoría. Cada login trae un "jti" propio (id
@@ -679,12 +693,22 @@ model Factura {
   fechaEmision     DateTime  @default(now())
   fechaVencimiento DateTime?
   observaciones    String?
+  // PQR que motivó la anulación/refacturación, si la hay — enlace estructurado en vez de solo
+  // texto libre en "observaciones", para poder rastrear qué reclamación generó el ajuste. Se
+  // resuelve por número de radicado al anular (ver PUT /facturas/:id/anular), no por búsqueda
+  // aparte, porque quien anula ya suele tener ese número a la mano por la reclamación misma.
+  pqrId            Int?
+  pqr              Pqr?      @relation(fields: [pqrId], references: [id], onDelete: SetNull)
   conceptos        FacturaConcepto[]
   pagos            Pago[]
+  notasAplicadas   Nota[]
+  acuerdosPago     AcuerdoPago[]
+  cuotasAplicadas  CuotaAcuerdoPago[] @relation("CuotasAplicadas")
 
   @@unique([suscriptorId, periodo])
   @@index([periodo])
   @@index([estado])
+  @@index([pqrId])
 }
 
 // Renglones de la factura. Los generados por el motor llevan tipo estándar; los manuales
@@ -774,6 +798,8 @@ model Tercero {
   updatedAt       DateTime @updatedAt
   suscriptores    Suscriptor[]
   pqrs            Pqr[]
+  movimientosContables MovimientoContable[]
+  gastos          Gasto[]
 }
 
 // PQR (Petición/Queja/Reclamo/Sugerencia) radicada por el público desde pqrs.acbum.com.co —
@@ -826,6 +852,10 @@ model Pqr {
   updatedAt      DateTime    @updatedAt
 
   mensajes       PqrMensaje[]
+  facturas       Factura[]
+  notas          Nota[]
+  acuerdosPago   AcuerdoPago[]
+  suspensiones   Suspension[]
 
   @@index([terceroId])
   @@index([suscriptorId])
@@ -1009,4 +1039,208 @@ model VersionDocumentoSgc {
 
   @@unique([documentoId, numeroVersion])
   @@index([documentoId, vigente])
+}
+
+// ===================== CONTABILIDAD =====================
+
+// Plan Único de Cuentas (Decreto 2650/1993 + adaptación NIIF pyme). Jerarquía por longitud del
+// código (1 dígito = clase, 2 = grupo, 4 = cuenta, 6 = subcuenta, ~8+ = auxiliar), igual a como
+// lo maneja cualquier software contable colombiano — no se modela "nivel" como enum separado del
+// código, nivel = length(codigo) salvo para el auxiliar (variable). Se siembra con el catálogo
+// estándar (ver migración); nuevas cuentas auxiliares las puede crear el usuario desde la app.
+model CuentaPuc {
+  id          Int         @id @default(autoincrement())
+  codigo      String      @unique
+  nombre      String
+  naturaleza  String      // "debito" | "credito"
+  nivel       Int
+  padreId     Int?
+  padre       CuentaPuc?  @relation("PucJerarquia", fields: [padreId], references: [id])
+  hijos       CuentaPuc[] @relation("PucJerarquia")
+  activa      Boolean     @default(true)
+  movimientos MovimientoContable[]
+  gastos      Gasto[]
+
+  @@index([padreId])
+}
+
+// Comprobante contable (recibo de caja, comprobante de egreso, o nota de diario para ajustes
+// manuales). origenTabla/origenId apuntan LAXAMENTE (sin FK) a la Factura o Pago que lo generó —
+// laxo a propósito: si esa factura/pago se borra o cambia, el comprobante ya contabilizado no debe
+// arrastrarse ni romperse, es un registro contable independiente desde el momento en que se crea.
+model ComprobanteContable {
+  id          Int       @id @default(autoincrement())
+  tipo        String    // "ingreso" | "egreso" | "diario"
+  numero      Int       @unique @default(dbgenerated("nextval('comprobante_numero_seq')::integer"))
+  fecha       DateTime  @default(now())
+  concepto    String
+  origen      String    // "venta" | "pago" | "compra" | "manual"
+  origenTabla String?
+  origenId    Int?
+  estado      String    @default("contabilizado") // "contabilizado" | "anulado"
+  creadoPorId Int?
+  creadoPor   Usuario?  @relation(fields: [creadoPorId], references: [id], onDelete: SetNull)
+  createdAt   DateTime  @default(now())
+  movimientos MovimientoContable[]
+
+  @@index([origenTabla, origenId])
+  @@index([fecha])
+}
+
+// Renglón de un comprobante (partida doble: cada fila es un débito O un crédito, no ambos). La
+// suma de débitos debe igualar la suma de créditos por comprobanteId — se valida en código al
+// contabilizar, no con un constraint de base de datos (mismo criterio que el resto de reglas de
+// negocio de este proyecto, ver facturacion.ts).
+model MovimientoContable {
+  id            Int                 @id @default(autoincrement())
+  comprobanteId Int
+  comprobante   ComprobanteContable @relation(fields: [comprobanteId], references: [id], onDelete: Cascade)
+  cuentaPucId   Int
+  cuentaPuc     CuentaPuc           @relation(fields: [cuentaPucId], references: [id])
+  terceroId     Int?
+  tercero       Tercero?            @relation(fields: [terceroId], references: [id])
+  debito        Decimal             @db.Decimal(14, 2) @default(0)
+  credito       Decimal             @db.Decimal(14, 2) @default(0)
+  descripcion   String?
+
+  @@index([comprobanteId])
+  @@index([cuentaPucId])
+}
+
+// Captura manual de una compra/gasto a un proveedor (Tercero) — Fluvi no tenía ningún concepto de
+// compras antes de este módulo, así que esto es lo mínimo para que un comprobante de egreso tenga
+// de dónde salir (ver docs del plan de contabilidad: automatizarlo más adelante si el volumen lo
+// justifica, sin flujo de aprobación por ahora).
+model Gasto {
+  id              Int       @id @default(autoincrement())
+  terceroId       Int
+  tercero         Tercero   @relation(fields: [terceroId], references: [id])
+  // Cuenta PUC de gasto que clasifica ESTE gasto (ej. "Mantenimiento y reparaciones", "Honorarios")
+  // — sin esto, todo gasto caería en una sola cuenta genérica y el libro mayor no serviría de nada.
+  cuentaGastoId   Int
+  cuentaGasto     CuentaPuc @relation(fields: [cuentaGastoId], references: [id])
+  fecha           DateTime  @default(now())
+  concepto        String
+  valor           Decimal   @db.Decimal(14, 2)
+  ivaValor        Decimal   @db.Decimal(14, 2) @default(0)
+  numeroFactura   String?
+  // true = ya se pagó (crédito a Caja/Bancos); false = queda a deber (crédito a Cuentas por pagar
+  // - Proveedores). Sin un módulo de tesorería todavía, es solo esta bandera simple.
+  pagado          Boolean   @default(true)
+  registradoPorId Int?
+  registradoPor   Usuario?  @relation(fields: [registradoPorId], references: [id], onDelete: SetNull)
+  createdAt       DateTime  @default(now())
+
+  @@index([terceroId])
+  @@index([fecha])
+}
+
+// Nota crédito (saldo a favor / descuento) o débito (cargo adicional) contra un suscriptor — antes
+// de esto, cualquier ajuste quedaba suelto como un FacturaConcepto tipo "manual" dentro de una
+// factura ya generada, sin documento propio ni saldo a favor que se arrastrara solo. Una nota
+// "pendiente" se aplica automáticamente como concepto extra en la PRÓXIMA factura que se genere
+// para ese suscriptor (ver generarConceptosDeNotas en facturacion.ts) y pasa a "aplicada".
+model Nota {
+  id                Int        @id @default(autoincrement())
+  tipo              String // "credito" | "debito"
+  numero            Int        @unique @default(dbgenerated("nextval('nota_numero_seq')::integer"))
+  suscriptorId      Int
+  suscriptor        Suscriptor @relation(fields: [suscriptorId], references: [id])
+  valor             Decimal    @db.Decimal(12, 2)
+  concepto          String
+  estado            String     @default("pendiente") // "pendiente" | "aplicada" | "anulada"
+  facturaAplicadaId Int?
+  facturaAplicada   Factura?   @relation(fields: [facturaAplicadaId], references: [id], onDelete: SetNull)
+  aplicadaEn        DateTime?
+  // PQR que motivó la nota, si la hay — mismo criterio que Factura.pqrId (se resuelve por
+  // radicado, sin buscador aparte).
+  pqrId             Int?
+  pqr               Pqr?       @relation(fields: [pqrId], references: [id], onDelete: SetNull)
+  creadoPorId       Int?
+  creadoPor         Usuario?   @relation(fields: [creadoPorId], references: [id], onDelete: SetNull)
+  createdAt         DateTime   @default(now())
+
+  @@index([suscriptorId])
+  @@index([estado])
+}
+
+// Acuerdo de pago en cuotas de una factura ya vencida — necesidad frecuente en un acueducto
+// comunitario (suscriptor con mora alta que pide pagar poco a poco para no perder el servicio).
+// Antes de esto, la única vía era anular/reemitir facturas a mano. Cada cuota se aplica, UNA por
+// factura (no todas de una vez, a diferencia de Nota), como concepto extra en la próxima
+// generación de ese suscriptor — ver lib/acuerdosPago.ts.
+model AcuerdoPago {
+  id           Int        @id @default(autoincrement())
+  suscriptorId Int
+  suscriptor   Suscriptor @relation(fields: [suscriptorId], references: [id])
+  // La factura vencida que se está financiando (se anula al crear el acuerdo y su saldo se
+  // reparte en las cuotas) — o null si el acuerdo financia un CARGO NUEVO que nunca existió como
+  // factura (ej. matrícula/conexión nueva en cuotas, ver POST /acuerdos-pago). En ese caso
+  // valorTotal se toma directo del monto que se pidió financiar, no del total de una factura.
+  facturaId    Int?
+  factura      Factura?   @relation(fields: [facturaId], references: [id])
+  valorTotal   Decimal    @db.Decimal(12, 2)
+  numeroCuotas Int
+  concepto     String
+  estado       String     @default("activo") // "activo" | "completado" | "anulado"
+  pqrId        Int?
+  pqr          Pqr?       @relation(fields: [pqrId], references: [id], onDelete: SetNull)
+  creadoPorId  Int?
+  creadoPor    Usuario?   @relation(fields: [creadoPorId], references: [id], onDelete: SetNull)
+  createdAt    DateTime   @default(now())
+  cuotas       CuotaAcuerdoPago[]
+
+  @@index([suscriptorId])
+  @@index([estado])
+}
+
+model CuotaAcuerdoPago {
+  id                Int         @id @default(autoincrement())
+  acuerdoPagoId     Int
+  acuerdoPago       AcuerdoPago @relation(fields: [acuerdoPagoId], references: [id], onDelete: Cascade)
+  numero            Int // 1..numeroCuotas, en orden de aplicación
+  valor             Decimal     @db.Decimal(12, 2)
+  estado            String      @default("pendiente") // "pendiente" | "aplicada"
+  facturaAplicadaId Int?
+  facturaAplicada   Factura?    @relation("CuotasAplicadas", fields: [facturaAplicadaId], references: [id], onDelete: SetNull)
+  aplicadaEn        DateTime?
+
+  @@unique([acuerdoPagoId, numero])
+  @@index([acuerdoPagoId, estado])
+}
+
+// Suspensión del servicio, forzosa por mora o voluntaria de mutuo acuerdo (ej. predio deshabitado
+// temporalmente). Antes de esto, Fluvi no tenía forma de probar que se cumplió el debido proceso
+// de la Ley 142/1994 (Art. 140-141) antes de un corte — quedaba solo en papel o de palabra fuera
+// del sistema. El ciclo de estados es el mismo para ambos tipos y SIEMPRE pasa por aprobación
+// manual (decisión explícita del usuario, no automática): pendiente → aprobada → ejecutada →
+// reactivada, con "cancelada" disponible antes de ejecutar. Para tipo "mora", el aviso previo (los
+// 4 elementos que exige el Art. 140: causal, recursos, plazo, autoridad) se genera y se guarda
+// como texto en el momento de crear el registro — ver generarAvisoMora en lib/suspensiones.ts.
+model Suspension {
+  id                Int        @id @default(autoincrement())
+  suscriptorId      Int
+  suscriptor        Suscriptor @relation(fields: [suscriptorId], references: [id])
+  tipo              String // "mora" | "mutuo_acuerdo"
+  motivo            String
+  // Solo tipo "mora": cuántas facturas pendientes tenía el suscriptor al momento de crear el
+  // aviso — constancia de que ya se cumplía el mínimo legal (3 periodos, facturación mensual).
+  mesesMoraAlCrear  Int?
+  // Solo tipo "mora": el texto completo del aviso previo, para constancia (mismo criterio que
+  // guardar el texto de un PQR tal cual se radicó, sin depender de que cambie después).
+  textoAviso        String?
+  estado            String     @default("pendiente") // "pendiente" | "aprobada" | "ejecutada" | "reactivada" | "cancelada"
+  fechaAprobacion   DateTime?
+  aprobadaPorId     Int?
+  aprobadaPor       Usuario?   @relation("SuspensionAprobada", fields: [aprobadaPorId], references: [id], onDelete: SetNull)
+  fechaEjecucion    DateTime?
+  fechaReactivacion DateTime?
+  pqrId             Int?
+  pqr               Pqr?       @relation(fields: [pqrId], references: [id], onDelete: SetNull)
+  creadoPorId       Int?
+  creadoPor         Usuario?   @relation("SuspensionCreada", fields: [creadoPorId], references: [id], onDelete: SetNull)
+  createdAt         DateTime   @default(now())
+
+  @@index([suscriptorId])
+  @@index([estado])
 }

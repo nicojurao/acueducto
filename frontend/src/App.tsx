@@ -51,6 +51,8 @@ const InventarioPage = lazy(() => import("./pages/InventarioPage"));
 const AdminPage = lazy(() => import("./pages/AdminPage"));
 const FacturacionPage = lazy(() => import("./pages/FacturacionPage"));
 const PqrsPage = lazy(() => import("./pages/PqrsPage"));
+const ContabilidadPage = lazy(() => import("./pages/ContabilidadPage"));
+const SuspensionesPage = lazy(() => import("./pages/SuspensionesPage"));
 const DocumentosSgcPage = lazy(() => import("./pages/DocumentosSgcPage"));
 const SetupWizardPage = lazy(() => import("./pages/SetupWizardPage"));
 
@@ -152,6 +154,22 @@ function AppShell() {
               element={
                 <RutaProtegida permiso={["pqrs_ver", "pqrs_avanzado"]}>
                   <PqrsPage />
+                </RutaProtegida>
+              }
+            />
+            <Route
+              path="/contabilidad"
+              element={
+                <RutaProtegida permiso={["contabilidad_ver", "contabilidad_avanzado"]}>
+                  <ContabilidadPage />
+                </RutaProtegida>
+              }
+            />
+            <Route
+              path="/suspensiones"
+              element={
+                <RutaProtegida permiso={["suspensiones_ver", "suspensiones_avanzado"]}>
+                  <SuspensionesPage />
                 </RutaProtegida>
               }
             />

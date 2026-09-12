@@ -19,6 +19,8 @@ import {
   Receipt,
   MessageSquareWarning,
   FileText,
+  Calculator,
+  Ban,
 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
@@ -50,6 +52,18 @@ const entradas: Entrada[] = [
     permiso: ["facturacion_ver", "facturacion_avanzado", "pagos_registrar"],
   },
   { to: "/pqrs", label: "PQRS", icon: MessageSquareWarning, permiso: ["pqrs_ver", "pqrs_avanzado"] },
+  {
+    to: "/contabilidad",
+    label: "Contabilidad",
+    icon: Calculator,
+    permiso: ["contabilidad_ver", "contabilidad_avanzado"],
+  },
+  {
+    to: "/suspensiones",
+    label: "Suspensión del servicio",
+    icon: Ban,
+    permiso: ["suspensiones_ver", "suspensiones_avanzado"],
+  },
   { to: "/aforos", label: "Aforos", icon: Waves, permiso: ["aforos_ver", "aforos_avanzado"] },
   { to: "/inventario", label: "Inventario general", icon: Warehouse, permiso: ["inventario_ver", "inventario_avanzado"] },
   { to: "/documentos-sgc", label: "Documentos SGC", icon: FileText, permiso: ["documentos_sgc_ver", "documentos_sgc_avanzado"] },

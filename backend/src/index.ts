@@ -24,6 +24,8 @@ import {
 } from "./routes/comercial/catalogos.js";
 import { actasRouter } from "./routes/comercial/actas.js";
 import { facturacionRouter } from "./routes/comercial/facturacion.js";
+import { contabilidadRouter } from "./routes/comercial/contabilidad.js";
+import { suspensionesRouter } from "./routes/comercial/suspensiones.js";
 import { tercerosRouter } from "./routes/comercial/terceros.js";
 import { offlineRouter } from "./routes/comercial/offline.js";
 import { authRouter } from "./routes/auth/auth.js";
@@ -162,6 +164,8 @@ app.use("/api/reportes", reportesRouter);
 app.use("/api/dashboard", requirePermiso("dashboard"), dashboardRouter);
 // Permisos por ruta ADENTRO del router (ver/avanzado/pagos difieren por endpoint).
 app.use("/api/facturacion", facturacionRouter);
+app.use("/api/contabilidad", requirePermiso("contabilidad_ver", "contabilidad_avanzado"), contabilidadRouter);
+app.use("/api/suspensiones", requirePermiso("suspensiones_ver", "suspensiones_avanzado"), suspensionesRouter);
 app.use("/api/terceros", requirePermiso("suscriptores_ver", "suscriptores_avanzado", "facturacion_ver", "facturacion_avanzado"), tercerosRouter);
 app.use("/api/marcas", requirePermisoCatalogos, marcasRouter);
 app.use("/api/modelos", requirePermisoCatalogos, modelosRouter);

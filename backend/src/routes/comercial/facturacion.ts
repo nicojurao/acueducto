@@ -19,6 +19,9 @@ import {
   MENSAJE_VERIFICACION_INCOMPLETA,
 } from "../../lib/verificacionPeriodo.js";
 import { calcularMora } from "../../lib/moraCalculo.js";
+import { generarComprobanteVenta, generarComprobantePago, anularComprobante, anularComprobantesEnLote } from "../../lib/contabilidad/comprobantes.js";
+import { conceptosDeNotasPendientes, marcarNotasAplicadas } from "../../lib/notas.js";
+import { conceptoDeSiguienteCuota, marcarCuotaAplicada } from "../../lib/acuerdosPago.js";
 import { randomUUID } from "node:crypto";
 import {
   crearJobFacturacion,
@@ -395,7 +398,11 @@ facturacionRouter.post("/generar/iniciar", permisoAvanzado, async (req, res) => 
               { tieneAcueducto: c.suscriptor.tieneAcueducto, tieneAlcantarillado: c.suscriptor.tieneAlcantarillado },
               c.consumoAlcantarilladoM3
             );
-            await tx.factura.create({
+            const { conceptos: conceptosNota, totalAjuste, notaIds } = await conceptosDeNotasPendientes(tx, c.suscriptor.id, liq.total);
+            const { concepto: conceptoCuota, cuotaId, acuerdoPagoId } = await conceptoDeSiguienteCuota(tx, c.suscriptor.id);
+            const conceptosFinales = [...liq.conceptos, ...conceptosNota, ...(conceptoCuota ? [conceptoCuota] : [])];
+            const totalFinal = liq.total + totalAjuste + (conceptoCuota?.valor ?? 0);
+            const factura = await tx.factura.create({
               data: {
                 // numero: lo asigna la secuencia de Postgres (default en el schema), no se
                 // calcula acá — así dos generaciones en paralelo nunca chocan.
@@ -410,12 +417,15 @@ facturacionRouter.post("/generar/iniciar", permisoAvanzado, async (req, res) => 
                 subtotal: liq.subtotal,
                 porcentajeAplicado: pct,
                 ajusteEstrato: liq.ajusteEstrato,
-                total: liq.total,
+                total: totalFinal,
                 fechaVencimiento,
-                conceptos: { create: liq.conceptos },
+                conceptos: { create: conceptosFinales },
               },
             });
-            totalFacturado += liq.total;
+            await marcarNotasAplicadas(tx, notaIds, factura.id);
+            if (cuotaId && acuerdoPagoId) await marcarCuotaAplicada(tx, cuotaId, acuerdoPagoId, factura.id);
+            await generarComprobanteVenta(tx, factura.id, totalFinal, conceptosFinales, c.suscriptor.terceroId);
+            totalFacturado += totalFinal;
             creadas++;
           }
         });
@@ -480,12 +490,19 @@ facturacionRouter.delete("/generar/:periodo", permisoAvanzado, async (req, res) 
   // y Postgres revierte TODA la transacción sola (nada queda borrado a medias). Acá solo se
   // traduce ese choque a un mensaje claro en vez de dejarlo caer como error 500 genérico.
   try {
-    const [, , , eliminadas] = await prisma.$transaction([
-      prisma.facturaConcepto.deleteMany({ where: { factura: { periodo: fechaPeriodo } } }),
-      prisma.periodoFacturacion.deleteMany({ where: { periodo: fechaPeriodo } }),
-      prisma.facturacionOmitida.deleteMany({ where: { periodo: fechaPeriodo } }),
-      prisma.factura.deleteMany({ where: { periodo: fechaPeriodo } }),
-    ]);
+    const eliminadas = await prisma.$transaction(async (tx) => {
+      const facturas = await tx.factura.findMany({ where: { periodo: fechaPeriodo }, select: { id: true } });
+      await tx.facturaConcepto.deleteMany({ where: { factura: { periodo: fechaPeriodo } } });
+      await tx.periodoFacturacion.deleteMany({ where: { periodo: fechaPeriodo } });
+      await tx.facturacionOmitida.deleteMany({ where: { periodo: fechaPeriodo } });
+      const eliminadas = await tx.factura.deleteMany({ where: { periodo: fechaPeriodo } });
+      // Sin esto, los comprobantes de "venta" de las facturas borradas quedan huérfanos y
+      // contabilizados — plata "facturada" en los libros que ya no corresponde a ninguna factura
+      // real (bug real encontrado en producción: 3.875 comprobantes por $84,9M quedaron así tras
+      // deshacer una generación).
+      await anularComprobantesEnLote(tx, "Factura", facturas.map((f) => f.id));
+      return eliminadas;
+    });
 
     req.log?.warn(
       { periodo: req.params.periodo, eliminadas: eliminadas.count, usuario: req.usuario?.id },
@@ -567,6 +584,7 @@ facturacionRouter.get("/facturas/:id", permisoVer, async (req, res) => {
       conceptos: true,
       pagos: { include: { registradoPor: { select: { nombre: true } } }, orderBy: { fecha: "desc" } },
       tarifa: true,
+      pqr: { select: { id: true, numeroRadicado: true, estado: true } },
     },
   });
   if (!factura) return res.status(404).json({ error: "No encontrada" });
@@ -580,15 +598,33 @@ facturacionRouter.get("/facturas/:id", permisoVer, async (req, res) => {
 });
 
 // Anular (no borrar: la numeración es consecutiva y una factura emitida debe quedar rastreable).
+// El motivo puede venir como texto libre y/o el número de radicado de una PQR ya existente — se
+// resuelve por radicado en vez de ofrecer un buscador aparte (quien anula por una reclamación ya
+// tiene ese número a la mano, y así no hace falta darle a esta pantalla el permiso de PQRS solo
+// para buscar una). El vínculo estructurado (Factura.pqrId) deja rastro consultable, a diferencia
+// de antes que solo quedaba el texto suelto en "observaciones".
 facturacionRouter.put("/facturas/:id/anular", permisoAvanzado, async (req, res) => {
   const id = Number(req.params.id);
+  const { motivo, numeroRadicadoPqr } = req.body;
   const factura = await prisma.factura.findUnique({ where: { id }, include: { pagos: true } });
   if (!factura) return res.status(404).json({ error: "No encontrada" });
   if (await periodoEstaCerrado(factura.periodo)) return res.status(400).json({ error: MENSAJE_PERIODO_CERRADO });
   if (factura.pagos.length > 0) return res.status(400).json({ error: "No se puede anular: ya tiene pagos registrados" });
-  const actualizada = await prisma.factura.update({
-    where: { id },
-    data: { estado: "anulada", observaciones: req.body.motivo ? `ANULADA: ${req.body.motivo}` : "ANULADA" },
+
+  let pqrId: number | null = null;
+  if (numeroRadicadoPqr) {
+    const pqr = await prisma.pqr.findUnique({ where: { numeroRadicado: String(numeroRadicadoPqr).trim() } });
+    if (!pqr) return res.status(400).json({ error: `No existe ninguna PQR con el radicado "${numeroRadicadoPqr}"` });
+    pqrId = pqr.id;
+  }
+
+  const actualizada = await prisma.$transaction(async (tx) => {
+    const actualizada = await tx.factura.update({
+      where: { id },
+      data: { estado: "anulada", observaciones: motivo ? `ANULADA: ${motivo}` : "ANULADA", pqrId },
+    });
+    await anularComprobante(tx, "Factura", id);
+    return actualizada;
   });
   res.json(actualizada);
 });
@@ -600,7 +636,10 @@ facturacionRouter.post("/pagos", permisoPagos, async (req, res) => {
   if (!facturaId || !valor || Number(valor) <= 0) {
     return res.status(400).json({ error: "facturaId y valor (> 0) son requeridos" });
   }
-  const factura = await prisma.factura.findUnique({ where: { id: Number(facturaId) }, include: { pagos: true } });
+  const factura = await prisma.factura.findUnique({
+    where: { id: Number(facturaId) },
+    include: { pagos: true, suscriptor: { select: { terceroId: true } } },
+  });
   if (!factura) return res.status(404).json({ error: "Factura no encontrada" });
   if (factura.estado === "anulada") return res.status(400).json({ error: "La factura está anulada" });
   const pagado = factura.pagos.reduce((acc, p) => acc + Number(p.valor), 0);
@@ -608,20 +647,23 @@ facturacionRouter.post("/pagos", permisoPagos, async (req, res) => {
   if (Number(valor) > saldo) {
     return res.status(400).json({ error: `El valor supera el saldo pendiente (${fmtPesos(saldo)})` });
   }
-  const nuevoSaldo = saldo - Math.round(Number(valor));
-  const [pago] = await prisma.$transaction([
-    prisma.pago.create({
+  const valorRedondeado = Math.round(Number(valor));
+  const nuevoSaldo = saldo - valorRedondeado;
+  const pago = await prisma.$transaction(async (tx) => {
+    const pago = await tx.pago.create({
       data: {
         facturaId: factura.id,
-        valor: Math.round(Number(valor)),
+        valor: valorRedondeado,
         medio: medio === "consignacion" || medio === "otro" ? medio : "efectivo",
         observaciones: observaciones || null,
         registradoPorId: req.usuario?.id ?? null,
       },
       include: { registradoPor: { select: { nombre: true } } },
-    }),
-    prisma.factura.update({ where: { id: factura.id }, data: { estado: nuevoSaldo <= 0 ? "pagada" : "pendiente" } }),
-  ]);
+    });
+    await tx.factura.update({ where: { id: factura.id }, data: { estado: nuevoSaldo <= 0 ? "pagada" : "pendiente" } });
+    await generarComprobantePago(tx, pago.id, valorRedondeado, factura.suscriptor.terceroId);
+    return pago;
+  });
   res.status(201).json({ ...pago, saldoRestante: nuevoSaldo });
 });
 
@@ -650,11 +692,14 @@ facturacionRouter.get("/pagos", permisoVer, async (req, res) => {
   res.json({ data: pagos, total, page: pageNum, limit: limitNum, sumaValor: Number(suma._sum.valor ?? 0) });
 });
 
-// Deshacer un pago mal registrado. Recalcula el saldo con los pagos QUE QUEDAN (no asume que
-// borrar el único pago existente): si la factura tenía dos abonos y se borra uno, puede seguir
-// "pagada" con el otro; si queda con saldo, vuelve a "pendiente". Una factura anulada no se
-// reabre por esto — anular ya es la vía para dejarla sin efecto.
-facturacionRouter.delete("/pagos/:id", permisoAvanzado, async (req, res) => {
+// Deshacer un pago mal registrado. Mismo permiso que registrarlo (pagos_registrar) — quien puede
+// cobrar en caja debe poder corregir su propio error sin depender de alguien con permiso de
+// Facturación (avanzado), que es un rol mucho más amplio (tarifas, anular facturas, etc.).
+// Recalcula el saldo con los pagos QUE QUEDAN (no asume que se borra el único pago existente): si
+// la factura tenía dos abonos y se borra uno, puede seguir "pagada" con el otro; si queda con
+// saldo, vuelve a "pendiente". Una factura anulada no se reabre por esto — anular ya es la vía
+// para dejarla sin efecto.
+facturacionRouter.delete("/pagos/:id", permisoPagos, async (req, res) => {
   const pago = await prisma.pago.findUnique({
     where: { id: Number(req.params.id) },
     include: { factura: { include: { pagos: true } } },
@@ -664,18 +709,204 @@ facturacionRouter.delete("/pagos/:id", permisoAvanzado, async (req, res) => {
     .filter((p) => p.id !== pago.id)
     .reduce((acc, p) => acc + Number(p.valor), 0);
   const saldoRestante = Number(pago.factura.total) - pagadoRestante;
-  await prisma.$transaction([
-    prisma.pago.delete({ where: { id: pago.id } }),
-    ...(pago.factura.estado === "anulada"
-      ? []
-      : [
-          prisma.factura.update({
-            where: { id: pago.facturaId },
-            data: { estado: saldoRestante <= 0 ? "pagada" : "pendiente" },
-          }),
-        ]),
-  ]);
+  await prisma.$transaction(async (tx) => {
+    await tx.pago.delete({ where: { id: pago.id } });
+    if (pago.factura.estado !== "anulada") {
+      await tx.factura.update({
+        where: { id: pago.facturaId },
+        data: { estado: saldoRestante <= 0 ? "pagada" : "pendiente" },
+      });
+    }
+    await anularComprobante(tx, "Pago", pago.id);
+  });
   req.log?.info({ pagoId: pago.id, facturaId: pago.facturaId, usuario: req.usuario?.id }, "Pago eliminado");
+  res.status(204).end();
+});
+
+// ============================== NOTAS (crédito/débito) ==============================
+// Antes de esto, un ajuste al saldo de un suscriptor solo se podía meter a mano dentro de una
+// factura ya generada (concepto tipo "manual") — sin documento propio con consecutivo, y sin que
+// el ajuste se arrastrara solo a la siguiente factura si todavía no había una donde meterlo. Una
+// nota queda "pendiente" hasta que la próxima generación masiva de ese suscriptor la aplica sola
+// (ver conceptosDeNotasPendientes en lib/notas.ts, llamado desde POST /generar/iniciar).
+
+facturacionRouter.get("/notas", permisoVer, async (req, res) => {
+  const { suscriptorId, estado, page, limit } = req.query;
+  const where: Record<string, unknown> = {};
+  if (suscriptorId) where.suscriptorId = Number(suscriptorId);
+  if (estado) where.estado = String(estado);
+  const pageNum = Math.max(1, Number(page) || 1);
+  const limitNum = Math.max(1, Number(limit) || 20);
+  const [notas, total] = await Promise.all([
+    prisma.nota.findMany({
+      where,
+      include: {
+        suscriptor: { select: { codigo: true, nombre: true } },
+        pqr: { select: { numeroRadicado: true } },
+        facturaAplicada: { select: { numero: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      skip: (pageNum - 1) * limitNum,
+      take: limitNum,
+    }),
+    prisma.nota.count({ where }),
+  ]);
+  res.json({ data: notas, total, page: pageNum, limit: limitNum });
+});
+
+facturacionRouter.post("/notas", permisoAvanzado, async (req, res) => {
+  const { suscriptorId, tipo, valor, concepto, numeroRadicadoPqr } = req.body;
+  if (!suscriptorId) return res.status(400).json({ error: "El suscriptor es requerido" });
+  if (tipo !== "credito" && tipo !== "debito") return res.status(400).json({ error: "Tipo inválido (credito | debito)" });
+  const valorNum = Number(valor);
+  if (!valorNum || valorNum <= 0) return res.status(400).json({ error: "El valor debe ser mayor a cero" });
+  if (!concepto || !String(concepto).trim()) return res.status(400).json({ error: "El concepto es requerido" });
+
+  const suscriptor = await prisma.suscriptor.findUnique({ where: { id: Number(suscriptorId) } });
+  if (!suscriptor) return res.status(404).json({ error: "Suscriptor no encontrado" });
+
+  let pqrId: number | null = null;
+  if (numeroRadicadoPqr) {
+    const pqr = await prisma.pqr.findUnique({ where: { numeroRadicado: String(numeroRadicadoPqr).trim() } });
+    if (!pqr) return res.status(400).json({ error: `No existe ninguna PQR con el radicado "${numeroRadicadoPqr}"` });
+    pqrId = pqr.id;
+  }
+
+  const nota = await prisma.nota.create({
+    data: {
+      suscriptorId: Number(suscriptorId),
+      tipo,
+      valor: valorNum,
+      concepto: String(concepto).trim(),
+      pqrId,
+      creadoPorId: req.usuario?.id ?? null,
+    },
+    include: { suscriptor: { select: { codigo: true, nombre: true } }, pqr: { select: { numeroRadicado: true } } },
+  });
+  res.status(201).json(nota);
+});
+
+facturacionRouter.delete("/notas/:id", permisoAvanzado, async (req, res) => {
+  const nota = await prisma.nota.findUnique({ where: { id: Number(req.params.id) } });
+  if (!nota) return res.status(404).json({ error: "No encontrada" });
+  if (nota.estado !== "pendiente") {
+    return res.status(400).json({ error: "Solo se puede anular una nota que todavía no se ha aplicado a una factura" });
+  }
+  await prisma.nota.update({ where: { id: nota.id }, data: { estado: "anulada" } });
+  res.status(204).end();
+});
+
+// ============================== ACUERDOS DE PAGO ==============================
+// Financia UNA factura vencida en cuotas — antes de esto la única forma de manejar una mora alta
+// era anular/reemitir facturas a mano, sin ningún rastro de que era un acuerdo. Al crear el
+// acuerdo, la factura original se anula (mismo mecanismo que PUT /facturas/:id/anular) y su saldo
+// se reparte en cuotas que se van aplicando UNA POR FACTURA en las próximas generaciones de ese
+// suscriptor (ver lib/acuerdosPago.ts).
+
+facturacionRouter.get("/acuerdos-pago", permisoVer, async (req, res) => {
+  const { suscriptorId, estado, page, limit } = req.query;
+  const where: Record<string, unknown> = {};
+  if (suscriptorId) where.suscriptorId = Number(suscriptorId);
+  if (estado) where.estado = String(estado);
+  const pageNum = Math.max(1, Number(page) || 1);
+  const limitNum = Math.max(1, Number(limit) || 20);
+  const [acuerdos, total] = await Promise.all([
+    prisma.acuerdoPago.findMany({
+      where,
+      include: {
+        suscriptor: { select: { codigo: true, nombre: true } },
+        factura: { select: { numero: true } },
+        pqr: { select: { numeroRadicado: true } },
+        cuotas: { orderBy: { numero: "asc" } },
+      },
+      orderBy: { createdAt: "desc" },
+      skip: (pageNum - 1) * limitNum,
+      take: limitNum,
+    }),
+    prisma.acuerdoPago.count({ where }),
+  ]);
+  res.json({ data: acuerdos, total, page: pageNum, limit: limitNum });
+});
+
+// Dos formas de crear un acuerdo: (a) financiando una FACTURA VENCIDA existente (facturaId) — la
+// factura se anula y su total se reparte en cuotas; o (b) financiando un CARGO NUEVO que nunca
+// existió como factura (suscriptorId + valorCargo) — ej. matrícula/conexión nueva en cuotas. No
+// se puede mandar ambos ni ninguno.
+facturacionRouter.post("/acuerdos-pago", permisoAvanzado, async (req, res) => {
+  const { facturaId, suscriptorId, valorCargo, numeroCuotas, concepto, numeroRadicadoPqr } = req.body;
+  const cuotas = Number(numeroCuotas);
+  if (!Number.isInteger(cuotas) || cuotas < 2) return res.status(400).json({ error: "El número de cuotas debe ser 2 o más" });
+  if (!concepto || !String(concepto).trim()) return res.status(400).json({ error: "El concepto es requerido" });
+  if (!facturaId && !suscriptorId) return res.status(400).json({ error: "Indica una factura a financiar o un suscriptor + valor para un cargo nuevo" });
+  if (facturaId && suscriptorId) return res.status(400).json({ error: "Indica solo una factura O un suscriptor, no ambos" });
+
+  let pqrId: number | null = null;
+  if (numeroRadicadoPqr) {
+    const pqr = await prisma.pqr.findUnique({ where: { numeroRadicado: String(numeroRadicadoPqr).trim() } });
+    if (!pqr) return res.status(400).json({ error: `No existe ninguna PQR con el radicado "${numeroRadicadoPqr}"` });
+    pqrId = pqr.id;
+  }
+
+  let datosAcuerdo: { suscriptorId: number; facturaId: number | null; valorTotal: number };
+  let anularFacturaEnTx: number | null = null;
+
+  if (facturaId) {
+    const factura = await prisma.factura.findUnique({ where: { id: Number(facturaId) }, include: { pagos: true } });
+    if (!factura) return res.status(404).json({ error: "Factura no encontrada" });
+    if (factura.estado !== "pendiente") return res.status(400).json({ error: "Solo se puede financiar una factura pendiente" });
+    if (factura.pagos.length > 0) {
+      return res.status(400).json({ error: "Esta factura ya tiene pagos registrados — no se puede financiar en un acuerdo" });
+    }
+    if (await periodoEstaCerrado(factura.periodo)) return res.status(400).json({ error: MENSAJE_PERIODO_CERRADO });
+    datosAcuerdo = { suscriptorId: factura.suscriptorId, facturaId: factura.id, valorTotal: Math.round(Number(factura.total)) };
+    anularFacturaEnTx = factura.id;
+  } else {
+    const valor = Math.round(Number(valorCargo));
+    if (!valor || valor <= 0) return res.status(400).json({ error: "El valor del cargo debe ser mayor a cero" });
+    const suscriptor = await prisma.suscriptor.findUnique({ where: { id: Number(suscriptorId) } });
+    if (!suscriptor) return res.status(404).json({ error: "Suscriptor no encontrado" });
+    datosAcuerdo = { suscriptorId: suscriptor.id, facturaId: null, valorTotal: valor };
+  }
+
+  const valorPorCuota = Math.floor(datosAcuerdo.valorTotal / cuotas);
+  const cuotasData = Array.from({ length: cuotas }, (_, i) => ({
+    numero: i + 1,
+    valor: i === cuotas - 1 ? datosAcuerdo.valorTotal - valorPorCuota * (cuotas - 1) : valorPorCuota,
+  }));
+
+  const acuerdo = await prisma.$transaction(async (tx) => {
+    if (anularFacturaEnTx) {
+      await tx.factura.update({
+        where: { id: anularFacturaEnTx },
+        data: { estado: "anulada", observaciones: `ANULADA: financiada en acuerdo de pago — ${concepto}`, pqrId },
+      });
+      await anularComprobante(tx, "Factura", anularFacturaEnTx);
+    }
+    return tx.acuerdoPago.create({
+      data: {
+        suscriptorId: datosAcuerdo.suscriptorId,
+        facturaId: datosAcuerdo.facturaId,
+        valorTotal: datosAcuerdo.valorTotal,
+        numeroCuotas: cuotas,
+        concepto: String(concepto).trim(),
+        pqrId,
+        creadoPorId: req.usuario?.id ?? null,
+        cuotas: { create: cuotasData },
+      },
+      include: { suscriptor: { select: { codigo: true, nombre: true } }, factura: { select: { numero: true } }, cuotas: true },
+    });
+  });
+  res.status(201).json(acuerdo);
+});
+
+facturacionRouter.delete("/acuerdos-pago/:id", permisoAvanzado, async (req, res) => {
+  const acuerdo = await prisma.acuerdoPago.findUnique({ where: { id: Number(req.params.id) } });
+  if (!acuerdo) return res.status(404).json({ error: "No encontrado" });
+  if (acuerdo.estado !== "activo") return res.status(400).json({ error: "Este acuerdo ya no está activo" });
+  // Las cuotas ya aplicadas (en facturas ya generadas) quedan tal cual — solo se detiene que se
+  // sigan aplicando cuotas futuras. No se intenta deshacer facturas que ya se emitieron con una
+  // cuota de este acuerdo.
+  await prisma.acuerdoPago.update({ where: { id: acuerdo.id }, data: { estado: "anulado" } });
   res.status(204).end();
 });
 
