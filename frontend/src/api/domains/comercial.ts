@@ -411,8 +411,11 @@ export const medidoresApi = {
   },
   create: (data: Partial<Medidor> & { marcaId?: number; modeloId?: number; diametroId?: number }) =>
     request<Medidor>("/api/medidores", { method: "POST", body: JSON.stringify(data) }),
-  serialDisponible: (serial: string) =>
-    request<{ disponible: boolean }>(`/api/medidores/serial/${encodeURIComponent(serial)}/disponible`),
+  // excluirMedidorId: al EDITAR un medidor, su propio serial no cuenta como "ya en uso".
+  serialDisponible: (serial: string, excluirMedidorId?: number) =>
+    request<{ disponible: boolean }>(
+      `/api/medidores/serial/${encodeURIComponent(serial)}/disponible${excluirMedidorId ? `?excluir=${excluirMedidorId}` : ""}`
+    ),
   update: (id: number, data: Partial<Medidor> & { marcaId?: number | null; modeloId?: number | null; diametroId?: number | null }) =>
     request<Medidor>(`/api/medidores/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   remove: (id: number) => request<void>(`/api/medidores/${id}`, { method: "DELETE" }),

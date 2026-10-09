@@ -118,6 +118,24 @@ medidoresRouter.get("/export", soloAvanzado, async (req, res) => {
   enviarExcel(res, buffer, "plantilla_medidores.xlsx");
 });
 
+// ActaInstalacion.serial es una COPIA del serial del medidor al momento de crear el acta (el acta
+// es un documento: dice qué medidor se instaló). Cuando el serial del medidor se corrige después
+// (error de digitación), esa copia quedaba con el serial viejo — el inventario decía una cosa y
+// el historial de actas del suscriptor otra. Como un acta siempre pertenece al mismo medidor
+// (medidorId), corregir el serial corrige todas las suyas. Si el serial queda vacío no se toca:
+// el acta es obligatoria con serial, se conserva el último conocido.
+async function sincronizarSerialEnActas(
+  db: Pick<typeof prisma, "actaInstalacion">,
+  medidorId: number,
+  serialNuevo: string | null | undefined
+) {
+  if (!serialNuevo) return;
+  await db.actaInstalacion.updateMany({
+    where: { medidorId, NOT: { serial: serialNuevo } },
+    data: { serial: serialNuevo },
+  });
+}
+
 function leerColumnas(headers: string[]) {
   return {
     iNuid: colIndexContains(headers, "NUID"),
@@ -590,6 +608,7 @@ medidoresRouter.post("/import", soloAvanzado, upload.single("archivo"), async (r
       medidoresPorSuscriptor.set(suscriptor.id, medidoresDelSuscriptor);
     }
 
+    const serialAnterior = medidor.serial;
     try {
       medidor = await prisma.medidor.update({
         where: { id: medidor.id },
@@ -616,6 +635,9 @@ medidoresRouter.post("/import", soloAvanzado, upload.single("archivo"), async (r
       );
       continue;
     }
+    // Si el Excel trae un serial distinto al que ya tenía este medidor (corrección), las actas que
+    // ya existían deben quedar con el serial nuevo, igual que al editarlo a mano.
+    if (serialAnterior && serial && serial !== serialAnterior) await sincronizarSerialEnActas(prisma, medidor.id, serial);
 
     // Igual que al registrar una acta de instalación individual (ver actas.ts): asignarle un
     // medidor a un suscriptor que estaba "sin_medidor" lo mueve a "instalado" (pendiente de
@@ -764,10 +786,13 @@ medidoresRouter.get("/:id", async (req, res) => {
 });
 
 // Chequeo de disponibilidad de un serial exacto — lo usa el formulario de "agregar medidor" para
-// avisar de una vez si el serial ya existe, antes de dejar completar el resto de los campos.
+// avisar de una vez si el serial ya existe, antes de dejar completar el resto de los campos, y el
+// de "editar medidor" (con ?excluir=<id del medidor que se edita>, para que su propio serial no
+// cuente como "ya en uso").
 medidoresRouter.get("/serial/:serial/disponible", async (req, res) => {
-  const existente = await prisma.medidor.findUnique({ where: { serial: req.params.serial }, select: { id: true } });
-  res.json({ disponible: !existente });
+  const existente = await prisma.medidor.findUnique({ where: { serial: req.params.serial.trim() }, select: { id: true } });
+  const excluir = Number(req.query.excluir);
+  res.json({ disponible: !existente || (Number.isInteger(excluir) && existente.id === excluir) });
 });
 
 // Al agregar un medidor nuevo al inventario, todos sus datos de catálogo se piden de una vez
@@ -777,7 +802,7 @@ medidoresRouter.get("/serial/:serial/disponible", async (req, res) => {
 medidoresRouter.post("/", soloAvanzado, async (req, res) => {
   const {
     suscriptorId,
-    serial,
+    serial: serialCrudo,
     marcaId,
     modeloId,
     diametroId,
@@ -790,6 +815,8 @@ medidoresRouter.post("/", soloAvanzado, async (req, res) => {
     loteId,
     lecturaInicial,
   } = req.body;
+  // "123 " y "123" son el mismo serial para una persona pero distintos para la restricción única.
+  const serial = typeof serialCrudo === "string" ? serialCrudo.trim() : serialCrudo;
 
   if (
     !serial ||
@@ -984,27 +1011,43 @@ medidoresRouter.put("/:id", soloAvanzado, async (req, res) => {
     diametroId ? prisma.diametroMedidor.findUnique({ where: { id: Number(diametroId) } }) : null,
   ]);
 
-  const medidor = await prisma.medidor.update({
-    where: { id: Number(req.params.id) },
-    data: {
-      serial: serial !== undefined ? serial : undefined,
-      marcaId: marcaId !== undefined ? marcaCat?.id ?? null : undefined,
-      modeloId: modeloId !== undefined ? modeloCat?.id ?? null : undefined,
-      diametroId: diametroId !== undefined ? diametroCat?.id ?? null : undefined,
-      // undefined = no vino en el body, no tocar; "" o null = limpiar la fecha; valor = parsear.
-      fechaInstalacion: fechaInstalacion === undefined ? undefined : fechaInstalacion ? new Date(fechaInstalacion) : null,
-      tipo: marcaId !== undefined || modeloId !== undefined ? modeloCat?.tipo ?? null : tipo,
-      fechaFabricacion: fechaFabricacion === undefined ? undefined : fechaFabricacion ? new Date(fechaFabricacion) : null,
-      fechaCertificacion: fechaCertificacion === undefined ? undefined : fechaCertificacion ? new Date(fechaCertificacion) : null,
-      clase,
-      certificado,
-      loteId: loteId !== undefined ? (loteId ? Number(loteId) : null) : undefined,
-      lecturaInicial,
-      activo,
-      condicion,
-    },
-    include: { marcaCat: true, modeloCat: true, diametroCat: true, lote: true },
-  });
+  // undefined = no tocar; string vacío (o solo espacios) = sin serial; si no, sin espacios en los extremos.
+  const serialNuevo = serial === undefined ? undefined : typeof serial === "string" ? serial.trim() || null : serial;
+
+  // Medidor + actas en una sola transacción: o se corrige el serial en ambos, o en ninguno.
+  let medidor;
+  try {
+    medidor = await prisma.$transaction(async (tx) => {
+      const actualizado = await tx.medidor.update({
+        where: { id: Number(req.params.id) },
+        data: {
+          serial: serialNuevo,
+          marcaId: marcaId !== undefined ? marcaCat?.id ?? null : undefined,
+          modeloId: modeloId !== undefined ? modeloCat?.id ?? null : undefined,
+          diametroId: diametroId !== undefined ? diametroCat?.id ?? null : undefined,
+          // undefined = no vino en el body, no tocar; "" o null = limpiar la fecha; valor = parsear.
+          fechaInstalacion: fechaInstalacion === undefined ? undefined : fechaInstalacion ? new Date(fechaInstalacion) : null,
+          tipo: marcaId !== undefined || modeloId !== undefined ? modeloCat?.tipo ?? null : tipo,
+          fechaFabricacion: fechaFabricacion === undefined ? undefined : fechaFabricacion ? new Date(fechaFabricacion) : null,
+          fechaCertificacion: fechaCertificacion === undefined ? undefined : fechaCertificacion ? new Date(fechaCertificacion) : null,
+          clase,
+          certificado,
+          loteId: loteId !== undefined ? (loteId ? Number(loteId) : null) : undefined,
+          lecturaInicial,
+          activo,
+          condicion,
+        },
+        include: { marcaCat: true, modeloCat: true, diametroCat: true, lote: true },
+      });
+      if (serialNuevo && serialNuevo !== antes.serial) await sincronizarSerialEnActas(tx, actualizado.id, serialNuevo);
+      return actualizado;
+    });
+  } catch (err: any) {
+    // Serial es único: antes esto caía en el 500 genérico ("Error interno del servidor") sin decir
+    // qué pasaba. No se guardó nada (la transacción se revirtió completa).
+    if (err?.code === "P2002") return res.status(400).json({ error: `Ya existe otro medidor con el serial "${serialNuevo}".` });
+    throw err;
+  }
 
   await registrarCambios("medidor", medidor.id, camposMedidor(antes), camposMedidor(medidor), req.usuario?.id);
 
