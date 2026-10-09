@@ -1,7 +1,8 @@
 import { Router } from "express";
 import multer from "multer";
 import { prisma } from "../../lib/prisma.js";
-import { guardarArchivo, borrarArchivo } from "../../lib/storage.js";
+import { guardarArchivo, borrarArchivo, borrarArchivos } from "../../lib/storage.js";
+import { LIMITE_DOCUMENTO_BYTES, filtroDocumento } from "../../lib/uploads.js";
 
 export const actasRouter = Router();
 
@@ -12,8 +13,12 @@ const upload = multer({
 });
 
 // El PDF/imagen del acta ya firmada a mano no tiene por qué ser una foto (mimetype restringido
-// arriba a "image/*"); acepta también PDF, sin límite de tipo.
-const uploadDocumento = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+// arriba a "image/*"); acepta también PDF, pero nada más (antes aceptaba cualquier tipo).
+const uploadDocumento = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: LIMITE_DOCUMENTO_BYTES },
+  fileFilter: filtroDocumento,
+});
 
 async function subirFotos(archivos: Express.Multer.File[]): Promise<string[]> {
   return Promise.all(archivos.map((f) => guardarArchivo("actas", f.buffer, f.originalname, f.mimetype)));
@@ -95,65 +100,83 @@ actasRouter.post("/", upload.array("fotos", 10), async (req, res) => {
   if (suscriptorDestino.estadoPredio === "inactivo") {
     return res.status(400).json({ error: "No se puede instalar un medidor en un predio inactivo" });
   }
+  // Un dato inválido se rechaza ANTES de subir nada a MinIO (no tiene sentido subir las fotos para
+  // que después la BD rechace el guardado).
+  if (Number.isNaN(new Date(fechaInstalacion).getTime())) {
+    return res.status(400).json({ error: "La fecha de instalación no es válida" });
+  }
 
   const archivos = (req.files as Express.Multer.File[] | undefined) ?? [];
   const fotos = await subirFotos(archivos);
 
-  // Si el suscriptor ya tenía un medidor activo, este nuevo lo reemplaza: el anterior queda
-  // marcado como inactivo (histórico, conserva sus lecturas) y vuelve a bodega — se desvincula
-  // del suscriptor para que no siga apareciendo como instalado en su predio.
-  const medidoresReemplazados = await prisma.medidor.findMany({
-    where: { suscriptorId: Number(suscriptorId), activo: true, id: { not: Number(medidorId) } },
-    select: { id: true },
-  });
-  if (medidoresReemplazados.length > 0) {
-    await prisma.medidor.updateMany({
-      where: { id: { in: medidoresReemplazados.map((m) => m.id) } },
-      data: { activo: false, estado: "en_bodega", suscriptorId: null },
-    });
-    // El acta del medidor reemplazado se cierra con fechaRetiro para que siga apareciendo en el
-    // historial del suscriptor (el modal de historial filtra por fechaRetiro, no por si el
-    // medidor sigue con suscriptorId asignado).
-    await prisma.actaInstalacion.updateMany({
-      where: { medidorId: { in: medidoresReemplazados.map((m) => m.id) }, fechaRetiro: null },
-      data: { fechaRetiro: new Date(fechaInstalacion) },
-    });
-  }
+  // TODO el guardado en UNA transacción, y si algo falla se borran las fotos recién subidas.
+  // Antes el reemplazo del medidor anterior ocurría ANTES del try (y cada paso por separado), así
+  // que un fallo de la BD a mitad dejaba dos problemas a la vez: las fotos huérfanas en MinIO, y
+  // el medidor anterior ya desinstalado aunque el nuevo nunca llegó a quedar registrado.
+  let acta;
+  try {
+    const instalador = await resolverInstalador(usuarioId, instaladoPor);
+    acta = await prisma.$transaction(async (tx) => {
+      // Si el suscriptor ya tenía un medidor activo, este nuevo lo reemplaza: el anterior queda
+      // marcado como inactivo (histórico, conserva sus lecturas) y vuelve a bodega — se desvincula
+      // del suscriptor para que no siga apareciendo como instalado en su predio.
+      const medidoresReemplazados = await tx.medidor.findMany({
+        where: { suscriptorId: Number(suscriptorId), activo: true, id: { not: Number(medidorId) } },
+        select: { id: true },
+      });
+      if (medidoresReemplazados.length > 0) {
+        await tx.medidor.updateMany({
+          where: { id: { in: medidoresReemplazados.map((m) => m.id) } },
+          data: { activo: false, estado: "en_bodega", suscriptorId: null },
+        });
+        // El acta del medidor reemplazado se cierra con fechaRetiro para que siga apareciendo en el
+        // historial del suscriptor (el modal de historial filtra por fechaRetiro, no por si el
+        // medidor sigue con suscriptorId asignado).
+        await tx.actaInstalacion.updateMany({
+          where: { medidorId: { in: medidoresReemplazados.map((m) => m.id) }, fechaRetiro: null },
+          data: { fechaRetiro: new Date(fechaInstalacion) },
+        });
+      }
 
-  const instalador = await resolverInstalador(usuarioId, instaladoPor);
-  const acta = await prisma.actaInstalacion.create({
-    data: {
-      medidorId: Number(medidorId),
-      suscriptorId: Number(suscriptorId),
-      serial: medidor.serial,
-      fechaInstalacion: new Date(fechaInstalacion),
-      instaladoPor: instalador.instaladoPor,
-      usuarioId: instalador.usuarioId,
-      observaciones: observaciones || null,
-      fotos,
-    },
-  });
+      const creada = await tx.actaInstalacion.create({
+        data: {
+          medidorId: Number(medidorId),
+          suscriptorId: Number(suscriptorId),
+          serial: medidor.serial!,
+          fechaInstalacion: new Date(fechaInstalacion),
+          instaladoPor: instalador.instaladoPor,
+          usuarioId: instalador.usuarioId,
+          observaciones: observaciones || null,
+          fotos,
+        },
+      });
 
-  // lecturaInicial NO se toca acá: ya quedó fijada cuando el medidor se agregó al inventario
-  // (es el valor de fábrica, no cambia por instalarse).
-  await prisma.medidor.update({
-    where: { id: Number(medidorId) },
-    data: {
-      suscriptorId: Number(suscriptorId),
-      estado: "instalado",
-      activo: true,
-      fechaInstalacion: new Date(fechaInstalacion),
-    },
-  });
+      // lecturaInicial NO se toca acá: ya quedó fijada cuando el medidor se agregó al inventario
+      // (es el valor de fábrica, no cambia por instalarse).
+      await tx.medidor.update({
+        where: { id: Number(medidorId) },
+        data: {
+          suscriptorId: Number(suscriptorId),
+          estado: "instalado",
+          activo: true,
+          fechaInstalacion: new Date(fechaInstalacion),
+        },
+      });
 
-  // Una instalación nueva mueve al suscriptor a "instalado_prueba" salvo que ya estuviera en un
-  // estado más avanzado (facturando, o inactivo/dañado) — un reemplazo de medidor no reinicia
-  // ese proceso ni resucita un predio que se marcó inactivo a propósito.
-  if (!["facturando", "inactivo"].includes(suscriptorDestino.estadoFacturacion)) {
-    await prisma.suscriptor.update({
-      where: { id: Number(suscriptorId) },
-      data: { estadoFacturacion: "instalado_prueba" },
+      // Una instalación nueva mueve al suscriptor a "instalado_prueba" salvo que ya estuviera en un
+      // estado más avanzado (facturando, o inactivo/dañado) — un reemplazo de medidor no reinicia
+      // ese proceso ni resucita un predio que se marcó inactivo a propósito.
+      if (!["facturando", "inactivo"].includes(suscriptorDestino.estadoFacturacion)) {
+        await tx.suscriptor.update({
+          where: { id: Number(suscriptorId) },
+          data: { estadoFacturacion: "instalado_prueba" },
+        });
+      }
+      return creada;
     });
+  } catch (err) {
+    await borrarArchivos(fotos);
+    throw err;
   }
 
   res.status(201).json(acta);
@@ -167,12 +190,14 @@ actasRouter.put("/:id", upload.array("fotos", 10), async (req, res) => {
   if (!fechaInstalacion || !instaladoPor) {
     return res.status(400).json({ error: "fechaInstalacion e instaladoPor son requeridos" });
   }
+  if (Number.isNaN(new Date(fechaInstalacion).getTime())) {
+    return res.status(400).json({ error: "La fecha de instalación no es válida" });
+  }
 
-  const aRemover: string[] = fotosARemover
-    ? Array.isArray(fotosARemover)
-      ? fotosARemover
-      : [fotosARemover]
-    : [];
+  // Solo se aceptan rutas que de verdad son de esta acta — sin este filtro, un fotosARemover
+  // arbitrario borraba de MinIO archivos de OTRO registro (que quedaba con la referencia rota).
+  const pedidas: string[] = fotosARemover ? (Array.isArray(fotosARemover) ? fotosARemover : [fotosARemover]) : [];
+  const aRemover = acta.fotos.filter((f) => pedidas.includes(f));
 
   const archivos = (req.files as Express.Multer.File[] | undefined) ?? [];
   const fotosNuevas = await subirFotos(archivos);
@@ -180,25 +205,35 @@ actasRouter.put("/:id", upload.array("fotos", 10), async (req, res) => {
 
   // fechaRetiro solo se envía al editar el historial de un medidor retirado (corregir la fecha
   // de retiro); si no viene en el body, no se toca (no es una forma de "reactivar" el medidor).
-  const instalador = await resolverInstalador(usuarioId, instaladoPor);
-  const actaActualizada = await prisma.actaInstalacion.update({
-    where: { id: acta.id },
-    data: {
-      fechaInstalacion: new Date(fechaInstalacion),
-      instaladoPor: instalador.instaladoPor,
-      usuarioId: instalador.usuarioId,
-      observaciones: observaciones || null,
-      fotos: fotosFinales,
-      fechaRetiro: fechaRetiro !== undefined ? new Date(fechaRetiro) : undefined,
-    },
-  });
+  let actaActualizada;
+  try {
+    const instalador = await resolverInstalador(usuarioId, instaladoPor);
+    actaActualizada = await prisma.actaInstalacion.update({
+      where: { id: acta.id },
+      data: {
+        fechaInstalacion: new Date(fechaInstalacion),
+        instaladoPor: instalador.instaladoPor,
+        usuarioId: instalador.usuarioId,
+        observaciones: observaciones || null,
+        fotos: fotosFinales,
+        fechaRetiro: fechaRetiro !== undefined ? new Date(fechaRetiro) : undefined,
+      },
+    });
+  } catch (err) {
+    await borrarArchivos(fotosNuevas);
+    throw err;
+  }
 
-  await Promise.all(aRemover.map((foto) => borrarArchivo(foto)));
+  await borrarArchivos(aRemover);
 
-  await prisma.medidor.update({
-    where: { id: acta.medidorId },
-    data: { fechaInstalacion: new Date(fechaInstalacion) },
-  });
+  // Medidor.fechaInstalacion es la de la instalación VIGENTE. Si lo que se corrige es un acta ya
+  // retirada (el medidor pudo haberse instalado después en otro predio), no se debe pisar.
+  if (!actaActualizada.fechaRetiro) {
+    await prisma.medidor.update({
+      where: { id: acta.medidorId },
+      data: { fechaInstalacion: new Date(fechaInstalacion) },
+    });
+  }
 
   res.json(actaActualizada);
 });
@@ -240,9 +275,6 @@ actasRouter.delete("/:id/definitivo", async (req, res) => {
   const acta = await prisma.actaInstalacion.findUnique({ where: { id: Number(req.params.id) } });
   if (!acta) return res.status(404).json({ error: "No encontrada" });
 
-  await Promise.all(acta.fotos.map((foto) => borrarArchivo(foto)));
-  if (acta.actaFirmadaUrl) await borrarArchivo(acta.actaFirmadaUrl);
-
   // Si esta acta todavía representa la asignación activa (nunca se "quitó" y el medidor sigue
   // apuntando a este mismo suscriptor), hay que revertir ese estado igual que haría un "quitar"
   // normal — si no, el medidor queda con suscriptorId puesto pero sin ningún acta que lo respalde.
@@ -253,6 +285,7 @@ actasRouter.delete("/:id/definitivo", async (req, res) => {
   }
 
   await prisma.actaInstalacion.delete({ where: { id: acta.id } });
+  await borrarArchivos([...acta.fotos, acta.actaFirmadaUrl]);
   res.status(204).end();
 });
 
@@ -264,18 +297,22 @@ actasRouter.post("/:id/firmada", uploadDocumento.single("archivo"), async (req, 
   if (!req.file) return res.status(400).json({ error: "Falta el archivo (campo 'archivo')" });
 
   const actaFirmadaUrl = await guardarArchivo("actas-firmadas", req.file.buffer, req.file.originalname, req.file.mimetype);
+  let actualizada;
+  try {
+    actualizada = await prisma.actaInstalacion.update({ where: { id: acta.id }, data: { actaFirmadaUrl } });
+  } catch (err) {
+    await borrarArchivo(actaFirmadaUrl);
+    throw err;
+  }
   if (acta.actaFirmadaUrl) await borrarArchivo(acta.actaFirmadaUrl);
-
-  const actualizada = await prisma.actaInstalacion.update({ where: { id: acta.id }, data: { actaFirmadaUrl } });
   res.json(actualizada);
 });
 
 actasRouter.delete("/:id/firmada", async (req, res) => {
   const acta = await prisma.actaInstalacion.findUnique({ where: { id: Number(req.params.id) } });
   if (!acta) return res.status(404).json({ error: "No encontrada" });
-  if (acta.actaFirmadaUrl) await borrarArchivo(acta.actaFirmadaUrl);
-
   const actualizada = await prisma.actaInstalacion.update({ where: { id: acta.id }, data: { actaFirmadaUrl: null } });
+  if (acta.actaFirmadaUrl) await borrarArchivo(acta.actaFirmadaUrl);
   res.json(actualizada);
 });
 
