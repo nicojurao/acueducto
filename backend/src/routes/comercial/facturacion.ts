@@ -1231,30 +1231,80 @@ function valorDeCampo(campo: string, factura: FacturaParaPlantilla): string {
   }
 }
 
-// Código de barras Code128 del número de factura, como PNG — el mismo número que escanea la
-// pantalla de "Recaudo rápido" para encontrar la factura sin buscarla a mano (ver /pagos/buscar).
-// Se genera en una resolución fija (queda nítido) y pdfkit lo reescala al tamaño que pida el
-// marcador, así que el tamaño "real" de generación acá no importa mucho.
-async function bufferCodigoBarras(numero: number): Promise<Buffer> {
-  return bwipjs.toBuffer({ bcid: "code128", text: String(numero), scale: 3, height: 10, includetext: false });
+// Cuánto "scale" (px por módulo de barra, ver bwip-js) hace falta para que el código llegue a una
+// resolución de impresión razonable (~220dpi) en el ANCHO EXACTO que el usuario configuró en el
+// editor de plantillas — un scale fijo alto (probado: 6) sale nítido en cajas grandes pero es
+// carísimo en las chicas, y en un PDF de periodo completo (~3874 facturas) eso se nota: generar
+// TODAS las facturas con el mismo scale alto tardaba ~12 minutos (medido 2026-09-13). Acá se mide
+// el ancho nativo a un scale bajo (barato, ~3ms) y se calcula desde ahí el scale real que hace
+// falta — el ancho nativo no es fijo, depende de cuántos dígitos tiene la referencia/saldo de
+// CADA factura, así que no se puede asumir una proporción constante de antemano.
+const DPI_OBJETIVO_BARRAS = 220;
+const SCALE_MUESTRA = 2;
+async function escalaParaAncho(generar: (scale: number) => Promise<Buffer>, anchoPt: number): Promise<number> {
+  const muestra = await generar(SCALE_MUESTRA);
+  const anchoNativo = muestra.readUInt32BE(16);
+  const anchoPxObjetivo = (anchoPt / 72) * DPI_OBJETIVO_BARRAS;
+  return Math.max(2, Math.min(10, Math.round((anchoPxObjetivo / anchoNativo) * SCALE_MUESTRA)));
 }
 
-// GLN de la entidad ante GS1 Colombia (ver lib/empresaCache.ts), para el convenio de recaudo
-// bancario — FIJO, igual en todas las facturas (no depende de cuál factura sea). AI (415) = "GLN
-// de quien factura/recauda". Por ahora, a pedido explícito, va SOLO este AI (el convenio sigue en
-// desarrollo, todavía no es público) — cuando se sume la referencia de pago (AI 8020) hay que
-// agregarla acá también.
+// Código de barras Code128 del número de factura, como PNG — el mismo número que escanea la
+// pantalla de "Recaudo rápido" para encontrar la factura sin buscarla a mano (ver /pagos/buscar).
+// Lleva el número legible debajo de las barras (includetext) para que también se pueda digitar a
+// mano si el escáner falla. pdfkit dibuja esta imagen forzando el ancho/alto EXACTOS del marcador
+// (ver pdfFacturaPlantilla) — así el tamaño en la plantilla es el tamaño real al imprimir (WYSIWYG),
+// sin recortar lo que el usuario configuró.
+export async function bufferCodigoBarras(numero: number, anchoPt: number): Promise<Buffer> {
+  const text = String(numero);
+  const generar = (scale: number) =>
+    bwipjs.toBuffer({
+      bcid: "code128",
+      text,
+      scale,
+      height: Math.round(scale * 3.3),
+      includetext: true,
+      textxalign: "center",
+      textsize: Math.round(scale * 1.7),
+    });
+  const scale = await escalaParaAncho(generar, anchoPt);
+  return generar(scale);
+}
+
+// GLN de la entidad ante GS1 Colombia (ver lib/empresaCache.ts) — FIJO, igual en todas las
+// facturas. AI (415) = "GLN de quien factura/recauda". Usado solo, sin datos de la factura, por
+// el código GS1 DataMatrix (bufferGs1DataMatrix) — ese sigue en desarrollo/pruebas a pedido
+// explícito del usuario, no se toca acá.
 async function contenidoGlnGs1(): Promise<string> {
   const empresa = await obtenerEmpresa();
   return `(415)${empresa.glnGs1}`;
 }
 
-async function bufferGs1Lineal(): Promise<Buffer> {
-  const text = await contenidoGlnGs1();
-  return bwipjs.toBuffer({ bcid: "gs1-128", text, scale: 3, height: 10, includetext: false });
+// Código de barras lineal del convenio de recaudo bancario: a diferencia del DataMatrix, este SÍ
+// lleva datos variables por factura para que el banco pueda identificar a qué factura corresponde
+// el pago — AI (8020) = referencia de pago (se usa el número de factura, confirmado con el
+// usuario 2026-09-13) y AI (3900) = valor a pagar (saldo pendiente, sin decimales — el peso
+// colombiano no los usa). Falta un AI (96), que en otros sistemas de ACBUM lleva la fecha de
+// vencimiento, pero su formato exacto depende de la ficha técnica del convenio con el banco, que
+// todavía no se ha confirmado — queda pendiente hasta tenerla.
+export async function bufferGs1Lineal(numeroFactura: number, saldoPendiente: number, anchoPt: number): Promise<Buffer> {
+  const empresa = await obtenerEmpresa();
+  const saldoEntero = Math.max(0, Math.round(saldoPendiente));
+  const text = `(415)${empresa.glnGs1}(8020)${numeroFactura}(3900)${saldoEntero}`;
+  const generar = (scale: number) =>
+    bwipjs.toBuffer({
+      bcid: "gs1-128",
+      text,
+      scale,
+      height: Math.round(scale * 3.3),
+      includetext: true,
+      textxalign: "center",
+      textsize: Math.round(scale * 1.7),
+    });
+  const scale = await escalaParaAncho(generar, anchoPt);
+  return generar(scale);
 }
 
-async function bufferGs1DataMatrix(): Promise<Buffer> {
+export async function bufferGs1DataMatrix(): Promise<Buffer> {
   // GS1 exige que el AI (415) venga acompañado del AI (8020) — bwip-js valida esto y por defecto
   // rechaza generarlo solo. "dontlint" salta esa validación a propósito: el usuario confirmó que
   // por ahora va solo el GLN (desarrollo/pruebas). Si el convenio pasa a producción con el banco,
@@ -1286,10 +1336,15 @@ async function pdfFacturaPlantilla(
         const ancho = m.anchoCaja ?? (m.campo === "gs1DataMatrix" ? alto : 120);
         const buffer =
           m.campo === "numeroBarras"
-            ? await bufferCodigoBarras(factura.numero)
+            ? await bufferCodigoBarras(factura.numero, ancho)
             : m.campo === "gs1Lineal"
-            ? await bufferGs1Lineal()
+            ? await bufferGs1Lineal(factura.numero, Number(factura.total) - (factura.pagado ?? 0), ancho)
             : await bufferGs1DataMatrix();
+        // width/height EXACTOS: el usuario decidió que quiere poder estirar el código libremente
+        // (no proporcional) para que el texto de abajo quede tan ancho como las barras, como en su
+        // sistema anterior — así que el recuadro que arrastra/agranda en el editor de plantillas
+        // (PlantillaFacturaEditor.tsx, con manija de resize real, misma imagen de
+        // /plantillas/muestra-codigo) es el tamaño exacto que sale impreso, sin recortarlo.
         doc.image(buffer, m.x, m.y, { width: ancho, height: alto });
       } catch {
         // si por lo que sea no se pudo generar, se sigue con el resto de marcadores — mejor una

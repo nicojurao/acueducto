@@ -24,7 +24,7 @@ import {
   variantesRouter,
 } from "./routes/comercial/catalogos.js";
 import { actasRouter } from "./routes/comercial/actas.js";
-import { facturacionRouter } from "./routes/comercial/facturacion.js";
+import { facturacionRouter, bufferCodigoBarras, bufferGs1Lineal, bufferGs1DataMatrix } from "./routes/comercial/facturacion.js";
 import { contabilidadRouter } from "./routes/comercial/contabilidad.js";
 import { suspensionesRouter } from "./routes/comercial/suspensiones.js";
 import { tercerosRouter } from "./routes/comercial/terceros.js";
@@ -133,6 +133,36 @@ app.get("/uploads/*", requireAuthQuery, async (req, res) => {
     stream.pipe(res);
   } catch {
     res.status(404).json({ error: "Archivo no encontrado" });
+  }
+});
+
+// Vista previa REAL del código de barras/DataMatrix para el editor de plantillas (con datos de
+// muestra, no de una factura real) — así lo que se ve al editar (PlantillaFacturaEditor.tsx,
+// <img object-fit: contain>) coincide con lo que sale impreso (pdfFacturaPlantilla, doc.image
+// con "fit"), en vez del placeholder rayado de antes que no reflejaba el tamaño real. Va acá,
+// antes de requireAuth, con el mismo esquema de /uploads/* (token corto por query, ?token=): un
+// <img src> no puede mandar el header Authorization.
+app.get("/api/facturacion/plantillas/muestra-codigo", requireAuthQuery, async (req, res) => {
+  const campo = String(req.query.campo ?? "");
+  // El ancho real del marcador (ver PlantillaFacturaEditor.tsx) — bufferCodigoBarras/bufferGs1Lineal
+  // calculan la resolución nativa a partir de ESTE valor, así la vista previa del editor sale con
+  // la misma nitidez real que va a imprimir, no genérica.
+  const ancho = Number(req.query.ancho) || 120;
+  try {
+    const buffer =
+      campo === "numeroBarras"
+        ? await bufferCodigoBarras(123456, ancho)
+        : campo === "gs1Lineal"
+        ? await bufferGs1Lineal(123456, 100000, ancho)
+        : campo === "gs1DataMatrix"
+        ? await bufferGs1DataMatrix()
+        : null;
+    if (!buffer) return res.status(400).json({ error: "Campo inválido" });
+    res.setHeader("Content-Type", "image/png");
+    res.setHeader("Cache-Control", "private, no-store");
+    res.send(buffer);
+  } catch {
+    res.status(500).json({ error: "No se pudo generar la muestra" });
   }
 });
 

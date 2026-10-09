@@ -68,7 +68,9 @@ export function limpiarMediaToken(): void {
 export function urlFoto(ruta: string | null | undefined): string {
   if (!ruta) return "";
   const token = mediaToken ?? getToken();
-  return `${API_URL}${ruta}${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+  if (!token) return `${API_URL}${ruta}`;
+  const separador = ruta.includes("?") ? "&" : "?";
+  return `${API_URL}${ruta}${separador}token=${encodeURIComponent(token)}`;
 }
 
 function handleUnauthorized() {

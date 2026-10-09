@@ -200,6 +200,36 @@ export default function PlantillaFacturaEditor({
     setMarcadores((prev) => prev.map((m) => (m.tempId === seleccionado ? { ...m, ...cambios } : m)));
   }
 
+  // Arrastrar la manija de la esquina (marcadores de imagen) en vez de escribir Ancho/Alto a
+  // mano — igual que agrandar una ventana. Usa mousedown/mousemove propios (no el drag nativo de
+  // HTML5 que ya usa el marcador para moverse) y calcula todo desde el punto de partida, así el
+  // arrastre no se desincroniza aunque el estado de React se actualice de a poco entre eventos.
+  // El DataMatrix (cuadrado) fuerza ancho=alto — deformarlo puede dejarlo imposible de escanear.
+  function iniciarResize(e: React.MouseEvent, m: MarcadorEnEdicion, cuadrado: boolean) {
+    e.stopPropagation();
+    e.preventDefault();
+    const anchoInicial = m.anchoCaja ?? (cuadrado ? 30 : 120);
+    const altoInicial = (m.fontSize ?? 0) > 9 ? m.fontSize! : 30;
+    const xInicial = e.clientX;
+    const yInicial = e.clientY;
+    function onMove(ev: MouseEvent) {
+      const dx = (ev.clientX - xInicial) / escala;
+      const dy = (ev.clientY - yInicial) / escala;
+      const delta = cuadrado ? Math.max(dx, dy) : 0;
+      const nuevoAncho = Math.max(10, Math.round(anchoInicial + (cuadrado ? delta : dx)));
+      const nuevoAlto = Math.max(10, Math.round(altoInicial + (cuadrado ? delta : dy)));
+      setMarcadores((prev) =>
+        prev.map((mk) => (mk.tempId === m.tempId ? { ...mk, anchoCaja: nuevoAncho, fontSize: nuevoAlto } : mk))
+      );
+    }
+    function onUp() {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
   function eliminarSeleccionado() {
     setMarcadores((prev) => prev.filter((m) => m.tempId !== seleccionado));
     setSeleccionado(null);
@@ -492,7 +522,7 @@ export default function PlantillaFacturaEditor({
                     setSeleccionado(m.tempId);
                   }}
                   className={`absolute select-none ${
-                    esImagen ? "flex items-center justify-center border border-slate-500 bg-white/80" : "whitespace-nowrap bg-white/70 px-0.5 text-black"
+                    esImagen ? "flex border border-slate-500 bg-white/80" : "whitespace-nowrap bg-white/70 px-0.5 text-black"
                   } ${soloLectura ? "" : "cursor-grab active:cursor-grabbing"} ${
                     seleccionado === m.tempId
                       ? "outline outline-2 outline-brand-500"
@@ -505,12 +535,6 @@ export default function PlantillaFacturaEditor({
                           top: m.y * escala,
                           width: (m.anchoCaja ?? (esCuadrado ? 30 : 120)) * escala,
                           height: ((m.fontSize ?? 0) > 9 ? m.fontSize! : 30) * escala,
-                          backgroundImage: esCuadrado
-                            ? "repeating-linear-gradient(to right, #000 0 3px, transparent 3px 6px), repeating-linear-gradient(to bottom, #000 0 3px, transparent 3px 6px)"
-                            : "repeating-linear-gradient(to right, #000 0px, #000 2px, transparent 2px, transparent 5px)",
-                          backgroundSize: esCuadrado ? "6px 6px" : "auto 100%",
-                          backgroundRepeat: esCuadrado ? "repeat" : "repeat-x",
-                          backgroundBlendMode: esCuadrado ? "multiply" : undefined,
                         }
                       : {
                           left: m.x * escala,
@@ -522,7 +546,31 @@ export default function PlantillaFacturaEditor({
                         }
                   }
                 >
-                  {!esImagen && etiquetaDe(m.campo)}
+                  {esImagen ? (
+                    // Vista previa REAL (con datos de muestra, no de una factura) generada por el
+                    // backend con la MISMA lógica de escalado que imprime (doc.image con width/
+                    // height exactos, sin mantener proporción) — object-fill estira igual que
+                    // pdfkit, así que agrandar/achicar el recuadro acá se ve igual que al imprimir.
+                    <img
+                      src={urlFoto(
+                        `/api/facturacion/plantillas/muestra-codigo?campo=${m.campo}&ancho=${m.anchoCaja ?? (esCuadrado ? 30 : 120)}`
+                      )}
+                      alt=""
+                      draggable={false}
+                      className="pointer-events-none h-full w-full object-fill"
+                    />
+                  ) : (
+                    etiquetaDe(m.campo)
+                  )}
+                  {esImagen && seleccionado === m.tempId && !soloLectura && (
+                    // Manija de resize: arrastrar con el mouse en vez de escribir Ancho/Alto a
+                    // mano — mismo patrón que agrandar una ventana desde la esquina.
+                    <div
+                      onMouseDown={(e) => iniciarResize(e, m, esCuadrado)}
+                      draggable={false}
+                      className="absolute -bottom-1.5 -right-1.5 h-3 w-3 cursor-nwse-resize rounded-sm border border-white bg-brand-500"
+                    />
+                  )}
                 </div>
               );
             })}
