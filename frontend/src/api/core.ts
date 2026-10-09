@@ -78,17 +78,32 @@ function handleUnauthorized() {
   if (window.location.pathname !== "/login") window.location.href = "/login";
 }
 
+// Con el status real a mano, quien llama puede distinguir "el backend respondió y dijo que no"
+// (401, 429, etc.) de cualquier otra falla (proxy/túnel caído devolviendo su propia página de
+// error, backend reiniciando) — antes solo se lanzaba un Error genérico y, en el login, eso hacía
+// que un servidor caído se viera igual que una contraseña incorrecta (ver LoginPage.tsx).
+export class HttpError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
 // El backend manda errores como JSON ({ "error": "mensaje" }); si se logra parsear se usa ese
-// texto tal cual (sin prefijos técnicos), y si no, se cae al texto crudo de la respuesta.
+// texto tal cual (sin prefijos técnicos). Si NO es JSON, no es nuestra API la que respondió —
+// típicamente la página de error de un proxy/túnel intermedio (ej. el 502/521-524 que devuelve
+// Cloudflare cuando el backend está caído o reiniciando) — así que se cae a un mensaje genérico
+// con el status en vez de mostrarle ese HTML crudo a alguien.
 async function mensajeError(res: Response): Promise<string> {
   const texto = await res.text();
   try {
     const cuerpo = JSON.parse(texto);
     if (cuerpo && typeof cuerpo.error === "string") return cuerpo.error;
   } catch {
-    // no era JSON, se usa el texto crudo
+    // no era JSON de nuestra API
   }
-  return texto || `Error ${res.status}`;
+  return `Error ${res.status}`;
 }
 
 export async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -97,10 +112,11 @@ export async function request<T>(path: string, options?: RequestInit): Promise<T
     ...options,
   });
   if (res.status === 401) {
+    const mensaje = await mensajeError(res);
     handleUnauthorized();
-    throw new Error("No autenticado");
+    throw new HttpError(401, mensaje);
   }
-  if (!res.ok) throw new Error(await mensajeError(res));
+  if (!res.ok) throw new HttpError(res.status, await mensajeError(res));
   if (res.status === 204) return undefined as T;
   return res.json();
 }

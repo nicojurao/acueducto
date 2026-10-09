@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Eye, EyeOff, Sun, Moon, Gauge, MapPin, ClipboardList, BarChart3 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
+import { HttpError } from "../api/core";
 import { useTheme } from "../contexts/ThemeContext";
 import { inputClass } from "../lib/ui";
 import { useEmpresa, urlLogoEmpresa } from "../lib/empresaRuntime";
@@ -32,13 +33,20 @@ export default function LoginPage() {
       await login(identificador, password);
       navigate("/");
     } catch (err) {
-      // Sin conexión, el fetch ni llega a preguntarle al servidor — falla como TypeError, no
-      // como un 401. Sin distinguirlo, se le decía "usuario o contraseña incorrectos" a alguien
-      // que en realidad solo se quedó sin señal (típico en campo, celular del fontanero).
-      if (!navigator.onLine || err instanceof TypeError) {
-        setError("Sin conexión a internet. Conéctate e inténtalo de nuevo.");
-      } else {
+      // Un 401 es el ÚNICO caso donde el backend de verdad respondió y dijo "no" — ahí sí es
+      // contraseña incorrecta. Todo lo demás (sin señal → TypeError; o cualquier otro código
+      // HTTP, como el 502/503/521-524 que devuelve Cloudflare cuando el backend está caído o
+      // reiniciando y el túnel/proxy sigue respondiendo por su cuenta) significa que la petición
+      // nunca llegó a validar nada — mostrar "contraseña incorrecta" ahí era engañoso: la app
+      // sigue cargando porque el shell está cacheado (ver service worker), pero no hay con quién
+      // hablar del otro lado. navigator.onLine tampoco alcanza: el dispositivo puede tener
+      // internet perfecto y aun así no llegar a ESTE servidor puntual.
+      if (err instanceof HttpError && err.status === 401) {
         setError("Cédula/usuario o contraseña incorrectos.");
+      } else if (err instanceof HttpError && err.status === 429) {
+        setError(err.message);
+      } else {
+        setError("No se pudo conectar con el servidor. Puede estar caído o reiniciando — intenta de nuevo en un momento.");
       }
     } finally {
       setCargando(false);
