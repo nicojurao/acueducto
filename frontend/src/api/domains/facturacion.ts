@@ -284,13 +284,26 @@ export const facturacionApi = {
       return descargarArchivo(`/api/facturacion/facturas/${id}/pdf${qs}`, `factura-${numero}.pdf`, true);
     },
   },
-  pdfLote: (periodo: string, filtros?: { barrioId?: number; ruta?: string; plantillaId?: number }) => {
-    const qs = new URLSearchParams({ periodo });
-    if (filtros?.barrioId) qs.set("barrioId", String(filtros.barrioId));
-    if (filtros?.ruta) qs.set("ruta", filtros.ruta);
-    if (filtros?.plantillaId) qs.set("plantillaId", String(filtros.plantillaId));
-    return descargarArchivo(`/api/facturacion/pdf-lote?${qs}`, `facturas_${periodo}.pdf`);
-  },
+  // PDF del periodo en 3 pasos (con miles de facturas puede tardar varios minutos — ver
+  // pdf-lote/iniciar en el backend): iniciar() arranca la generación contra un temporal y
+  // responde con un id; estadoPdfLote() hace polling del progreso; descargarPdfLote() solo
+  // funciona con fase="listo" y ya trae Content-Length real (barra de progreso exacta en la
+  // descarga, ver descargarArchivo).
+  pdfLoteIniciar: (periodo: string, filtros?: { barrioId?: number; ruta?: string; plantillaId?: number }) =>
+    request<{ id: string }>("/api/facturacion/pdf-lote/iniciar", {
+      method: "POST",
+      body: JSON.stringify({ periodo, ...filtros }),
+    }),
+  estadoPdfLote: (id: string) =>
+    request<{
+      fase: "generando" | "listo" | "error";
+      bytesProcesados: number;
+      bytesTotalAprox: number;
+      tamanoFinal: number | null;
+      error: string | null;
+    }>(`/api/facturacion/pdf-lote/${id}/estado`),
+  descargarPdfLote: (id: string, nombrePorDefecto: string, onProgress?: (bytesRecibidos: number, bytesTotal: number | null) => void) =>
+    descargarArchivo(`/api/facturacion/pdf-lote/${id}/descargar`, nombrePorDefecto, false, onProgress),
   pagos: {
     crear: (data: { facturaId: number; valor: number; medio?: string; observaciones?: string }) =>
       request<PagoItem & { saldoRestante: number }>("/api/facturacion/pagos", { method: "POST", body: JSON.stringify(data) }),

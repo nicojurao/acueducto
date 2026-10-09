@@ -22,6 +22,8 @@ import { calcularMora } from "../../lib/moraCalculo.js";
 import { generarComprobanteVenta, generarComprobantePago, anularComprobante, anularComprobantesEnLote } from "../../lib/contabilidad/comprobantes.js";
 import { conceptosDeNotasPendientes, marcarNotasAplicadas } from "../../lib/notas.js";
 import { conceptoDeSiguienteCuota, marcarCuotaAplicada } from "../../lib/acuerdosPago.js";
+import { crearJobPdfLote, actualizarProgresoPdfLote, marcarListoPdfLote, marcarErrorPdfLote, obtenerJobPdfLote } from "../../lib/pdfLoteJobs.js";
+import { createReadStream, createWriteStream } from "node:fs";
 import { randomUUID } from "node:crypto";
 import {
   crearJobFacturacion,
@@ -1404,8 +1406,17 @@ facturacionRouter.get("/facturas/:id/pdf", permisoVer, async (req, res) => {
 // siempre ordenado de ruta menor a mayor (la ruta viene con ceros a la izquierda, ej. "01-001",
 // así que el orden alfabético YA coincide con el numérico) y dentro de la misma ruta, por número
 // de factura.
-facturacionRouter.get("/pdf-lote", permisoVer, async (req, res) => {
-  const { periodo, barrioId, ruta } = req.query;
+//
+// Con miles de facturas en un periodo (~3874 típico en ACBUM) generar el PDF completo tarda
+// varios MINUTOS (medido 2026-09-13: ~12 min, ~250MB) — mantener eso en una sola conexión HTTP
+// abierta es frágil (se corta si se cierra la pestaña, se pierde la señal, o algún proxy
+// intermedio la tumba por inactividad) y no deja mostrar progreso real. Mismo patrón de 3 pasos
+// que ya usan los backups (ver lib/backupJobs.ts) y la generación masiva de facturas (ver
+// /generar/iniciar): iniciar → arranca contra un archivo temporal y responde con un jobId al
+// toque; estado → polling del progreso; descargar → sirve el PDF ya completo, con Content-Length
+// real (a diferencia del estimado de la fase de generación).
+facturacionRouter.post("/pdf-lote/iniciar", permisoVer, async (req, res) => {
+  const { periodo, barrioId, ruta, plantillaId: plantillaIdRaw } = req.body;
   if (!periodo) return res.status(400).json({ error: "periodo (YYYY-MM) es requerido" });
   const facturas = await prisma.factura.findMany({
     where: {
@@ -1416,29 +1427,69 @@ facturacionRouter.get("/pdf-lote", permisoVer, async (req, res) => {
         ...(ruta ? { ruta: { contains: String(ruta), mode: "insensitive" as const } } : {}),
       },
     },
-    include: { suscriptor: { include: { barrioCat: true, tercero: true } }, conceptos: true },
+    include: { suscriptor: { include: { barrioCat: true, tercero: true } }, conceptos: true, pagos: { select: { valor: true } } },
     orderBy: [{ suscriptor: { ruta: "asc" } }, { numero: "asc" }],
   });
   if (facturas.length === 0) return res.status(404).json({ error: "No hay facturas para esos filtros" });
+  const facturasConPagado = facturas.map((f) => ({ ...f, pagado: f.pagos.reduce((acc, p) => acc + Number(p.valor), 0) }));
 
-  const plantillaId = req.query.plantillaId ? Number(req.query.plantillaId) : null;
+  const plantillaId = plantillaIdRaw ? Number(plantillaIdRaw) : null;
   const plantilla = plantillaId
     ? await prisma.plantillaFactura.findUnique({ where: { id: plantillaId }, include: { marcadores: true } })
     : null;
   if (plantillaId && !plantilla) return res.status(404).json({ error: "Plantilla no encontrada" });
 
+  // Estimado grueso para la barra de progreso mientras se genera (no hace falta exacto, igual
+  // que el de los backups) — 80KB/factura es un techo razonable con los marcadores de código de
+  // barras actuales; la descarga ya usa el tamaño real.
+  const { id, rutaArchivo } = crearJobPdfLote(facturasConPagado.length * 80_000, `facturas_${periodo}.pdf`);
+  res.status(202).json({ id });
+
+  (async () => {
+    const doc = plantilla
+      ? new PDFDocument({ margin: 0, size: [plantilla.anchoPt, plantilla.altoPt] })
+      : new PDFDocument({ margin: 40, size: "A4" });
+    const destino = createWriteStream(rutaArchivo);
+    doc.pipe(destino);
+    try {
+      for (let i = 0; i < facturasConPagado.length; i++) {
+        if (i > 0) doc.addPage();
+        if (plantilla) await pdfFacturaPlantilla(doc, facturasConPagado[i], plantilla);
+        else pdfDeFactura(doc, facturasConPagado[i]);
+        actualizarProgresoPdfLote(id, destino.bytesWritten);
+      }
+      doc.end();
+      await new Promise<void>((resolve, reject) => {
+        destino.on("finish", resolve);
+        destino.on("error", reject);
+      });
+      marcarListoPdfLote(id, destino.bytesWritten);
+    } catch (err: any) {
+      marcarErrorPdfLote(id, err?.message ?? "Error desconocido al generar el PDF");
+    }
+  })();
+});
+
+facturacionRouter.get("/pdf-lote/:id/estado", permisoVer, (req, res) => {
+  const job = obtenerJobPdfLote(req.params.id);
+  if (!job) return res.status(404).json({ error: "No encontrado (puede que ya haya expirado)" });
+  res.json({
+    fase: job.fase,
+    bytesProcesados: job.bytesProcesados,
+    bytesTotalAprox: job.bytesTotalAprox,
+    tamanoFinal: job.tamanoFinal ?? null,
+    error: job.error ?? null,
+  });
+});
+
+facturacionRouter.get("/pdf-lote/:id/descargar", permisoVer, (req, res) => {
+  const job = obtenerJobPdfLote(req.params.id);
+  if (!job) return res.status(404).json({ error: "No encontrado (puede que ya haya expirado)" });
+  if (job.fase !== "listo") return res.status(409).json({ error: "El PDF todavía se está generando" });
   res.setHeader("Content-Type", "application/pdf");
-  res.setHeader("Content-Disposition", `attachment; filename="facturas_${periodo}.pdf"`);
-  const doc = plantilla
-    ? new PDFDocument({ margin: 0, size: [plantilla.anchoPt, plantilla.altoPt] })
-    : new PDFDocument({ margin: 40, size: "A4" });
-  doc.pipe(res);
-  for (let i = 0; i < facturas.length; i++) {
-    if (i > 0) doc.addPage();
-    if (plantilla) await pdfFacturaPlantilla(doc, facturas[i], plantilla);
-    else pdfDeFactura(doc, facturas[i]);
-  }
-  doc.end();
+  res.setHeader("Content-Disposition", `attachment; filename="${job.nombreDescarga}"`);
+  res.setHeader("Content-Length", String(job.tamanoFinal));
+  createReadStream(job.rutaArchivo).pipe(res);
 });
 
 // ===================== CRUD de plantillas (editor visual) =====================

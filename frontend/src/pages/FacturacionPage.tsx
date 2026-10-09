@@ -50,6 +50,13 @@ import { inputClass } from "../lib/ui";
 
 const fmtPesos = (v: number | string) => `$${Number(v).toLocaleString("es-CO", { maximumFractionDigits: 0 })}`;
 
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes === 0) return "0 MB";
+  const unidades = ["B", "KB", "MB", "GB"];
+  const i = Math.min(unidades.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+  return `${(bytes / 1024 ** i).toFixed(i === 0 ? 0 : 1)} ${unidades[i]}`;
+}
+
 // Mismo criterio del backend (lib/periodo.ts): antes del día 20, el periodo facturable es el mes anterior.
 function periodoFacturableActual(): string {
   const now = new Date();
@@ -166,7 +173,13 @@ function FacturasTab() {
   const [generando, setGenerando] = useState(false);
   const [jobGeneracion, setJobGeneracion] = useState<string | null>(null);
   const [progresoGeneracion, setProgresoGeneracion] = useState<{ procesados: number; total: number } | null>(null);
-  const [descargandoLote, setDescargandoLote] = useState(false);
+  // PDF del periodo en 3 pasos (ver api.facturacion.pdfLoteIniciar) — con miles de facturas la
+  // generación puede tardar varios minutos, así que tiene 2 fases con su propio progreso:
+  // "generando" (estimado, mientras arma el PDF en el servidor) y "descargando" (exacto, ya se
+  // conoce el tamaño final real). Mismo patrón que el backup en AdminPage.tsx.
+  const [faseLote, setFaseLote] = useState<"generando" | "descargando" | null>(null);
+  const [bytesLote, setBytesLote] = useState(0);
+  const [bytesLoteTotal, setBytesLoteTotal] = useState<number | null>(null);
   const [estadoPeriodo, setEstadoPeriodo] = useState<"abierto" | "cerrado" | null>(null);
   const [verificacion, setVerificacion] = useState<PasoVerificacionPeriodo[] | null>(null);
   const verificacionCompleta = verificacion !== null && verificacion.every((p) => p.ok);
@@ -277,17 +290,40 @@ function FacturasTab() {
   }
 
   async function descargarLote() {
-    setDescargandoLote(true);
+    setFaseLote("generando");
+    setBytesLote(0);
+    setBytesLoteTotal(null);
     try {
-      await api.facturacion.pdfLote(periodo, {
+      const { id } = await api.facturacion.pdfLoteIniciar(periodo, {
         barrioId: barrioPdf ? Number(barrioPdf) : undefined,
         ruta: rutaPdf || undefined,
         plantillaId: plantillaPdf ? Number(plantillaPdf) : undefined,
       });
+
+      // Polling del progreso de generación hasta que el backend marque "listo" (o falle).
+      for (;;) {
+        const estado = await api.facturacion.estadoPdfLote(id);
+        setBytesLote(estado.bytesProcesados);
+        setBytesLoteTotal(estado.bytesTotalAprox || null);
+        if (estado.fase === "listo") break;
+        if (estado.fase === "error") throw new Error(estado.error ?? "No se pudo generar el PDF");
+        await new Promise((r) => setTimeout(r, 700));
+      }
+
+      // Ya está completo en el servidor: ahora sí se conoce el tamaño exacto (Content-Length).
+      setFaseLote("descargando");
+      setBytesLote(0);
+      setBytesLoteTotal(null);
+      await api.facturacion.descargarPdfLote(id, `facturas_${periodo}.pdf`, (bytes, total) => {
+        setBytesLote(bytes);
+        if (total) setBytesLoteTotal(total);
+      });
     } catch (err) {
       mostrarError(err, "no se pudo generar el PDF del lote");
     } finally {
-      setDescargandoLote(false);
+      setFaseLote(null);
+      setBytesLote(0);
+      setBytesLoteTotal(null);
     }
   }
 
@@ -396,14 +432,34 @@ function FacturasTab() {
               </option>
             ))}
           </select>
-          <button
-            onClick={descargarLote}
-            disabled={descargandoLote}
-            className="btn-accion flex items-center gap-1.5 rounded-lg border border-brand-200 px-3 py-2 text-sm font-medium text-brand-700 hover:bg-brand-50 disabled:opacity-60 dark:border-slate-700 dark:text-brand-400 dark:hover:bg-slate-800"
-          >
-            {descargandoLote ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-            PDF del periodo
-          </button>
+          <div>
+            <button
+              onClick={descargarLote}
+              disabled={faseLote !== null}
+              className="btn-accion flex items-center gap-1.5 rounded-lg border border-brand-200 px-3 py-2 text-sm font-medium text-brand-700 hover:bg-brand-50 disabled:opacity-60 dark:border-slate-700 dark:text-brand-400 dark:hover:bg-slate-800"
+            >
+              {faseLote ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              {faseLote === "generando"
+                ? `Generando… ${formatBytes(bytesLote)}${bytesLoteTotal ? ` de ~${formatBytes(bytesLoteTotal)}` : ""}`
+                : faseLote === "descargando"
+                ? `Descargando… ${formatBytes(bytesLote)}${bytesLoteTotal ? ` de ${formatBytes(bytesLoteTotal)}` : ""}`
+                : "PDF del periodo"}
+            </button>
+            {faseLote && bytesLoteTotal !== null && (
+              <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+                <div
+                  className="h-full rounded-full bg-brand-500 transition-all duration-200"
+                  style={{
+                    width: `${
+                      faseLote === "descargando"
+                        ? Math.round((bytesLote / bytesLoteTotal) * 100)
+                        : Math.min(99, Math.round((bytesLote / bytesLoteTotal) * 100))
+                    }%`,
+                  }}
+                />
+              </div>
+            )}
+          </div>
           <VerificacionPeriodoPanel periodo={periodo} onEstadoCambia={setVerificacion} />
           {puedeGenerar && estadoPeriodo !== "cerrado" && (
             <button
