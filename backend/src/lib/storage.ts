@@ -51,6 +51,16 @@ export async function borrarArchivo(rutaRelativa: string): Promise<void> {
   await minioClient.removeObject(BUCKET, objectName(rutaRelativa)).catch(() => {});
 }
 
+// Regla para no dejar huérfanos en MinIO (ni referencias rotas en la BD):
+//   1. subir el archivo nuevo,
+//   2. escribir en la BD dentro de try/catch — si falla, borrar lo recién subido (borrarArchivos),
+//   3. SOLO después de que la BD quedó bien, borrar el archivo viejo que se reemplazó o quitó.
+// Borrar el viejo antes del paso 2 deja la BD apuntando a un archivo que ya no existe si el
+// UPDATE falla.
+export async function borrarArchivos(rutas: (string | null | undefined)[]): Promise<void> {
+  await Promise.all(rutas.filter((r): r is string => !!r).map((r) => borrarArchivo(r)));
+}
+
 // Para el proxy GET /uploads/*: devuelve el stream de lectura + metadatos (tamaño, content-type).
 export async function leerArchivo(rutaRelativa: string) {
   const nombreObjeto = objectName(rutaRelativa);

@@ -162,9 +162,7 @@ authRouter.put("/perfil", requireAuth, upload.single("foto"), async (req, res) =
   let foto: string | null | undefined = undefined;
   if (req.file) {
     foto = await guardarArchivo("usuarios", req.file.buffer, req.file.originalname, req.file.mimetype);
-    await borrarArchivo(existente.foto ?? "");
   } else if (quitarFoto === "true") {
-    if (existente.foto) await borrarArchivo(existente.foto);
     foto = null;
   }
 
@@ -184,10 +182,13 @@ authRouter.put("/perfil", requireAuth, upload.single("foto"), async (req, res) =
       },
       include: { rol: { include: { permisos: { include: { permiso: true } } } } },
     });
+    // La foto vieja se borra solo cuando la BD ya quedó apuntando a la nueva (o a null).
+    if (foto !== undefined && existente.foto) await borrarArchivo(existente.foto);
     await registrarCambios("usuario", existente.id, antes, camposUsuario(usuario), req.usuario!.id);
     if (password) await registrarCambioContrasena(existente.id, req.usuario!.id);
     res.json(perfil(usuario, req.usuario!.jti));
   } catch (err: any) {
+    if (foto) await borrarArchivo(foto);
     if (err?.code === "P2002") {
       const campo = err.meta?.target?.[0] === "cedula" ? "La cédula" : "El nombre de usuario";
       return res.status(400).json({ error: `${campo} ya está en uso` });

@@ -2,7 +2,7 @@ import { Router } from "express";
 import multer from "multer";
 import PDFDocument from "pdfkit";
 import { prisma } from "../../lib/prisma.js";
-import { guardarArchivo, borrarArchivo, leerBuffer } from "../../lib/storage.js";
+import { guardarArchivo, borrarArchivos, borrarArchivo, leerBuffer } from "../../lib/storage.js";
 import {
   encabezadoPdf,
   COLOR_PDF as COLOR,
@@ -218,31 +218,37 @@ aforosRouter.post("/", requirePermiso("aforos_avanzado"), upload.single("foto"),
     ? await guardarArchivo("aforos", req.file.buffer, req.file.originalname, req.file.mimetype)
     : null;
 
-  const aforo = await prisma.aforo.create({
-    data: {
-      puntoAforoId: Number(puntoAforoId),
-      fecha: new Date(fecha),
-      metodo,
-      volumenLitros: volumenLitros ? Number(volumenLitros) : null,
-      tiempoSegundos: resultado.tiempoSegundos ?? (tiempoSegundos ? Number(tiempoSegundos) : null),
-      tiempos: metodo === "flotador" ? tiempos : [],
-      distanciaMetros: distanciaMetros ? Number(distanciaMetros) : null,
-      anchoAltaM: anchoAltaM ? Number(anchoAltaM) : null,
-      profundidadesAltaM: metodo === "flotador" ? profundidadesAltaM : [],
-      anchoBajaM: anchoBajaM ? Number(anchoBajaM) : null,
-      profundidadesBajaM: metodo === "flotador" ? profundidadesBajaM : [],
-      areaAltaM2: resultado.areaAltaM2 ?? null,
-      areaBajaM2: resultado.areaBajaM2 ?? null,
-      areaM2: resultado.areaM2 ?? null,
-      caudalLps: resultado.caudalLps,
-      observaciones: observaciones || null,
-      fotoUrl,
-      latitud: latitud ? Number(latitud) : null,
-      longitud: longitud ? Number(longitud) : null,
-      capturadoPorId: req.usuario?.id,
-    },
-    include: { puntoAforo: true, capturadoPor: { select: { nombre: true } } },
-  });
+  let aforo;
+  try {
+    aforo = await prisma.aforo.create({
+      data: {
+        puntoAforoId: Number(puntoAforoId),
+        fecha: new Date(fecha),
+        metodo,
+        volumenLitros: volumenLitros ? Number(volumenLitros) : null,
+        tiempoSegundos: resultado.tiempoSegundos ?? (tiempoSegundos ? Number(tiempoSegundos) : null),
+        tiempos: metodo === "flotador" ? tiempos : [],
+        distanciaMetros: distanciaMetros ? Number(distanciaMetros) : null,
+        anchoAltaM: anchoAltaM ? Number(anchoAltaM) : null,
+        profundidadesAltaM: metodo === "flotador" ? profundidadesAltaM : [],
+        anchoBajaM: anchoBajaM ? Number(anchoBajaM) : null,
+        profundidadesBajaM: metodo === "flotador" ? profundidadesBajaM : [],
+        areaAltaM2: resultado.areaAltaM2 ?? null,
+        areaBajaM2: resultado.areaBajaM2 ?? null,
+        areaM2: resultado.areaM2 ?? null,
+        caudalLps: resultado.caudalLps,
+        observaciones: observaciones || null,
+        fotoUrl,
+        latitud: latitud ? Number(latitud) : null,
+        longitud: longitud ? Number(longitud) : null,
+        capturadoPorId: req.usuario?.id,
+      },
+      include: { puntoAforo: true, capturadoPor: { select: { nombre: true } } },
+    });
+  } catch (err) {
+    await borrarArchivos([fotoUrl]);
+    throw err;
+  }
   res.status(201).json(aforo);
 });
 

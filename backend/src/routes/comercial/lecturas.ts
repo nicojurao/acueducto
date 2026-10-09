@@ -1,7 +1,7 @@
 import { Router } from "express";
 import multer from "multer";
 import { prisma } from "../../lib/prisma.js";
-import { guardarArchivo, borrarArchivo } from "../../lib/storage.js";
+import { guardarArchivo, borrarArchivo, borrarArchivos } from "../../lib/storage.js";
 import { registrarCambioLectura } from "../../lib/historial.js";
 import { primerDiaMes } from "../../lib/periodo.js";
 import { periodoEstaCerrado, MENSAJE_PERIODO_CERRADO } from "../../lib/periodoFacturacion.js";
@@ -222,38 +222,47 @@ lecturasRouter.post("/", uploadLectura.single("foto"), async (req, res) => {
     ? await guardarArchivo("lecturas", req.file.buffer, req.file.originalname, req.file.mimetype)
     : null;
 
-  const novedadPrevia = await prisma.novedadLectura.findUnique({
-    where: { medidorId_periodo: { medidorId, periodo: fecha } },
-  });
-
-  const [lectura] = await prisma.$transaction([
-    prisma.lectura.upsert({
-      where: { medidorId_periodo: { medidorId, periodo: fecha } },
-      create: {
-        medidorId,
-        periodo: fecha,
-        valorLectura,
-        consumo,
-        observaciones,
-        fotoUrl,
-        latitud: latitud ? Number(latitud) : null,
-        longitud: longitud ? Number(longitud) : null,
-        capturadoPorId: req.usuario?.id,
-      },
-      update: {
-        valorLectura,
-        consumo,
-        observaciones,
-        fotoUrl,
-        latitud: latitud ? Number(latitud) : null,
-        longitud: longitud ? Number(longitud) : null,
-        capturadoPorId: req.usuario?.id,
-      },
-    }),
-    prisma.novedadLectura.deleteMany({ where: { medidorId, periodo: fecha } }),
+  const [novedadPrevia, lecturaPrevia] = await Promise.all([
+    prisma.novedadLectura.findUnique({ where: { medidorId_periodo: { medidorId, periodo: fecha } } }),
+    prisma.lectura.findUnique({ where: { medidorId_periodo: { medidorId, periodo: fecha } }, select: { fotoUrl: true } }),
   ]);
 
-  await Promise.all((novedadPrevia?.fotos ?? []).map((foto) => borrarArchivo(foto)));
+  let lectura;
+  try {
+    [lectura] = await prisma.$transaction([
+      prisma.lectura.upsert({
+        where: { medidorId_periodo: { medidorId, periodo: fecha } },
+        create: {
+          medidorId,
+          periodo: fecha,
+          valorLectura,
+          consumo,
+          observaciones,
+          fotoUrl,
+          latitud: latitud ? Number(latitud) : null,
+          longitud: longitud ? Number(longitud) : null,
+          capturadoPorId: req.usuario?.id,
+        },
+        update: {
+          valorLectura,
+          consumo,
+          observaciones,
+          fotoUrl,
+          latitud: latitud ? Number(latitud) : null,
+          longitud: longitud ? Number(longitud) : null,
+          capturadoPorId: req.usuario?.id,
+        },
+      }),
+      prisma.novedadLectura.deleteMany({ where: { medidorId, periodo: fecha } }),
+    ]);
+  } catch (err) {
+    await borrarArchivos([fotoUrl]);
+    throw err;
+  }
+
+  // Si ya había una lectura en este periodo (se volvió a capturar), el upsert le pisó la foto:
+  // la anterior queda sin ninguna referencia y hay que borrarla de MinIO.
+  await borrarArchivos([...(novedadPrevia?.fotos ?? []), lecturaPrevia?.fotoUrl !== fotoUrl ? lecturaPrevia?.fotoUrl : null]);
 
   // El punto del suscriptor en el Mapa se actualiza con el GPS de CADA lectura nueva (no solo
   // la primera vez): el frontend solo manda latitud/longitud cuando la foto se tomó ahí mismo
@@ -300,10 +309,16 @@ lecturasRouter.put("/:id", uploadLectura.single("foto"), async (req, res) => {
     nuevaFotoUrl = null;
   }
 
-  const lectura = await prisma.lectura.update({
-    where: { id: Number(req.params.id) },
-    data: { valorLectura, consumo, observaciones, fotoUrl: nuevaFotoUrl },
-  });
+  let lectura;
+  try {
+    lectura = await prisma.lectura.update({
+      where: { id: Number(req.params.id) },
+      data: { valorLectura, consumo, observaciones, fotoUrl: nuevaFotoUrl },
+    });
+  } catch (err) {
+    await borrarArchivos([nuevaFotoUrl]);
+    throw err;
+  }
 
   if (nuevaFotoUrl !== undefined && lecturaExistente.fotoUrl) {
     await borrarArchivo(lecturaExistente.fotoUrl);
@@ -372,11 +387,17 @@ lecturasRouter.post("/novedad", upload.array("fotos", 5), async (req, res) => {
     where: { medidorId_periodo: { medidorId: Number(medidorId), periodo: fecha } },
   });
 
-  const novedad = await prisma.novedadLectura.upsert({
-    where: { medidorId_periodo: { medidorId: Number(medidorId), periodo: fecha } },
-    create: { medidorId: Number(medidorId), periodo: fecha, motivo, fotos },
-    update: { motivo, fotos: fotos.length > 0 ? [...(existente?.fotos ?? []), ...fotos] : existente?.fotos },
-  });
+  let novedad;
+  try {
+    novedad = await prisma.novedadLectura.upsert({
+      where: { medidorId_periodo: { medidorId: Number(medidorId), periodo: fecha } },
+      create: { medidorId: Number(medidorId), periodo: fecha, motivo, fotos },
+      update: { motivo, fotos: fotos.length > 0 ? [...(existente?.fotos ?? []), ...fotos] : existente?.fotos },
+    });
+  } catch (err) {
+    await borrarArchivos(fotos);
+    throw err;
+  }
   res.status(201).json(novedad);
 });
 
@@ -395,7 +416,9 @@ lecturasRouter.put("/novedad/:id", upload.array("fotos", 5), async (req, res) =>
   if (!novedad) return res.status(404).json({ error: "No encontrada" });
 
   const { motivo, fotosARemover } = req.body;
-  const aRemover: string[] = fotosARemover ? (Array.isArray(fotosARemover) ? fotosARemover : [fotosARemover]) : [];
+  // Solo rutas que de verdad son de esta novedad (ver el mismo filtro en actas.ts PUT /:id).
+  const pedidas: string[] = fotosARemover ? (Array.isArray(fotosARemover) ? fotosARemover : [fotosARemover]) : [];
+  const aRemover = novedad.fotos.filter((f) => pedidas.includes(f));
 
   const archivos = (req.files as Express.Multer.File[] | undefined) ?? [];
   const fotosNuevas = await Promise.all(
@@ -403,12 +426,18 @@ lecturasRouter.put("/novedad/:id", upload.array("fotos", 5), async (req, res) =>
   );
   const fotosFinales = [...novedad.fotos.filter((f) => !aRemover.includes(f)), ...fotosNuevas];
 
-  const actualizada = await prisma.novedadLectura.update({
-    where: { id: novedad.id },
-    data: { motivo: motivo || novedad.motivo, fotos: fotosFinales },
-  });
+  let actualizada;
+  try {
+    actualizada = await prisma.novedadLectura.update({
+      where: { id: novedad.id },
+      data: { motivo: motivo || novedad.motivo, fotos: fotosFinales },
+    });
+  } catch (err) {
+    await borrarArchivos(fotosNuevas);
+    throw err;
+  }
 
-  await Promise.all(aRemover.map((foto) => borrarArchivo(foto)));
+  await borrarArchivos(aRemover);
 
   res.json(actualizada);
 });

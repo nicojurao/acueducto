@@ -108,9 +108,7 @@ usuariosRouter.put("/:id", upload.single("foto"), async (req, res) => {
   let foto: string | null | undefined = undefined;
   if (req.file) {
     foto = await guardarArchivo("usuarios", req.file.buffer, req.file.originalname, req.file.mimetype);
-    await borrarArchivo(existente.foto ?? "");
   } else if (quitarFoto === "true") {
-    if (existente.foto) await borrarArchivo(existente.foto);
     foto = null;
   }
 
@@ -131,6 +129,8 @@ usuariosRouter.put("/:id", upload.single("foto"), async (req, res) => {
       },
       include: { rol: true },
     });
+    // La foto vieja se borra solo cuando la BD ya quedó apuntando a la nueva (o a null).
+    if (foto !== undefined && existente.foto) await borrarArchivo(existente.foto);
     await registrarCambios("usuario", id, antes, camposUsuario({ ...usuario, rolNombre: usuario.rol.nombre }), req.usuario!.id);
     if (password) await registrarCambioContrasena(id, req.usuario!.id);
     res.json(sinPassword(usuario));

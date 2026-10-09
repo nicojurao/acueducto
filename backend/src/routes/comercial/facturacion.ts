@@ -1441,8 +1441,8 @@ facturacionRouter.delete("/plantillas/:id", permisoAvanzado, async (req, res) =>
   const id = Number(req.params.id);
   const existente = await prisma.plantillaFactura.findUnique({ where: { id } });
   if (!existente) return res.status(404).json({ error: "No encontrada" });
-  if (existente.imagenGuiaUrl) await borrarArchivo(existente.imagenGuiaUrl);
   await prisma.plantillaFactura.delete({ where: { id } });
+  if (existente.imagenGuiaUrl) await borrarArchivo(existente.imagenGuiaUrl);
   res.status(204).end();
 });
 
@@ -1501,13 +1501,19 @@ facturacionRouter.post(
     if (!existente) return res.status(404).json({ error: "No encontrada" });
     if (!req.file) return res.status(400).json({ error: "La imagen es requerida" });
 
-    if (existente.imagenGuiaUrl) await borrarArchivo(existente.imagenGuiaUrl);
     const url = await guardarArchivo("plantillas-factura", req.file.buffer, req.file.originalname, req.file.mimetype);
-    const plantilla = await prisma.plantillaFactura.update({
-      where: { id },
-      data: { imagenGuiaUrl: url },
-      include: { marcadores: true },
-    });
+    let plantilla;
+    try {
+      plantilla = await prisma.plantillaFactura.update({
+        where: { id },
+        data: { imagenGuiaUrl: url },
+        include: { marcadores: true },
+      });
+    } catch (err) {
+      await borrarArchivo(url);
+      throw err;
+    }
+    if (existente.imagenGuiaUrl) await borrarArchivo(existente.imagenGuiaUrl);
     res.json(plantilla);
   }
 );
@@ -1516,11 +1522,11 @@ facturacionRouter.delete("/plantillas/:id/imagen-guia", permisoAvanzado, async (
   const id = Number(req.params.id);
   const existente = await prisma.plantillaFactura.findUnique({ where: { id } });
   if (!existente) return res.status(404).json({ error: "No encontrada" });
-  if (existente.imagenGuiaUrl) await borrarArchivo(existente.imagenGuiaUrl);
   const plantilla = await prisma.plantillaFactura.update({
     where: { id },
     data: { imagenGuiaUrl: null },
     include: { marcadores: true },
   });
+  if (existente.imagenGuiaUrl) await borrarArchivo(existente.imagenGuiaUrl);
   res.json(plantilla);
 });

@@ -3,7 +3,7 @@ import multer from "multer";
 import { prisma } from "../../lib/prisma.js";
 import { enviarCorreoPqrRespondida, enviarCorreoPqrMensaje } from "../../lib/correo.js";
 import { generarConstanciaPqrPdf } from "../../lib/pqrConstancia.js";
-import { guardarArchivo } from "../../lib/storage.js";
+import { guardarArchivo, borrarArchivos } from "../../lib/storage.js";
 import { logger } from "../../lib/logger.js";
 import { fechaLegibleColombia, horaLegibleColombia } from "../../lib/fechaColombia.js";
 import { obtenerEmpresa } from "../../lib/empresaCache.js";
@@ -489,12 +489,17 @@ pqrsRouter.post("/:id/mensajes", uploadAdjuntos.array("archivos", 5), async (req
 
   const archivos = (req.files as Express.Multer.File[] | undefined) ?? [];
   const rutas = await Promise.all(archivos.map((f) => guardarArchivo("pqrs", f.buffer, f.originalname, f.mimetype)));
-  const autor = req.usuario ? await prisma.usuario.findUnique({ where: { id: req.usuario.id }, select: { nombre: true } }) : null;
   const textoLimpio = String(texto).trim();
 
-  await prisma.pqrMensaje.create({
-    data: { pqrId: id, autor: "staff", autorNombre: autor?.nombre, texto: textoLimpio, archivos: rutas, esRespuestaFinal: esFinal },
-  });
+  try {
+    const autor = req.usuario ? await prisma.usuario.findUnique({ where: { id: req.usuario.id }, select: { nombre: true } }) : null;
+    await prisma.pqrMensaje.create({
+      data: { pqrId: id, autor: "staff", autorNombre: autor?.nombre, texto: textoLimpio, archivos: rutas, esRespuestaFinal: esFinal },
+    });
+  } catch (err) {
+    await borrarArchivos(rutas);
+    throw err;
+  }
 
   // Solo "radicada" sube a "en_proceso" automáticamente con un mensaje que no cierra el caso — si
   // ya estaba en_proceso, resuelta o cerrada, un mensaje de más no le cambia el estado por su

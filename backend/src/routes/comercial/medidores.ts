@@ -858,6 +858,9 @@ medidoresRouter.delete("/:id", soloAvanzado, async (req, res) => {
   }
 
   await prisma.medidor.delete({ where: { id } });
+  // Un medidor "limpio" igual puede tener su acta de calibración subida (se sube al registrarlo,
+  // antes de instalarlo) — sin esto quedaba huérfana en MinIO.
+  if (medidor.actaCalibracionUrl) await borrarArchivo(medidor.actaCalibracionUrl);
   res.status(204).end();
 });
 
@@ -1032,9 +1035,14 @@ medidoresRouter.post("/:id/acta-calibracion", soloAvanzado, upload.single("archi
   if (!req.file) return res.status(400).json({ error: "Falta el archivo (campo 'archivo')" });
 
   const actaCalibracionUrl = await guardarArchivo("actas-calibracion", req.file.buffer, req.file.originalname, req.file.mimetype);
+  let actualizado;
+  try {
+    actualizado = await prisma.medidor.update({ where: { id }, data: { actaCalibracionUrl } });
+  } catch (err) {
+    await borrarArchivo(actaCalibracionUrl);
+    throw err;
+  }
   if (medidor.actaCalibracionUrl) await borrarArchivo(medidor.actaCalibracionUrl);
-
-  const actualizado = await prisma.medidor.update({ where: { id }, data: { actaCalibracionUrl } });
   res.json(actualizado);
 });
 
@@ -1042,8 +1050,7 @@ medidoresRouter.delete("/:id/acta-calibracion", soloAvanzado, async (req, res) =
   const id = Number(req.params.id);
   const medidor = await prisma.medidor.findUnique({ where: { id } });
   if (!medidor) return res.status(404).json({ error: "No encontrado" });
-  if (medidor.actaCalibracionUrl) await borrarArchivo(medidor.actaCalibracionUrl);
-
   const actualizado = await prisma.medidor.update({ where: { id }, data: { actaCalibracionUrl: null } });
+  if (medidor.actaCalibracionUrl) await borrarArchivo(medidor.actaCalibracionUrl);
   res.json(actualizado);
 });

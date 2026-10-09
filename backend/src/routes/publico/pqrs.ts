@@ -2,7 +2,7 @@ import { Router } from "express";
 import multer from "multer";
 import rateLimit from "express-rate-limit";
 import { prisma } from "../../lib/prisma.js";
-import { guardarArchivo, leerArchivo } from "../../lib/storage.js";
+import { guardarArchivo, borrarArchivos, leerArchivo } from "../../lib/storage.js";
 import { enviarCorreoPqrCreada, enviarCorreoPqrMensajeCiudadano } from "../../lib/correo.js";
 import { generarConstanciaPqrPdf, generarConstanciaPqrBuffer } from "../../lib/pqrConstancia.js";
 import { logger } from "../../lib/logger.js";
@@ -172,6 +172,7 @@ pqrsPublicoRouter.post("/", limiteRadicar, uploadFotos.array("fotos", 5), async 
       break;
     } catch (err: any) {
       if (err?.code === "P2002" && intento < 5) continue;
+      await borrarArchivos(fotos);
       throw err;
     }
   }
@@ -291,9 +292,14 @@ pqrsPublicoRouter.post("/:radicado/mensajes", limiteResponderMensaje, uploadFoto
   const rutas = await Promise.all(archivos.map((f) => guardarArchivo("pqrs", f.buffer, f.originalname, f.mimetype)));
   const textoLimpio = String(texto).trim();
 
-  await prisma.pqrMensaje.create({
-    data: { pqrId: pqr.id, autor: "ciudadano", autorNombre: pqr.nombre, texto: textoLimpio, archivos: rutas },
-  });
+  try {
+    await prisma.pqrMensaje.create({
+      data: { pqrId: pqr.id, autor: "ciudadano", autorNombre: pqr.nombre, texto: textoLimpio, archivos: rutas },
+    });
+  } catch (err) {
+    await borrarArchivos(rutas);
+    throw err;
+  }
 
   enviarCorreoPqrMensajeCiudadano({ ...pqr, mensaje: textoLimpio }).catch((err) =>
     logger.error({ err }, "No se pudo enviar el aviso de mensaje del ciudadano")

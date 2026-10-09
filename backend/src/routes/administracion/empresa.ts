@@ -63,13 +63,18 @@ empresaRouter.post("/logo", upload.single("logo"), async (req, res) => {
 
   const existente = await prisma.empresa.findUnique({ where: { id: 1 } });
   const logoRuta = await guardarArchivo("empresa", req.file.buffer, req.file.originalname, req.file.mimetype);
+  let actualizada;
+  try {
+    actualizada = await prisma.empresa.upsert({
+      where: { id: 1 },
+      create: { id: 1, logoRuta },
+      update: { logoRuta },
+    });
+  } catch (err) {
+    await borrarArchivo(logoRuta);
+    throw err;
+  }
   if (existente?.logoRuta) await borrarArchivo(existente.logoRuta);
-
-  const actualizada = await prisma.empresa.upsert({
-    where: { id: 1 },
-    create: { id: 1, logoRuta },
-    update: { logoRuta },
-  });
   invalidarEmpresaCache();
   res.json(actualizada);
 });
