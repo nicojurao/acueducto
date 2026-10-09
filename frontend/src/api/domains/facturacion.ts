@@ -265,11 +265,12 @@ export const facturacionApi = {
       error: string | null;
     }>(`/api/facturacion/generar/${id}/estado`),
   facturas: {
-    listPaginado: (page: number, limit: number, filtros?: { periodo?: string; estado?: string; q?: string }) => {
+    listPaginado: (page: number, limit: number, filtros?: { periodo?: string; estado?: string; q?: string; suscriptorId?: number }) => {
       const qs = new URLSearchParams({ page: String(page), limit: String(limit) });
       if (filtros?.periodo) qs.set("periodo", filtros.periodo);
       if (filtros?.estado) qs.set("estado", filtros.estado);
       if (filtros?.q) qs.set("q", filtros.q);
+      if (filtros?.suscriptorId) qs.set("suscriptorId", String(filtros.suscriptorId));
       return request<{ data: FacturaResumen[]; total: number; page: number; limit: number }>(`/api/facturacion/facturas?${qs}`);
     },
     get: (id: number) => request<FacturaDetalle>(`/api/facturacion/facturas/${id}`),

@@ -534,9 +534,10 @@ facturacionRouter.get("/omitidos", permisoVer, async (req, res) => {
 // ============================== FACTURAS ==============================
 
 facturacionRouter.get("/facturas", permisoVer, async (req, res) => {
-  const { periodo, estado, q, page, limit } = req.query;
+  const { periodo, estado, q, suscriptorId, page, limit } = req.query;
   const filtros: any[] = [];
   if (periodo) filtros.push({ periodo: primerDiaMes(String(periodo)) });
+  if (suscriptorId) filtros.push({ suscriptorId: Number(suscriptorId) });
   if (estado === "con_saldo") filtros.push({ estado: "pendiente" });
   else if (estado) filtros.push({ estado: String(estado) });
   if (q) {

@@ -1,11 +1,35 @@
 import { useEffect, useRef, useState } from "react";
-import { ScanLine, X, CheckCircle2 } from "lucide-react";
+import { ScanLine, X, CheckCircle2, AlertTriangle } from "lucide-react";
 import { api, FacturaResumen } from "../api/client";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
 import { inputClass } from "../lib/ui";
 
 const fmtPesos = (v: number | string) => `$${Number(v).toLocaleString("es-CO", { maximumFractionDigits: 0 })}`;
+
+// El código de barras "código de factura" imprime el número plano (ver plantillas), pero el
+// código GS1 lineal (el ancho, con el GLN debajo) trae el número de factura empacado dentro del
+// AI (8020) junto con el GLN fijo (415) y el saldo (3900) — buscar ESE string completo contra
+// número/NUID nunca iba a encontrar nada. Caso real reportado 2026-09-13, lector con prefijo AIM
+// "]C1": "]C1415770950095427380203674739005250" → GLN(415)=7709500954273, referencia(8020)=36747,
+// saldo(3900)=5250 → hay que buscar "36747", no el string entero.
+function extraerNumeroDeEscaneo(textoCrudo: string): string {
+  // El prefijo de 3 caracteres (ej. "]C1") identifica la simbología para el lector, no es dato.
+  const texto = textoCrudo.replace(/^\][A-Za-z0-9]{2}/, "");
+  const m = texto.match(/^415(\d{13})8020(.+)$/);
+  if (!m) return textoCrudo.trim(); // no es un escaneo GS1 reconocible — se busca tal cual (número/NUID a mano)
+  let referencia = m[2];
+  // Entre AI de largo variable el separador real es un carácter de control (GS, 0x1D) — si el
+  // lector viene configurado para transmitirlo, ahí termina la referencia. Si no (lector en modo
+  // "Code128 plano", sin FNC1), se usa "3900" — el único AI que sigue — como límite de respaldo.
+  const gs = referencia.indexOf("\x1d");
+  if (gs !== -1) referencia = referencia.slice(0, gs);
+  else {
+    const i3900 = referencia.indexOf("3900");
+    if (i3900 !== -1) referencia = referencia.slice(0, i3900);
+  }
+  return referencia || textoCrudo.trim();
+}
 
 // Recaudo rápido: para no tener que buscar la factura a mano en la lista y abrir su detalle solo
 // para registrar un pago (lento cuando hay fila de gente esperando), acá hay un solo cuadro
@@ -22,11 +46,23 @@ export default function RecaudoRapidoTab() {
   const [buscando, setBuscando] = useState(false);
   const [resultados, setResultados] = useState<FacturaResumen[] | null>(null);
   const [factura, setFactura] = useState<FacturaResumen | null>(null);
+  // Si la factura abierta está vencida Y el suscriptor ya tiene una más reciente pendiente, esa
+  // más reciente queda acá — bloquea el cobro de la vencida y se ofrece pasar a esta en su lugar
+  // (ver abrirFactura). Si está vencida pero es la más reciente (no hay ninguna después), no hay
+  // a qué redirigir — es simplemente una mora normal, se puede cobrar igual.
+  const [facturaVigente, setFacturaVigente] = useState<FacturaResumen | null>(null);
   const [valorPago, setValorPago] = useState("");
   const [medioPago, setMedioPago] = useState("efectivo");
   const [registrando, setRegistrando] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const valorRef = useRef<HTMLInputElement>(null);
+  // Detecta un escaneo por la VELOCIDAD de tecleo (un lector escribe carácter por carácter en
+  // pocos milisegundos, muchísimo más rápido que una persona) para buscar solo apenas termina —
+  // no depende de que el lector esté configurado para mandar Enter al final, que no todos hacen.
+  const ultimoTecleoEn = useRef(0);
+  const pareceEscaneo = useRef(false);
+  const autoBuscarTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (autoBuscarTimeout.current) clearTimeout(autoBuscarTimeout.current); }, []);
 
   // Vuelve a enfocar el cuadro de escaneo apenas se cierra el pago o no hay ninguna factura
   // abierta — así el cajero puede escanear la siguiente factura sin tocar el mouse ni el teclado.
@@ -35,24 +71,44 @@ export default function RecaudoRapidoTab() {
   }, [factura, resultados]);
 
   function limpiar() {
+    if (autoBuscarTimeout.current) clearTimeout(autoBuscarTimeout.current);
+    pareceEscaneo.current = false;
     setFactura(null);
+    setFacturaVigente(null);
     setResultados(null);
     setCodigo("");
     setValorPago("");
     setMedioPago("efectivo");
   }
 
-  function abrirFactura(f: FacturaResumen) {
+  async function abrirFactura(f: FacturaResumen) {
+    if (autoBuscarTimeout.current) clearTimeout(autoBuscarTimeout.current);
+    pareceEscaneo.current = false;
     setFactura(f);
+    setFacturaVigente(null);
     setResultados(null);
     setValorPago(String(f.saldo));
     setCodigo("");
     setTimeout(() => valorRef.current?.focus(), 50);
+
+    const vencida = f.estado === "pendiente" && !!f.fechaVencimiento && new Date(f.fechaVencimiento) < new Date();
+    if (!vencida) return;
+    try {
+      // Ordenado por periodo desc (ver GET /facturas) — el primero es la pendiente más reciente
+      // del suscriptor. Si es la misma factura que se acaba de abrir, no hay ninguna más nueva.
+      const r = await api.facturacion.facturas.listPaginado(1, 1, { suscriptorId: f.suscriptorId, estado: "con_saldo" });
+      const masReciente = r.data[0];
+      if (masReciente && masReciente.id !== f.id && masReciente.periodo > f.periodo) {
+        setFacturaVigente(masReciente);
+      }
+    } catch {
+      // si esta verificación falla, no bloquea el flujo normal de cobro de "f" — solo no se
+      // alcanza a avisar que hay una factura más reciente
+    }
   }
 
-  async function buscar(e: React.FormEvent) {
-    e.preventDefault();
-    const texto = codigo.trim();
+  async function buscarTexto(textoCrudo: string) {
+    const texto = extraerNumeroDeEscaneo(textoCrudo.trim());
     if (!texto) return;
     setBuscando(true);
     try {
@@ -63,6 +119,34 @@ export default function RecaudoRapidoTab() {
       mostrarError(err, "no se pudo buscar la factura");
     } finally {
       setBuscando(false);
+    }
+  }
+
+  function buscar(e: React.FormEvent) {
+    e.preventDefault();
+    if (autoBuscarTimeout.current) clearTimeout(autoBuscarTimeout.current);
+    if (codigo.trim()) buscarTexto(codigo);
+  }
+
+  function onCambiarCodigo(valor: string) {
+    const ahora = Date.now();
+    const delta = ahora - ultimoTecleoEn.current;
+    const crecio = valor.length - codigo.length;
+    ultimoTecleoEn.current = ahora;
+    if (valor.length <= 1) pareceEscaneo.current = false;
+    // Dos formas de detectar un escaneo, según cómo lo entregue el lector: tecleo caracter por
+    // caracter pero muchísimo más rápido que una persona (<30ms entre eventos), o el string
+    // completo de una sola vez (algunos lectores/navegadores lo entregan así, como un pegado) —
+    // ningún humano teclea 6+ caracteres nuevos en un solo evento.
+    else if (crecio >= 6 || (crecio > 0 && delta < 30)) pareceEscaneo.current = true;
+    setCodigo(valor);
+
+    if (autoBuscarTimeout.current) clearTimeout(autoBuscarTimeout.current);
+    if (pareceEscaneo.current) {
+      // Pequeña pausa para dejar que el lector termine de "escribir" el resto del código antes de
+      // buscar — si llega otro carácter antes de que se cumpla, este timeout se cancela y arranca
+      // de nuevo (ver el clearTimeout de arriba).
+      autoBuscarTimeout.current = setTimeout(() => buscarTexto(valor), 80);
     }
   }
 
@@ -94,7 +178,7 @@ export default function RecaudoRapidoTab() {
               ref={inputRef}
               autoFocus
               value={codigo}
-              onChange={(e) => setCodigo(e.target.value)}
+              onChange={(e) => onCambiarCodigo(e.target.value)}
               placeholder="Esperando escaneo..."
               className={`${inputClass} flex-1 text-lg`}
             />
@@ -172,7 +256,29 @@ export default function RecaudoRapidoTab() {
             </div>
           </div>
 
-          {puedePagar ? (
+          {facturaVigente ? (
+            // Esta factura venció Y el suscriptor ya tiene una más reciente pendiente — no se
+            // cobra la vieja (el valor impreso ya no refleja lo que debe): se avisa acá mismo y
+            // se pasa a la vigente, para que se le entregue esa al suscriptor.
+            <div className="rounded-lg border border-red-300 bg-red-50 p-3 dark:border-red-500/30 dark:bg-red-500/10">
+              <div className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold text-red-700 dark:text-red-400">
+                <AlertTriangle className="h-4 w-4" />
+                Esta factura está vencida
+              </div>
+              <p className="mb-3 text-xs text-red-700/90 dark:text-red-400/90">
+                Venció el {new Date(factura.fechaVencimiento!).toLocaleDateString("es-CO")} y el suscriptor ya tiene
+                la factura N° {facturaVigente.numero} (periodo {facturaVigente.periodo.slice(0, 7)}) pendiente por{" "}
+                {fmtPesos(facturaVigente.saldo)}. Infórmale que está vencida y entrégale la nueva para que pague con
+                ese valor.
+              </p>
+              <button
+                onClick={() => abrirFactura(facturaVigente)}
+                className="flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-500"
+              >
+                Ver factura vigente (N° {facturaVigente.numero})
+              </button>
+            </div>
+          ) : puedePagar ? (
             <form onSubmit={registrarPago} className="flex flex-wrap items-end gap-2">
               <label className="flex flex-col gap-1 text-xs text-slate-600 dark:text-slate-400">
                 Valor a recibir
