@@ -423,6 +423,28 @@ export const medidoresApi = {
     const qs = ids && ids.length > 0 ? `?ids=${ids.join(",")}` : "";
     return descargarArchivo(`/api/medidores/export${qs}`, "plantilla_medidores.xlsx");
   },
+  // Informe de solo lectura (una fila por medidor con todo lo asociado) — acepta los mismos
+  // filtros que la tabla de Inventario para que el Excel coincida con lo que se ve filtrado.
+  informe: (filtros?: {
+    q?: string;
+    estado?: string;
+    marca?: string;
+    condicion?: string;
+    modeloId?: number;
+    diametroId?: number;
+    tipo?: string;
+  }) => {
+    const qs = new URLSearchParams();
+    if (filtros?.q) qs.set("q", filtros.q);
+    if (filtros?.estado) qs.set("estado", filtros.estado);
+    if (filtros?.marca) qs.set("marca", filtros.marca);
+    if (filtros?.condicion) qs.set("condicion", filtros.condicion);
+    if (filtros?.modeloId) qs.set("modeloId", String(filtros.modeloId));
+    if (filtros?.diametroId) qs.set("diametroId", String(filtros.diametroId));
+    if (filtros?.tipo) qs.set("tipo", filtros.tipo);
+    const consulta = qs.toString();
+    return descargarArchivo(`/api/medidores/informe${consulta ? `?${consulta}` : ""}`, "informe_medidores.xlsx");
+  },
   import: (file: File) => {
     const formData = new FormData();
     formData.append("archivo", file);

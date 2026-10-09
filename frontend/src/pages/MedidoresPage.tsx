@@ -17,6 +17,7 @@ import {
   Tag,
   Ruler,
   Package,
+  Loader2,
 } from "lucide-react";
 import {
   api,
@@ -143,6 +144,7 @@ function InventarioTab() {
   const { error, run } = useErrorHandler();
   const { pedirConfirmacion, modal } = useConfirm();
   const [seleccionados, setSeleccionados] = useState<Set<number>>(new Set());
+  const [generandoInforme, setGenerandoInforme] = useState(false);
 
   function alternarSeleccion(id: number) {
     setSeleccionados((prev) => {
@@ -349,6 +351,25 @@ function InventarioTab() {
     setFiltroTipo("");
   }
 
+  async function descargarInforme() {
+    setGenerandoInforme(true);
+    try {
+      await api.medidores.informe({
+        q: filtroDebounced,
+        estado: filtroEstado,
+        marca: filtroMarca,
+        condicion: filtroCondicion,
+        modeloId: filtroModelo ? Number(filtroModelo) : undefined,
+        diametroId: filtroDiametro ? Number(filtroDiametro) : undefined,
+        tipo: filtroTipo,
+      });
+    } catch (err) {
+      mostrarError(err, "no se pudo generar el informe de medidores");
+    } finally {
+      setGenerandoInforme(false);
+    }
+  }
+
   function eliminarMedidor(m: Medidor) {
     pedirConfirmacion(`¿Eliminar el medidor "${m.serial ?? m.id}"? Esta acción no se puede deshacer.`, () =>
       run(async () => {
@@ -391,6 +412,15 @@ function InventarioTab() {
         >
           <Upload className="h-4 w-4" />
           Importar / exportar Excel
+        </button>
+        <button
+          onClick={descargarInforme}
+          disabled={generandoInforme}
+          title="Excel con todo lo asociado a cada medidor: calibración, instalación, suscriptor, barrio, última lectura. Respeta los filtros de arriba."
+          className="flex items-center gap-1.5 rounded-lg border border-brand-200 px-4 py-2 text-sm font-medium text-brand-700 hover:bg-brand-50 disabled:opacity-60 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+        >
+          {generandoInforme ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+          {generandoInforme ? "Generando…" : "Informe de medidores"}
         </button>
         {seleccionados.size > 0 && (
           <button

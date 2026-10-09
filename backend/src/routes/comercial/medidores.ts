@@ -2,7 +2,8 @@ import { Router } from "express";
 import multer from "multer";
 import { prisma } from "../../lib/prisma.js";
 import { requirePermiso } from "../../middleware/auth.js";
-import { crearPlantillaImportExport, enviarExcel } from "../../lib/excelBranding.js";
+import { crearPlantillaImportExport, crearInformeExcel, enviarExcel } from "../../lib/excelBranding.js";
+import { fechaLegibleColombia, fechaArchivoColombia } from "../../lib/fechaColombia.js";
 import { LIMITE_DOCUMENTO_BYTES, filtroDocumento } from "../../lib/uploads.js";
 import { guardarArchivo, borrarArchivo } from "../../lib/storage.js";
 import { registrarCambios, camposMedidor, camposSuscriptor } from "../../lib/historial.js";
@@ -118,6 +119,45 @@ medidoresRouter.get("/export", soloAvanzado, async (req, res) => {
   enviarExcel(res, buffer, "plantilla_medidores.xlsx");
 });
 
+// Filtros del listado de Inventario (GET /) — compartidos con el informe (GET /informe) para que
+// "lo que ves filtrado en la tabla" y "lo que sale en el Excel" siempre sean lo mismo.
+function filtrosDeMedidores(query: Record<string, unknown>) {
+  const { ruta, activo, estado, condicion, marca, modeloId, diametroId, tipo, q } = query;
+  const filtros: any[] = [];
+  if (activo !== undefined) filtros.push({ activo: activo === "true" });
+  if (estado) filtros.push({ estado: String(estado) });
+  if (condicion) filtros.push({ condicion: String(condicion) });
+  if (marca) filtros.push({ marcaCat: { nombre: String(marca) } });
+  if (modeloId) filtros.push({ modeloId: Number(modeloId) });
+  if (diametroId) filtros.push({ diametroId: Number(diametroId) });
+  if (tipo) filtros.push({ tipo: String(tipo) });
+  if (ruta) filtros.push({ suscriptor: { ruta: String(ruta) } });
+  if (q) {
+    const texto = String(q).trim();
+    filtros.push({
+      OR: [
+        { serial: { contains: texto, mode: "insensitive" as const } },
+        { tipo: { contains: texto, mode: "insensitive" as const } },
+        { marcaCat: { nombre: { contains: texto, mode: "insensitive" as const } } },
+        { modeloCat: { nombre: { contains: texto, mode: "insensitive" as const } } },
+      ],
+    });
+  }
+  return filtros.length > 0 ? { AND: filtros } : undefined;
+}
+
+const ETIQUETA_ESTADO_MEDIDOR: Record<string, string> = { instalado: "Instalado", en_bodega: "En bodega" };
+const ETIQUETA_CONDICION: Record<string, string> = { bueno: "Bueno", danado: "Dañado" };
+const ETIQUETA_TIPO: Record<string, string> = { volumetrico: "Volumétrico", velocidad: "Velocidad" };
+const ETIQUETA_ESTADO_FACTURACION: Record<string, string> = {
+  sin_medidor: "Sin medidor",
+  instalado_prueba: "Instalado (prueba)",
+  facturando: "Facturando",
+  inactivo: "Inactivo",
+};
+
+const fechaISO = (d: Date | null | undefined) => (d ? d.toISOString().slice(0, 10) : "");
+
 // ActaInstalacion.serial es una COPIA del serial del medidor al momento de crear el acta (el acta
 // es un documento: dice qué medidor se instaló). Cuando el serial del medidor se corrige después
 // (error de digitación), esa copia quedaba con el serial viejo — el inventario decía una cosa y
@@ -135,6 +175,122 @@ async function sincronizarSerialEnActas(
     data: { serial: serialNuevo },
   });
 }
+
+// Informe de solo lectura con TODO lo asociado a cada medidor en una sola fila: ficha técnica
+// (marca/modelo/diámetro/lote), calibración (fechas, certificado, acta), instalación (fecha,
+// instalador, acta firmada), a quién está asignado (NUID, barrio, dirección, estrato...) y su
+// última lectura. A diferencia de /export (plantilla de import/export, solo medidores con
+// suscriptor y pensada para volver a subirse), esto trae también los que están en bodega y no
+// sirve para re-importar. Acepta los mismos filtros que el listado (estado, condición, marca,
+// modelo, diámetro, tipo, búsqueda). Va antes de "/:id" a propósito, o Express toma "informe"
+// como si fuera un id.
+medidoresRouter.get("/informe", async (req, res) => {
+  const medidores = await prisma.medidor.findMany({
+    where: filtrosDeMedidores(req.query),
+    include: {
+      suscriptor: { include: { barrioCat: true, estratoCat: true } },
+      marcaCat: true,
+      modeloCat: { include: { varianteCat: true } },
+      diametroCat: true,
+      lote: true,
+      cotitulares: { include: { suscriptor: { select: { codigo: true } } } },
+      // La acta más reciente, esté retirada o no: en un medidor instalado es la vigente; en uno ya
+      // retirado (en bodega) conserva quién lo instaló y cuándo se le quitó al suscriptor.
+      actas: { orderBy: { fechaInstalacion: "desc" }, take: 1 },
+      lecturas: { orderBy: { periodo: "desc" }, take: 1 },
+    },
+    orderBy: [{ serial: "asc" }, { id: "asc" }],
+  });
+
+  const filas = medidores.map((m) => {
+    const s = m.suscriptor;
+    const acta = m.actas[0];
+    const ultima = m.lecturas[0];
+    return {
+      serial: m.serial ?? "",
+      estado: ETIQUETA_ESTADO_MEDIDOR[m.estado] ?? m.estado,
+      condicion: ETIQUETA_CONDICION[m.condicion] ?? m.condicion,
+      vigente: m.activo ? "Sí" : "No",
+      marca: m.marcaCat?.nombre ?? "",
+      modelo: m.modeloCat?.nombre ?? "",
+      tipo: m.tipo ? (ETIQUETA_TIPO[m.tipo] ?? m.tipo) : "",
+      variante: m.modeloCat?.varianteCat?.etiqueta ?? "",
+      clase: m.clase ?? m.modeloCat?.clasePrecision ?? "",
+      diametro: m.diametroCat?.valor ?? "",
+      lote: m.lote ? `${m.lote.serialInicial}-${m.lote.serialFinal}` : "",
+      fechaFabricacion: fechaISO(m.fechaFabricacion),
+      fechaCalibracion: fechaISO(m.fechaCertificacion),
+      certificado: m.certificado ?? "",
+      actaCalibracion: m.actaCalibracionUrl ? "Sí" : "No",
+      lecturaInicial: m.lecturaInicial !== null ? Number(m.lecturaInicial) : "",
+      fechaInstalacion: fechaISO(m.fechaInstalacion),
+      fechaRetiro: fechaISO(acta?.fechaRetiro),
+      instaladoPor: acta?.instaladoPor ?? "",
+      actaFirmada: acta ? (acta.actaFirmadaUrl ? "Sí" : "No") : "",
+      nuid: s?.codigo ?? "",
+      suscriptor: s?.nombre ?? "",
+      identificacion: s?.identificacion ?? "",
+      barrio: s?.barrioCat?.nombre ?? "",
+      direccion: s?.direccion ?? "",
+      ruta: s?.ruta ?? "",
+      estrato: s?.estratoCat ? `${s.estratoCat.codigo} — ${s.estratoCat.etiqueta}` : "",
+      estadoFacturacion: s ? (ETIQUETA_ESTADO_FACTURACION[s.estadoFacturacion] ?? s.estadoFacturacion) : "",
+      cotitulares: m.cotitulares.map((c) => c.suscriptor.codigo).join(", "),
+      periodoUltimaLectura: ultima ? ultima.periodo.toISOString().slice(0, 7) : "",
+      ultimaLectura: ultima ? Number(ultima.valorLectura) : "",
+      consumoUltimaLectura: ultima ? Number(ultima.consumo) : "",
+      registradoEn: fechaLegibleColombia(m.createdAt),
+    };
+  });
+
+  const instalados = medidores.filter((m) => m.estado === "instalado").length;
+  const subtitulo = `${filas.length} medidor${filas.length === 1 ? "" : "es"} · ${instalados} instalado${instalados === 1 ? "" : "s"}, ${
+    medidores.filter((m) => m.estado === "en_bodega").length
+  } en bodega · Generado el ${fechaLegibleColombia()}`;
+
+  const buffer = await crearInformeExcel(
+    "Medidores",
+    "Informe de micromedidores",
+    subtitulo,
+    [
+      { titulo: "SERIAL", clave: "serial", ancho: 16 },
+      { titulo: "ESTADO", clave: "estado", ancho: 12 },
+      { titulo: "CONDICIÓN", clave: "condicion", ancho: 12 },
+      { titulo: "VIGENTE", clave: "vigente", ancho: 10 },
+      { titulo: "MARCA", clave: "marca", ancho: 16 },
+      { titulo: "MODELO", clave: "modelo", ancho: 16 },
+      { titulo: "TIPO", clave: "tipo", ancho: 13 },
+      { titulo: "VARIANTE", clave: "variante", ancho: 16 },
+      { titulo: "CLASE", clave: "clase", ancho: 10 },
+      { titulo: "DIÁMETRO", clave: "diametro", ancho: 11 },
+      { titulo: "LOTE", clave: "lote", ancho: 16 },
+      { titulo: "FECHA FABRICACIÓN", clave: "fechaFabricacion", ancho: 18 },
+      { titulo: "FECHA CALIBRACIÓN", clave: "fechaCalibracion", ancho: 18 },
+      { titulo: "N° CERTIFICADO", clave: "certificado", ancho: 18 },
+      { titulo: "ACTA CALIBRACIÓN CARGADA", clave: "actaCalibracion", ancho: 16 },
+      { titulo: "LECTURA INICIAL", clave: "lecturaInicial", ancho: 15 },
+      { titulo: "FECHA INSTALACIÓN", clave: "fechaInstalacion", ancho: 18 },
+      { titulo: "FECHA RETIRO", clave: "fechaRetiro", ancho: 14 },
+      { titulo: "INSTALADO POR", clave: "instaladoPor", ancho: 22 },
+      { titulo: "ACTA INSTALACIÓN FIRMADA", clave: "actaFirmada", ancho: 16 },
+      { titulo: "NUID", clave: "nuid", ancho: 12 },
+      { titulo: "SUSCRIPTOR", clave: "suscriptor", ancho: 30 },
+      { titulo: "IDENTIFICACIÓN", clave: "identificacion", ancho: 16 },
+      { titulo: "BARRIO", clave: "barrio", ancho: 20 },
+      { titulo: "DIRECCIÓN", clave: "direccion", ancho: 28 },
+      { titulo: "RUTA", clave: "ruta", ancho: 12 },
+      { titulo: "ESTRATO", clave: "estrato", ancho: 18 },
+      { titulo: "ESTADO FACTURACIÓN", clave: "estadoFacturacion", ancho: 18 },
+      { titulo: "COTITULARES (NUID)", clave: "cotitulares", ancho: 20 },
+      { titulo: "PERIODO ÚLTIMA LECTURA", clave: "periodoUltimaLectura", ancho: 14 },
+      { titulo: "ÚLTIMA LECTURA", clave: "ultimaLectura", ancho: 14 },
+      { titulo: "CONSUMO ÚLTIMA LECTURA", clave: "consumoUltimaLectura", ancho: 14 },
+      { titulo: "REGISTRADO EN EL SISTEMA", clave: "registradoEn", ancho: 16 },
+    ],
+    filas
+  );
+  enviarExcel(res, buffer, `informe_medidores_${fechaArchivoColombia()}.xlsx`);
+});
 
 function leerColumnas(headers: string[]) {
   return {
@@ -713,29 +869,8 @@ medidoresRouter.post("/import", soloAvanzado, upload.single("archivo"), async (r
 // en el cliente, ej. "medidores en bodega" al asignar uno a un suscriptor). Con "page", pagina
 // y filtra en el servidor — para la tabla de Inventario, que ya no necesita traer todo de una.
 medidoresRouter.get("/", async (req, res) => {
-  const { ruta, activo, estado, condicion, marca, modeloId, diametroId, tipo, q, page, limit } = req.query;
-
-  const filtros: any[] = [];
-  if (activo !== undefined) filtros.push({ activo: activo === "true" });
-  if (estado) filtros.push({ estado: String(estado) });
-  if (condicion) filtros.push({ condicion: String(condicion) });
-  if (marca) filtros.push({ marcaCat: { nombre: String(marca) } });
-  if (modeloId) filtros.push({ modeloId: Number(modeloId) });
-  if (diametroId) filtros.push({ diametroId: Number(diametroId) });
-  if (tipo) filtros.push({ tipo: String(tipo) });
-  if (ruta) filtros.push({ suscriptor: { ruta: String(ruta) } });
-  if (q) {
-    const texto = String(q).trim();
-    filtros.push({
-      OR: [
-        { serial: { contains: texto, mode: "insensitive" as const } },
-        { tipo: { contains: texto, mode: "insensitive" as const } },
-        { marcaCat: { nombre: { contains: texto, mode: "insensitive" as const } } },
-        { modeloCat: { nombre: { contains: texto, mode: "insensitive" as const } } },
-      ],
-    });
-  }
-  const where = filtros.length > 0 ? { AND: filtros } : undefined;
+  const { page, limit } = req.query;
+  const where = filtrosDeMedidores(req.query);
 
   if (page) {
     const pageNum = Math.max(1, Number(page) || 1);
