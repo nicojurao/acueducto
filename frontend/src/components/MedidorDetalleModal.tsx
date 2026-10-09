@@ -3,6 +3,7 @@ import { Pencil, X } from "lucide-react";
 import { api, DiametroMedidor, Lote, MarcaMedidor, Medidor, ModeloMedidor, urlFoto } from "../api/client";
 import { useConfirm, useErrorHandler } from "./ConfirmModal";
 import { HistorialSeccion } from "./HistorialTimeline";
+import { DocumentoAdjunto } from "./Adjuntos";
 import { useAuth } from "../contexts/AuthContext";
 import { useCierreAnimado } from "../lib/useCierreAnimado";
 import { inputClass } from "../lib/ui";
@@ -56,10 +57,12 @@ export default function MedidorDetalleModal({
   const [certificado, setCertificado] = useState(medidor.certificado ?? "");
   const [lecturaInicial, setLecturaInicial] = useState(medidor.lecturaInicial != null ? String(medidor.lecturaInicial) : "");
   const [condicion, setCondicion] = useState(medidor.condicion);
-  const [actaCalibracionUrl, setActaCalibracionUrl] = useState(medidor.actaCalibracionUrl);
+  const actaCalibracionUrl = medidor.actaCalibracionUrl;
   const [actaCalibracionArchivo, setActaCalibracionArchivo] = useState<File | null>(null);
+  // Quitar el acta guardada NO es inmediato: se marca y se aplica al Guardar (así Cancelar cancela
+  // de verdad, y se puede deshacer). Ver DocumentoAdjunto.
+  const [quitarActaCalibracion, setQuitarActaCalibracion] = useState(false);
   const [guardando, setGuardando] = useState(false);
-  const [subiendo, setSubiendo] = useState(false);
   const { error, run } = useErrorHandler();
   const { usuario } = useAuth();
   const { pedirConfirmacion, modal: modalConfirmacion } = useConfirm();
@@ -99,8 +102,11 @@ export default function MedidorDetalleModal({
           lecturaInicial: Number(lecturaInicial),
           condicion,
         });
+        // Subir uno nuevo ya reemplaza al anterior; "quitar" solo aplica si no se eligió reemplazo.
         if (actaCalibracionArchivo) {
           await api.medidores.subirActaCalibracion(medidor.id, actaCalibracionArchivo);
+        } else if (quitarActaCalibracion) {
+          await api.medidores.quitarActaCalibracion(medidor.id);
         }
         onCambio();
         cerrar();
@@ -110,14 +116,10 @@ export default function MedidorDetalleModal({
     });
   }
 
-  async function quitarActaCalibracion() {
-    setSubiendo(true);
-    try {
-      await api.medidores.quitarActaCalibracion(medidor.id);
-      setActaCalibracionUrl(null);
-    } finally {
-      setSubiendo(false);
-    }
+  function cancelarEdicion() {
+    setActaCalibracionArchivo(null);
+    setQuitarActaCalibracion(false);
+    setModo("ver");
   }
 
   return (
@@ -362,40 +364,19 @@ export default function MedidorDetalleModal({
                 </label>
               </div>
 
-              <div>
-                <span className="mb-1 block text-sm text-slate-600 dark:text-slate-300">Acta de calibración (escaneada)</span>
-                {actaCalibracionUrl && !actaCalibracionArchivo && (
-                  <div className="mb-1 flex items-center gap-2">
-                    <a
-                      href={urlFoto(actaCalibracionUrl)}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-xs font-medium text-brand-600 hover:underline dark:text-brand-400"
-                    >
-                      Ver acta actual
-                    </a>
-                    <button
-                      type="button"
-                      disabled={subiendo}
-                      onClick={quitarActaCalibracion}
-                      className="text-xs font-medium text-red-500 hover:underline"
-                    >
-                      Quitar
-                    </button>
-                  </div>
-                )}
-                <input
-                  type="file"
-                  accept="image/*,application/pdf"
-                  onChange={(e) => setActaCalibracionArchivo(e.target.files?.[0] ?? null)}
-                  className={`${inputClass} w-full`}
-                />
-              </div>
+              <DocumentoAdjunto
+                titulo="Acta de calibración"
+                urlActual={actaCalibracionUrl}
+                archivoNuevo={actaCalibracionArchivo}
+                onArchivoNuevo={setActaCalibracionArchivo}
+                quitar={quitarActaCalibracion}
+                onQuitar={setQuitarActaCalibracion}
+              />
             </div>
 
             <div className="mt-5 flex justify-end gap-2">
               <button
-                onClick={() => setModo("ver")}
+                onClick={cancelarEdicion}
                 className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
               >
                 Cancelar

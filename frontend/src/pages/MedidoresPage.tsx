@@ -33,6 +33,7 @@ import {
 import MedidorDetalleModal from "../components/MedidorDetalleModal";
 import SuscriptorDetailModal from "../components/SuscriptorDetailModal";
 import ImportExcelModal from "../components/ImportExcelModal";
+import { DocumentoAdjunto } from "../components/Adjuntos";
 import ListCard from "../components/ListCard";
 import { useConfirm, useErrorHandler } from "../components/ConfirmModal";
 import { useToast } from "../contexts/ToastContext";
@@ -46,6 +47,7 @@ import { inputClass } from "../lib/ui";
 import { fmtFecha } from "../lib/fecha";
 import EmptyState from "../components/EmptyState";
 import { leerSnapshot, listarMedidoresOffline } from "../lib/offlineSnapshot";
+import { useAuth } from "../contexts/AuthContext";
 
 const TIPO_LABELS: Record<string, string> = { volumetrico: "Volumétrico", velocidad: "Velocidad" };
 function tipoLabel(tipo: string | null): string {
@@ -636,17 +638,11 @@ function InventarioTab() {
                   inventario, no cuando se instala.
                 </span>
               </label>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">
-                  Acta de calibración (escaneada, opcional)
-                </label>
-                <input
-                  type="file"
-                  accept="image/*,application/pdf"
-                  onChange={(e) => setNuevaActaCalibracion(e.target.files?.[0] ?? null)}
-                  className={`${inputClass} w-full`}
-                />
-              </div>
+              <DocumentoAdjunto
+                titulo="Acta de calibración (opcional)"
+                archivoNuevo={nuevaActaCalibracion}
+                onArchivoNuevo={setNuevaActaCalibracion}
+              />
               <div className="mt-1 flex justify-end gap-2">
                 <button
                   type="button"
@@ -1882,16 +1878,24 @@ function MarcaModal({
   );
 }
 
+// Seguimiento de las actas de instalación: cuáles faltan por firmar. Las actas se crean y corrigen desde
+// la ficha del suscriptor (son una instalación: suscriptor + medidor + fecha); esta lista solo sirve para
+// revisarlas y llevar a la ficha con un clic.
+type VistaActas = "por_firmar" | "firmadas" | "todas";
+
 function ActasTab() {
+  const { usuario } = useAuth();
+  const puedeAbrirFicha = (usuario?.permisos ?? []).some((p) => p === "suscriptores_ver" || p === "suscriptores_avanzado");
   const [actas, setActas] = useState<ActaInstalacion[]>([]);
   const [cargando, setCargando] = useState(true);
   const [filtro, setFiltro] = useState("");
-  const [firmadaFiltro, setFirmadaFiltro] = useState("");
+  const [vista, setVista] = useState<VistaActas>("por_firmar");
+  const [fichaSuscriptorId, setFichaSuscriptorId] = useState<number | null>(null);
   // Más viejas primero por defecto — es el orden que se necesita para revisar el histórico de
   // instalaciones desde el principio, no lo último capturado.
   const [orden, setOrden] = useState<Orden>({ campo: "fechaInstalacion", dir: "asc" });
 
-  useEffect(() => {
+  function cargarActas() {
     api.actas
       .list()
       .then((a) => {
@@ -1905,12 +1909,16 @@ function ActasTab() {
         setActas(snapshot?.actas ?? []);
         setCargando(false);
       });
-  }, []);
+  }
+  useEffect(cargarActas, []);
+
+  const porFirmar = actas.filter((a) => !a.actaFirmadaUrl).length;
+  const firmadas = actas.length - porFirmar;
 
   const filtradas = actas
     .filter((a) => {
-      if (firmadaFiltro === "firmada" && !a.actaFirmadaUrl) return false;
-      if (firmadaFiltro === "sin_firmar" && a.actaFirmadaUrl) return false;
+      if (vista === "firmadas" && !a.actaFirmadaUrl) return false;
+      if (vista === "por_firmar" && a.actaFirmadaUrl) return false;
       if (!filtro.trim()) return true;
       const texto = filtro.trim().toLowerCase();
       return (
@@ -1940,8 +1948,10 @@ function ActasTab() {
   return (
     <div>
       <p className="mb-4 text-sm text-slate-700 dark:text-slate-400">
-        Historial de instalaciones registradas. Para asignar un medidor a un suscriptor, ve a la ficha del suscriptor
-        en la pestaña Suscriptores.
+        Seguimiento de las actas de instalación.
+        {puedeAbrirFicha
+          ? " Haz clic en una fila para abrir la ficha del suscriptor, donde se sube o se corrige el acta firmada."
+          : " El acta firmada se sube desde la ficha del suscriptor."}
       </p>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <BusquedaInput
@@ -1950,16 +1960,30 @@ function ActasTab() {
           onChange={setFiltro}
           className="w-full max-w-xs"
         />
-        <select value={firmadaFiltro} onChange={(e) => setFirmadaFiltro(e.target.value)} className={inputClass}>
-          <option value="">Firmada o no</option>
-          <option value="firmada">Con acta firmada</option>
-          <option value="sin_firmar">Sin acta firmada</option>
-        </select>
-        {!cargando && (
-          <span className="text-xs text-slate-500 dark:text-slate-400">
-            {filtradas.length} de {actas.length}
-          </span>
-        )}
+        <div role="tablist" aria-label="Estado del acta firmada" className="inline-flex rounded-full border border-slate-200 bg-white p-0.5 dark:border-slate-700 dark:bg-slate-900">
+          {(
+            [
+              { id: "por_firmar", etiqueta: "Por firmar", n: porFirmar },
+              { id: "firmadas", etiqueta: "Firmadas", n: firmadas },
+              { id: "todas", etiqueta: "Todas", n: actas.length },
+            ] as const
+          ).map((v) => (
+            <button
+              key={v.id}
+              role="tab"
+              aria-selected={vista === v.id}
+              onClick={() => setVista(v.id)}
+              className={`rounded-full px-3 py-1.5 text-xs font-medium ${
+                vista === v.id
+                  ? "bg-brand-600 text-white"
+                  : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+              }`}
+            >
+              {v.etiqueta}
+              {!cargando && <span className="ml-1.5 opacity-80">{v.n}</span>}
+            </button>
+          ))}
+        </div>
       </div>
       {cargando ? (
         <SkeletonLista />
@@ -1980,6 +2004,7 @@ function ActasTab() {
                 <ThOrdenable campo="instaladoPor" orden={orden} onOrdenar={(c) => setOrden(alternarOrden(orden, c))} className="px-4 py-3 font-medium">
                   Instalado por
                 </ThOrdenable>
+                <th className="px-4 py-3 font-medium">Estado</th>
                 <ThOrdenable campo="actaFirmada" orden={orden} onOrdenar={(c) => setOrden(alternarOrden(orden, c))} className="px-4 py-3 font-medium">
                   Acta firmada
                 </ThOrdenable>
@@ -1987,7 +2012,11 @@ function ActasTab() {
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {filtradas.map((a) => (
-                <tr key={a.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                <tr
+                  key={a.id}
+                  onClick={puedeAbrirFicha ? () => setFichaSuscriptorId(a.suscriptorId) : undefined}
+                  className={`hover:bg-slate-50 dark:hover:bg-slate-800/40 ${puedeAbrirFicha ? "cursor-pointer" : ""}`}
+                >
                   <td className="px-4 py-2.5">{fmtFecha(a.fechaInstalacion, {})}</td>
                   <td className="px-4 py-2.5">
                     {a.suscriptor ? `${a.suscriptor.codigo} — ${a.suscriptor.nombre}` : "-"}
@@ -1995,27 +2024,41 @@ function ActasTab() {
                   <td className="px-4 py-2.5">{a.serial}</td>
                   <td className="px-4 py-2.5">{a.usuario?.nombre ?? a.instaladoPor}</td>
                   <td className="px-4 py-2.5">
+                    {a.fechaRetiro ? (
+                      <span className="text-slate-500 dark:text-slate-400">Retirada {fmtFecha(a.fechaRetiro, {})}</span>
+                    ) : (
+                      <span className="text-emerald-700 dark:text-emerald-400">Vigente</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2.5">
                     {a.actaFirmadaUrl ? (
                       <a
                         href={urlFoto(a.actaFirmadaUrl)}
                         target="_blank"
                         rel="noreferrer"
+                        onClick={(e) => e.stopPropagation()}
                         className="inline-flex items-center gap-1 text-brand-600 hover:underline"
                       >
                         <Download className="h-3.5 w-3.5" />
                         Ver PDF firmado
                       </a>
                     ) : (
-                      <span className="text-slate-500 dark:text-slate-400">Sin subir</span>
+                      <span className="text-amber-700 dark:text-amber-400">Sin firmar</span>
                     )}
                   </td>
                 </tr>
               ))}
               {filtradas.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-6">
+                  <td colSpan={6} className="px-4 py-6">
                     <EmptyState
-                      mensaje={actas.length === 0 ? "Aún no hay actas de instalación." : "Ningún acta coincide con el filtro."}
+                      mensaje={
+                        actas.length === 0
+                          ? "Aún no hay actas de instalación."
+                          : vista === "por_firmar" && !filtro.trim()
+                          ? "No hay actas pendientes de firma."
+                          : "Ningún acta coincide con el filtro."
+                      }
                       icon={FileText}
                     />
                   </td>
@@ -2024,6 +2067,16 @@ function ActasTab() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {fichaSuscriptorId !== null && (
+        <SuscriptorDetailModal
+          suscriptorId={fichaSuscriptorId}
+          onClose={() => {
+            setFichaSuscriptorId(null);
+            cargarActas();
+          }}
+        />
       )}
     </div>
   );

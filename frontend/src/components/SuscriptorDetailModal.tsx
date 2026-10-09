@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { X, Gauge, Users, MapPin, ChevronDown, ChevronUp, Download, Pencil, Trash2 } from "lucide-react";
+import { X, Gauge, Users, MapPin, ChevronDown, ChevronUp, Download, Pencil, Trash2, FileText } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Cell } from "recharts";
 import {
   api,
@@ -20,7 +20,7 @@ import {
 import MapaPredios from "./MapaPredios";
 import LecturaDetalleModal from "./LecturaDetalleModal";
 import LecturaModal from "./LecturaModal";
-import AsignarMedidorModal from "./AsignarMedidorModal";
+import AsignarMedidorModal, { ModoFormularioMedidor } from "./AsignarMedidorModal";
 import { useConfirm } from "./ConfirmModal";
 import { HistorialSeccion } from "./HistorialTimeline";
 import { useAuth } from "../contexts/AuthContext";
@@ -97,6 +97,8 @@ export default function SuscriptorDetailModal({
   const [verPrincipalId, setVerPrincipalId] = useState<number | null>(null);
 
   const [asignando, setAsignando] = useState(false);
+  // Qué tarea hace el formulario abierto: asignar un medidor, corregir el medidor, o corregir su acta.
+  const [modoFormulario, setModoFormulario] = useState<ModoFormularioMedidor>("asignar");
   const [editandoActaId, setEditandoActaId] = useState<number | null>(null);
   const [medidoresBodega, setMedidoresBodega] = useState<Medidor[]>([]);
   const [actaPorMedidor, setActaPorMedidor] = useState<Record<number, ActaInstalacion>>({});
@@ -104,10 +106,15 @@ export default function SuscriptorDetailModal({
   const [guardandoActa, setGuardandoActa] = useState(false);
   const [editandoEsRetirado, setEditandoEsRetirado] = useState(false);
   const [editandoActaCalibracionUrl, setEditandoActaCalibracionUrl] = useState<string | null>(null);
+  // Acta de instalación firmada ya guardada del acta que se está editando (null = no tiene).
+  const [editandoActaFirmadaUrl, setEditandoActaFirmadaUrl] = useState<string | null>(null);
   // Diámetro real del medidor que se está editando, aunque no esté vinculado al modelo elegido en
   // el catálogo (Modelo → Diámetros) — sin esto el <select> queda "vacío" porque el value no
   // matchea ninguna <option> de la lista filtrada por modelo.
   const [editandoDiametroActual, setEditandoDiametroActual] = useState<{ id: number; valor: string } | null>(null);
+  // Serial que tenía el medidor al abrir la edición: sirve para avisar cuando se cambia y para no
+  // contar su propio serial como "ya en uso" (ver AsignarMedidorModal).
+  const [editandoSerialOriginal, setEditandoSerialOriginal] = useState("");
   const [formActa, setFormActa] = useState({
     medidorId: "",
     fechaInstalacion: "",
@@ -168,9 +175,16 @@ export default function SuscriptorDetailModal({
     modeloId: "",
     diametroId: "",
     loteId: "",
+    fechaFabricacion: "",
+    fechaCertificacion: "",
+    certificado: "",
   });
   const [actaCalibracionArchivo, setActaCalibracionArchivo] = useState<File | null>(null);
   const [actaFirmadaArchivo, setActaFirmadaArchivo] = useState<File | null>(null);
+  // Quitar un acta ya guardada NO se hace al instante: se marca y se aplica recién al Guardar (así Cancelar
+  // de verdad cancela y se puede deshacer).
+  const [quitarActaCalibracion, setQuitarActaCalibracion] = useState(false);
+  const [quitarActaFirmada, setQuitarActaFirmada] = useState(false);
   const [guardandoEstado, setGuardandoEstado] = useState(false);
   const [gapAbierto, setGapAbierto] = useState<(typeof historico)[number] | null>(null);
 
@@ -288,7 +302,7 @@ export default function SuscriptorDetailModal({
       .listBySuscriptor(suscriptorId)
       .then((actas) => {
         const mapa: Record<number, ActaInstalacion> = {};
-        for (const a of actas) mapa[a.medidorId] = a;
+        for (const a of actas) if (!mapa[a.medidorId] || !a.fechaRetiro) mapa[a.medidorId] = a;
         setActaPorMedidor(mapa);
         setActasRetiradas(actas.filter((a) => a.fechaRetiro));
       })
@@ -304,12 +318,17 @@ export default function SuscriptorDetailModal({
   }, []);
 
   function abrirAsignacion() {
+    setModoFormulario("asignar");
     setAsignando(true);
     setEditandoActaId(null);
     setEditandoMedidorId(null);
     setEditandoEsRetirado(false);
     setEditandoActaCalibracionUrl(null);
     setEditandoDiametroActual(null);
+    setEditandoSerialOriginal("");
+    setEditandoActaFirmadaUrl(null);
+    setQuitarActaCalibracion(false);
+    setQuitarActaFirmada(false);
     setFormActa({
       medidorId: "",
       fechaInstalacion: "",
@@ -326,18 +345,22 @@ export default function SuscriptorDetailModal({
     api.medidores.list({ estado: "en_bodega" }).then(setMedidoresBodega);
   }
 
-  // Edita un medidor instalado (activo o "reemplazado"): siempre se puede editar sus datos de
-  // catálogo, tenga o no un acta asociada. La mayoría de medidores cargados masivamente NO tienen
-  // acta (vienen de la carga inicial de datos), así que la fecha de instalación se precarga del
-  // propio Medidor.fechaInstalacion cuando no hay acta — ya existe ese dato, solo no está ligado
-  // a ningún acta todavía. "Instalado por" sí queda vacío porque no hay ese dato en ningún lado.
-  function abrirEdicion(medidor: Medidor) {
-    const acta = actaPorMedidor[medidor.id];
+  // Abre el formulario para corregir un medidor ya instalado. Son dos tareas distintas (ver
+  // AsignarMedidorModal): "medidor" edita el aparato y su calibración; "acta" edita el registro de la
+  // instalación. `acta` es la vigente del medidor o, al editar el historial, la del retiro (el medidor
+  // retirado ya no está en suscriptor.medidores; sus datos salen de acta.medidor). La mayoría de
+  // medidores de la carga inicial no tiene acta: ahí la fecha de instalación se precarga del propio
+  // Medidor.fechaInstalacion y "Instalado por" queda vacío porque ese dato no existe en ningún lado.
+  function abrirEdicion(modoNuevo: "medidor" | "acta", medidor: Medidor, acta?: ActaInstalacion) {
+    setModoFormulario(modoNuevo);
     setAsignando(true);
     setEditandoActaId(acta?.id ?? null);
     setEditandoMedidorId(medidor.id);
-    setEditandoEsRetirado(false);
+    setEditandoEsRetirado(!!acta?.fechaRetiro);
     setEditandoActaCalibracionUrl(medidor.actaCalibracionUrl ?? null);
+    setEditandoActaFirmadaUrl(acta?.actaFirmadaUrl ?? null);
+    setQuitarActaCalibracion(false);
+    setQuitarActaFirmada(false);
     setEditandoDiametroActual(medidor.diametroCat ? { id: medidor.diametroCat.id, valor: medidor.diametroCat.valor } : null);
     setFormActa({
       medidorId: String(medidor.id),
@@ -349,10 +372,11 @@ export default function SuscriptorDetailModal({
       instaladoPor: acta?.instaladoPor ?? "",
       usuarioId: acta?.usuarioId ? String(acta.usuarioId) : "",
       observaciones: acta?.observaciones ?? "",
-      fechaRetiro: "",
+      fechaRetiro: acta?.fechaRetiro ? acta.fechaRetiro.slice(0, 10) : "",
       lecturaInicial: medidor.lecturaInicial ?? "",
     });
     setInstaladorExtra(acta?.usuario ?? null);
+    setEditandoSerialOriginal(medidor.serial ?? "");
     setFormMedidor({
       serial: medidor.serial ?? "",
       marcaId: medidor.marcaCat ? String(medidor.marcaCat.id) : "",
@@ -368,64 +392,28 @@ export default function SuscriptorDetailModal({
     setFotos([]);
     setFotosExistentes(acta?.fotos ?? []);
     setFotosARemover([]);
-    Promise.all([api.marcas.list(), api.modelos.list(), api.lotes.list()]).then(([ma, mo, lo]) => {
-      setMarcas(ma);
-      setModelos(mo);
-      setLotes(lo);
-    });
-  }
-
-  // Edita una entrada del historial de medidores retirados: el medidor ya no aparece en
-  // suscriptor.medidores (se le quitó el suscriptorId al retirarlo), así que sus datos se sacan
-  // del acta (acta.medidor), no de la lista de medidores del suscriptor.
-  function abrirEdicionRetirado(acta: ActaInstalacion) {
-    const medidor = acta.medidor;
-    if (!medidor) return;
-    setAsignando(true);
-    setEditandoActaId(acta.id);
-    setEditandoMedidorId(medidor.id);
-    setEditandoEsRetirado(true);
-    setEditandoActaCalibracionUrl(medidor.actaCalibracionUrl ?? null);
-    setEditandoDiametroActual(medidor.diametroCat ? { id: medidor.diametroCat.id, valor: medidor.diametroCat.valor } : null);
-    setFormActa({
-      medidorId: String(medidor.id),
-      fechaInstalacion: acta.fechaInstalacion.slice(0, 10),
-      instaladoPor: acta.instaladoPor,
-      usuarioId: acta.usuarioId ? String(acta.usuarioId) : "",
-      observaciones: acta.observaciones ?? "",
-      fechaRetiro: acta.fechaRetiro ? acta.fechaRetiro.slice(0, 10) : "",
-      lecturaInicial: medidor.lecturaInicial ?? "",
-    });
-    setInstaladorExtra(acta.usuario ?? null);
-    setFormMedidor({
-      serial: medidor.serial ?? "",
-      marcaId: medidor.marcaCat ? String(medidor.marcaCat.id) : "",
-      modeloId: medidor.modeloCat ? String(medidor.modeloCat.id) : "",
-      diametroId: medidor.diametroCat ? String(medidor.diametroCat.id) : "",
-      loteId: medidor.loteId ? String(medidor.loteId) : "",
-      fechaFabricacion: medidor.fechaFabricacion ? medidor.fechaFabricacion.slice(0, 10) : "",
-      fechaCertificacion: medidor.fechaCertificacion ? medidor.fechaCertificacion.slice(0, 10) : "",
-      certificado: medidor.certificado ?? "",
-    });
-    setActaCalibracionArchivo(null);
-    setActaFirmadaArchivo(null);
-    setFotos([]);
-    setFotosExistentes(acta.fotos);
-    setFotosARemover([]);
-    Promise.all([api.marcas.list(), api.modelos.list(), api.lotes.list()]).then(([ma, mo, lo]) => {
-      setMarcas(ma);
-      setModelos(mo);
-      setLotes(lo);
-    });
+    // Los catálogos solo hacen falta para corregir el medidor.
+    if (modoNuevo === "medidor") {
+      Promise.all([api.marcas.list(), api.modelos.list(), api.lotes.list()]).then(([ma, mo, lo]) => {
+        setMarcas(ma);
+        setModelos(mo);
+        setLotes(lo);
+      });
+    }
   }
 
   function cerrarFormulario() {
     setAsignando(false);
+    setModoFormulario("asignar");
     setEditandoActaId(null);
     setEditandoMedidorId(null);
     setEditandoEsRetirado(false);
     setEditandoActaCalibracionUrl(null);
     setEditandoDiametroActual(null);
+    setEditandoSerialOriginal("");
+    setEditandoActaFirmadaUrl(null);
+    setQuitarActaCalibracion(false);
+    setQuitarActaFirmada(false);
     setFormActa({
       medidorId: "",
       fechaInstalacion: "",
@@ -515,11 +503,10 @@ export default function SuscriptorDetailModal({
     const nombreInstalador = instaladoresParaFormulario.find((u) => u.id === usuarioIdInstalador)?.nombre ?? "";
     setGuardandoActa(true);
     try {
-      if (editandoMedidorId) {
-        // Editando un medidor ya existente (instalado, reemplazado o retirado): sus datos de
-        // catálogo siempre se pueden editar, tenga o no un acta asociada.
+      if (modoFormulario === "medidor" && editandoMedidorId) {
+        // Corregir el aparato: sus datos de catálogo y la calibración. No toca el acta de instalación.
         await api.medidores.update(editandoMedidorId, {
-          serial: formMedidor.serial || null,
+          serial: formMedidor.serial.trim() || null,
           marcaId: formMedidor.marcaId ? Number(formMedidor.marcaId) : null,
           modeloId: formMedidor.modeloId ? Number(formMedidor.modeloId) : null,
           diametroId: formMedidor.diametroId ? Number(formMedidor.diametroId) : null,
@@ -529,11 +516,16 @@ export default function SuscriptorDetailModal({
           certificado: formMedidor.certificado || null,
           lecturaInicial: formActa.lecturaInicial !== "" ? Number(formActa.lecturaInicial) : null,
         });
+        // Subir uno nuevo ya reemplaza al anterior; "quitar" solo aplica si no se eligió reemplazo.
         if (actaCalibracionArchivo) {
           await api.medidores.subirActaCalibracion(editandoMedidorId, actaCalibracionArchivo);
+        } else if (quitarActaCalibracion) {
+          await api.medidores.quitarActaCalibracion(editandoMedidorId);
         }
+      } else if (modoFormulario === "acta" && editandoMedidorId) {
+        // Corregir el registro de la instalación: fecha, instalador, observaciones, fotos y acta firmada.
+        if (!formActa.fechaInstalacion || !nombreInstalador) return;
         if (editandoActaId) {
-          if (!formActa.fechaInstalacion || !nombreInstalador) return;
           await api.actas.update(editandoActaId, {
             fechaInstalacion: formActa.fechaInstalacion,
             instaladoPor: nombreInstalador,
@@ -545,11 +537,12 @@ export default function SuscriptorDetailModal({
           });
           if (actaFirmadaArchivo) {
             await api.actas.subirFirmada(editandoActaId, actaFirmadaArchivo);
+          } else if (quitarActaFirmada) {
+            await api.actas.quitarFirmada(editandoActaId);
           }
-        } else if (formActa.fechaInstalacion && nombreInstalador) {
-          // El medidor no tenía acta: si se completó fecha e instalador, se genera ahora
-          // (documenta retroactivamente una instalación que ya estaba hecha), y de una vez se le
-          // puede adjuntar el escaneo firmado si el suscriptor ya lo tenía en papel.
+        } else {
+          // El medidor no tenía acta: se genera ahora (documenta retroactivamente una instalación que
+          // ya estaba hecha) y, si el suscriptor ya tenía el acta firmada en papel, se adjunta de una vez.
           const actaCreada = await api.actas.create({
             suscriptorId,
             medidorId: editandoMedidorId,
@@ -560,7 +553,15 @@ export default function SuscriptorDetailModal({
             fotos,
           });
           if (actaFirmadaArchivo) {
-            await api.actas.subirFirmada(actaCreada.id, actaFirmadaArchivo);
+            try {
+              await api.actas.subirFirmada(actaCreada.id, actaFirmadaArchivo);
+            } catch (err) {
+              // El acta ya existe: se cierra el formulario para que reintentar no cree un duplicado
+              // (se vuelve a abrir con «Editar acta» y se adjunta el PDF ahí).
+              cerrarFormulario();
+              cargarDetalle();
+              throw err;
+            }
           }
         }
       } else {
@@ -1178,11 +1179,14 @@ export default function SuscriptorDetailModal({
 
               {asignando && puedeAsignarMedidor && (
                 <AsignarMedidorModal
+                  modo={modoFormulario}
                   editandoMedidorId={editandoMedidorId}
                   editandoEsRetirado={editandoEsRetirado}
                   editandoActaId={editandoActaId}
                   editandoActaCalibracionUrl={editandoActaCalibracionUrl}
+                  editandoActaFirmadaUrl={editandoActaFirmadaUrl}
                   editandoDiametroActual={editandoDiametroActual}
+                  serialOriginal={editandoSerialOriginal}
                   formMedidor={formMedidor}
                   setFormMedidor={setFormMedidor}
                   formActa={formActa}
@@ -1199,17 +1203,15 @@ export default function SuscriptorDetailModal({
                   fileInputRef={fileInputRef}
                   actaCalibracionArchivo={actaCalibracionArchivo}
                   setActaCalibracionArchivo={setActaCalibracionArchivo}
+                  quitarActaCalibracion={quitarActaCalibracion}
+                  setQuitarActaCalibracion={setQuitarActaCalibracion}
                   actaFirmadaArchivo={actaFirmadaArchivo}
                   setActaFirmadaArchivo={setActaFirmadaArchivo}
-                  actaPorMedidor={actaPorMedidor}
+                  quitarActaFirmada={quitarActaFirmada}
+                  setQuitarActaFirmada={setQuitarActaFirmada}
                   guardandoActa={guardandoActa}
                   onSubmit={onSubmitAsignacion}
                   onClose={cerrarFormulario}
-                  onActaCalibracionQuitada={() => {
-                    setEditandoActaCalibracionUrl(null);
-                    cargarDetalle();
-                  }}
-                  onActaFirmadaQuitada={cargarDetalle}
                 />
               )}
 
@@ -1276,15 +1278,50 @@ export default function SuscriptorDetailModal({
                         <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">N° certificado</div>
                         <div className="break-words">{m.certificado ?? "-"}</div>
                       </div>
+                      <div className="min-w-[130px]">
+                        <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">Acta de calibración</div>
+                        <div className="break-words">
+                          {m.actaCalibracionUrl ? (
+                            <a href={urlFoto(m.actaCalibracionUrl)} target="_blank" rel="noreferrer" className="text-brand-600 hover:underline dark:text-brand-400">
+                              Ver PDF
+                            </a>
+                          ) : (
+                            "-"
+                          )}
+                        </div>
+                      </div>
+                      <div className="min-w-[130px]">
+                        <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">Acta de instalación</div>
+                        <div className="break-words">
+                          {actaPorMedidor[m.id]?.actaFirmadaUrl ? (
+                            <a href={urlFoto(actaPorMedidor[m.id].actaFirmadaUrl!)} target="_blank" rel="noreferrer" className="text-brand-600 hover:underline dark:text-brand-400">
+                              Ver PDF firmado
+                            </a>
+                          ) : (
+                            <span className="text-amber-700 dark:text-amber-400">{actaPorMedidor[m.id] ? "Sin firmar" : "Sin acta"}</span>
+                          )}
+                        </div>
+                      </div>
                     </div>
                     <div className="mt-2 flex flex-wrap items-center gap-3">
                       {puedeAsignarMedidor && (
                         <button
-                          onClick={() => abrirEdicion(m)}
+                          onClick={() => abrirEdicion("medidor", m, actaPorMedidor[m.id])}
                           className="inline-flex items-center gap-1 text-xs font-medium text-slate-700 hover:text-brand-600 dark:text-slate-400"
+                          title="Serial, marca, modelo, calibración y su acta de calibración"
                         >
                           <Pencil className="h-3.5 w-3.5" />
-                          Editar
+                          Editar medidor
+                        </button>
+                      )}
+                      {puedeAsignarMedidor && (
+                        <button
+                          onClick={() => abrirEdicion("acta", m, actaPorMedidor[m.id])}
+                          className="inline-flex items-center gap-1 text-xs font-medium text-slate-700 hover:text-brand-600 dark:text-slate-400"
+                          title="Fecha, instalador, acta firmada y fotos de la instalación"
+                        >
+                          <FileText className="h-3.5 w-3.5" />
+                          {actaPorMedidor[m.id] ? "Editar acta" : "Registrar acta"}
                         </button>
                       )}
                       {puedeAsignarMedidor && actaPorMedidor[m.id] && (
@@ -1394,16 +1431,35 @@ export default function SuscriptorDetailModal({
                           Serial <strong>{a.serial}</strong> — instalado el {fmtFecha(a.fechaInstalacion)}, retirado
                           el {fmtFecha(a.fechaRetiro)}
                         </div>
-                        <div className="text-xs text-slate-600 dark:text-slate-400">Instalado por: {a.usuario?.nombre ?? a.instaladoPor}</div>
-                        <div className="mt-1.5 flex items-center gap-3">
+                        <div className="text-xs text-slate-600 dark:text-slate-400">
+                          Instalado por: {a.usuario?.nombre ?? a.instaladoPor} ·{" "}
+                          {a.actaFirmadaUrl ? (
+                            <a href={urlFoto(a.actaFirmadaUrl)} target="_blank" rel="noreferrer" className="text-brand-600 hover:underline dark:text-brand-400">
+                              Ver acta firmada
+                            </a>
+                          ) : (
+                            "Acta sin firmar"
+                          )}
+                        </div>
+                        <div className="mt-1.5 flex flex-wrap items-center gap-3">
                           {a.medidor && puedeAsignarMedidor && (
                             <button
                               type="button"
-                              onClick={() => abrirEdicionRetirado(a)}
+                              onClick={() => abrirEdicion("acta", a.medidor!, a)}
+                              className="inline-flex items-center gap-1 text-xs font-medium text-slate-700 hover:text-brand-600 dark:text-slate-400"
+                            >
+                              <FileText className="h-3.5 w-3.5" />
+                              Editar acta
+                            </button>
+                          )}
+                          {a.medidor && puedeAsignarMedidor && (
+                            <button
+                              type="button"
+                              onClick={() => abrirEdicion("medidor", a.medidor!, a)}
                               className="inline-flex items-center gap-1 text-xs font-medium text-slate-700 hover:text-brand-600 dark:text-slate-400"
                             >
                               <Pencil className="h-3.5 w-3.5" />
-                              Editar
+                              Editar medidor
                             </button>
                           )}
                           {usuario?.permisos?.includes("actas_avanzado") && (
