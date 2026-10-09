@@ -10,6 +10,7 @@ import cors from "cors";
 import helmet from "helmet";
 import pinoHttp from "pino-http";
 import { logger } from "./lib/logger.js";
+import { respuestaErrorSubida } from "./lib/uploads.js";
 import { suscriptoresRouter } from "./routes/comercial/suscriptores.js";
 import { medidoresRouter } from "./routes/comercial/medidores.js";
 import { lecturasRouter } from "./routes/comercial/lecturas.js";
@@ -200,6 +201,14 @@ app.use(
 // se responde como 500 en vez de dejar caer el proceso completo. Debe ir después de todas las
 // rutas — Express identifica el middleware de errores por tener 4 argumentos.
 app.use((err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  // Archivo demasiado grande / tipo no permitido / demasiados archivos: es culpa del archivo, no
+  // del servidor — se avisa con un mensaje claro (y status 4xx) en vez del 500 genérico.
+  const errorSubida = respuestaErrorSubida(err);
+  if (errorSubida) {
+    (req.log ?? logger).warn({ err: err.message, url: req.url }, "Subida de archivo rechazada");
+    if (res.headersSent) return;
+    return res.status(errorSubida.status).json({ error: errorSubida.mensaje });
+  }
   (req.log ?? logger).error({ err }, "Error no capturado en un handler de ruta");
   if (res.headersSent) return;
   res.status(500).json({ error: "Error interno del servidor" });

@@ -3,12 +3,21 @@ import multer from "multer";
 import { prisma } from "../../lib/prisma.js";
 import { requirePermiso } from "../../middleware/auth.js";
 import { crearPlantillaImportExport, enviarExcel } from "../../lib/excelBranding.js";
+import { LIMITE_DOCUMENTO_BYTES, filtroDocumento } from "../../lib/uploads.js";
 import { guardarArchivo, borrarArchivo } from "../../lib/storage.js";
 import { registrarCambios, camposMedidor, camposSuscriptor } from "../../lib/historial.js";
 import { leerLibroDesdeBuffer, hojaAFilas } from "../../lib/xlsxCompat.js";
 
 export const medidoresRouter = Router();
 const upload = multer({ storage: multer.memoryStorage() });
+// El acta de calibración escaneada no compartía este "upload" por casualidad — pero este NO tiene
+// límite de tamaño ni de tipo (es el de los Excel de import), así que un PDF de 48 MB se aceptaba
+// completo. Este sí lo limita, igual que el acta de instalación firmada.
+const uploadActa = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: LIMITE_DOCUMENTO_BYTES },
+  fileFilter: filtroDocumento,
+});
 const soloAvanzado = requirePermiso("medidores_avanzado");
 
 function norm(s: unknown): string {
@@ -1028,7 +1037,7 @@ medidoresRouter.put("/:id", soloAvanzado, async (req, res) => {
 // Sube (o reemplaza) el acta de calibración escaneada (PDF o imagen) de un medidor. Es un
 // documento individual por medidor, no por lote — el fabricante certifica cada unidad, aunque
 // varias vengan de la misma caja/lote.
-medidoresRouter.post("/:id/acta-calibracion", soloAvanzado, upload.single("archivo"), async (req, res) => {
+medidoresRouter.post("/:id/acta-calibracion", soloAvanzado, uploadActa.single("archivo"), async (req, res) => {
   const id = Number(req.params.id);
   const medidor = await prisma.medidor.findUnique({ where: { id } });
   if (!medidor) return res.status(404).json({ error: "No encontrado" });
